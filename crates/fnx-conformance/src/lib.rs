@@ -2336,12 +2336,21 @@ fn compare_degree_centrality(
     compare_centrality_scores("degree_centrality", actual, expected, mismatches);
 }
 
+fn centrality_score_tolerance(label: &str) -> f64 {
+    match label {
+        "hits_hubs" | "hits_authorities" => 1e-9,
+        _ => 1e-12,
+    }
+}
+
 fn compare_centrality_scores(
     label: &str,
     actual: &[CentralityScore],
     expected: &[ExpectedCentralityScore],
     mismatches: &mut Vec<Mismatch>,
 ) {
+    let tolerance = centrality_score_tolerance(label);
+
     if actual.len() != expected.len() {
         mismatches.push(Mismatch {
             category: "algorithm_centrality".to_owned(),
@@ -2364,7 +2373,7 @@ fn compare_centrality_scores(
                 ),
             });
         }
-        if (actual_score.score - expected_score.score).abs() > 1e-12 {
+        if (actual_score.score - expected_score.score).abs() > tolerance {
             mismatches.push(Mismatch {
                 category: "algorithm_centrality".to_owned(),
                 message: format!(

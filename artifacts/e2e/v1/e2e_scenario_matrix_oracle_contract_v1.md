@@ -3,7 +3,7 @@
 - generated_at_utc: 2026-02-20T20:10:03.059136+00:00
 - baseline_comparator: legacy_networkx/main@python3.12
 - journey_count: 11
-- fixture_inventory_count: 30
+- fixture_inventory_count: 33
 - covered_fixture_count: 30
 - uncovered_fixture_count: 0
 

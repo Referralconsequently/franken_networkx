@@ -71,13 +71,18 @@
           "attrs": {}
         },
         {
+          "left": "a",
+          "right": "c",
+          "attrs": {}
+        },
+        {
           "left": "b",
           "right": "c",
           "attrs": {}
         },
         {
-          "left": "a",
-          "right": "c",
+          "left": "c",
+          "right": "d",
           "attrs": {}
         },
         {
@@ -86,18 +91,13 @@
           "attrs": {}
         },
         {
-          "left": "e",
-          "right": "f",
-          "attrs": {}
-        },
-        {
           "left": "d",
           "right": "f",
           "attrs": {}
         },
         {
-          "left": "c",
-          "right": "d",
+          "left": "e",
+          "right": "f",
           "attrs": {}
         }
       ]

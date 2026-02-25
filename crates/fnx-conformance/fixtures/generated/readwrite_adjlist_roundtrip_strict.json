@@ -46,6 +46,6 @@
       "c",
       "d"
     ],
-    "serialized_adjlist": "a b c\nb a\nc a d\nd c"
+    "serialized_adjlist": "a b c\nb\nc d\nd"
   }
 }

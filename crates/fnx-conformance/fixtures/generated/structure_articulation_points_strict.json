@@ -19,12 +19,12 @@
       "nodes": ["a", "b", "c", "d", "e", "f", "g", "h"],
       "edges": [
         { "left": "a", "right": "b", "attrs": {} },
-        { "left": "b", "right": "c", "attrs": {} },
         { "left": "a", "right": "c", "attrs": {} },
+        { "left": "b", "right": "c", "attrs": {} },
         { "left": "c", "right": "d", "attrs": {} },
         { "left": "d", "right": "e", "attrs": {} },
-        { "left": "e", "right": "f", "attrs": {} },
         { "left": "d", "right": "f", "attrs": {} },
+        { "left": "e", "right": "f", "attrs": {} },
         { "left": "f", "right": "g", "attrs": {} },
         { "left": "g", "right": "h", "attrs": {} }
       ]

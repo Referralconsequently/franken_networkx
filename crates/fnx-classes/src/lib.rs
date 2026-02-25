@@ -7,6 +7,7 @@ use fnx_runtime::{
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::fmt;
 
 pub type AttrMap = BTreeMap<String, String>;
@@ -373,14 +374,41 @@ impl Graph {
 
     #[must_use]
     pub fn edges_ordered(&self) -> Vec<EdgeSnapshot> {
-        self.edges
-            .iter()
-            .map(|(key, attrs)| EdgeSnapshot {
-                left: key.left.clone(),
-                right: key.right.clone(),
-                attrs: attrs.clone(),
-            })
-            .collect()
+        let mut ordered = Vec::with_capacity(self.edges.len());
+        let mut seen = HashSet::<EdgeKey>::with_capacity(self.edges.len());
+
+        for node in self.nodes.keys() {
+            if let Some(neighbors) = self.adjacency.get(node) {
+                for neighbor in neighbors {
+                    let key = EdgeKey::new(node, neighbor);
+                    if !seen.insert(key.clone()) {
+                        continue;
+                    }
+                    if let Some(attrs) = self.edges.get(&key) {
+                        ordered.push(EdgeSnapshot {
+                            left: key.left.clone(),
+                            right: key.right.clone(),
+                            attrs: attrs.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        // Keep a deterministic fallback path if adjacency/edge indexes diverge.
+        if ordered.len() < self.edges.len() {
+            for (key, attrs) in &self.edges {
+                if seen.insert(key.clone()) {
+                    ordered.push(EdgeSnapshot {
+                        left: key.left.clone(),
+                        right: key.right.clone(),
+                        attrs: attrs.clone(),
+                    });
+                }
+            }
+        }
+
+        ordered
     }
 
     #[must_use]
@@ -428,6 +456,34 @@ mod tests {
         } else {
             (right.to_owned(), left.to_owned())
         }
+    }
+
+    #[test]
+    fn edges_ordered_tracks_node_and_neighbor_iteration_order() {
+        let mut graph = Graph::strict();
+        graph
+            .add_edge_with_attrs("a", "b", AttrMap::new())
+            .expect("edge add should succeed");
+        graph
+            .add_edge_with_attrs("b", "c", AttrMap::new())
+            .expect("edge add should succeed");
+        graph
+            .add_edge_with_attrs("a", "c", AttrMap::new())
+            .expect("edge add should succeed");
+
+        let pairs = graph
+            .edges_ordered()
+            .into_iter()
+            .map(|edge| (edge.left, edge.right))
+            .collect::<Vec<(String, String)>>();
+        assert_eq!(
+            pairs,
+            vec![
+                ("a".to_owned(), "b".to_owned()),
+                ("a".to_owned(), "c".to_owned()),
+                ("b".to_owned(), "c".to_owned()),
+            ]
+        );
     }
 
     fn assert_graph_core_invariants(graph: &Graph) {
