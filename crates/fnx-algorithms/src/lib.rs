@@ -5655,6 +5655,477 @@ pub fn min_edge_cover(graph: &Graph) -> Option<MinEdgeCoverResult> {
     })
 }
 
+/// Checks whether an undirected graph has an Eulerian circuit.
+///
+/// An Eulerian circuit exists iff the graph is connected (ignoring isolated nodes)
+/// and every node has even degree.
+#[must_use]
+pub fn is_eulerian(graph: &Graph) -> IsEulerianResult {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let mut edges_scanned = 0usize;
+
+    if n == 0 {
+        return IsEulerianResult {
+            is_eulerian: true,
+            witness: ComplexityWitness {
+                algorithm: "is_eulerian".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    // Check all nodes have even degree
+    for &node in &nodes {
+        let deg = graph
+            .neighbors_iter(node)
+            .map(|iter| {
+                let nbrs: Vec<_> = iter.collect();
+                edges_scanned += nbrs.len();
+                nbrs.len()
+            })
+            .unwrap_or(0);
+        if deg % 2 != 0 {
+            return IsEulerianResult {
+                is_eulerian: false,
+                witness: ComplexityWitness {
+                    algorithm: "is_eulerian".to_owned(),
+                    complexity_claim: "O(|V| + |E|)".to_owned(),
+                    nodes_touched: n,
+                    edges_scanned,
+                    queue_peak: 0,
+                },
+            };
+        }
+    }
+
+    // Check connectivity among non-isolated nodes
+    let non_isolated: Vec<&str> = nodes
+        .iter()
+        .filter(|&&node| {
+            graph
+                .neighbors_iter(node)
+                .map(|iter| iter.count())
+                .unwrap_or(0)
+                > 0
+        })
+        .copied()
+        .collect();
+
+    if non_isolated.is_empty() {
+        // All nodes isolated => vacuously Eulerian (no edges)
+        return IsEulerianResult {
+            is_eulerian: true,
+            witness: ComplexityWitness {
+                algorithm: "is_eulerian".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: n,
+                edges_scanned,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    // BFS from first non-isolated node
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    let mut queue_peak = 0usize;
+    visited.insert(non_isolated[0]);
+    queue.push_back(non_isolated[0]);
+
+    while let Some(current) = queue.pop_front() {
+        if let Some(neighbors) = graph.neighbors_iter(current) {
+            for neighbor in neighbors {
+                edges_scanned += 1;
+                if visited.insert(neighbor) {
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        if queue.len() > queue_peak {
+            queue_peak = queue.len();
+        }
+    }
+
+    let connected = non_isolated.iter().all(|n| visited.contains(n));
+
+    IsEulerianResult {
+        is_eulerian: connected,
+        witness: ComplexityWitness {
+            algorithm: "is_eulerian".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched: visited.len(),
+            edges_scanned,
+            queue_peak,
+        },
+    }
+}
+
+/// Checks whether an undirected graph has an Eulerian path.
+///
+/// An Eulerian path exists iff the graph is connected (ignoring isolated nodes)
+/// and has exactly 0 or 2 nodes of odd degree. (0 odd-degree nodes means an
+/// Eulerian circuit exists, which is a special case of Eulerian path.)
+#[must_use]
+pub fn has_eulerian_path(graph: &Graph) -> HasEulerianPathResult {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let mut edges_scanned = 0usize;
+
+    if n == 0 {
+        return HasEulerianPathResult {
+            has_eulerian_path: true,
+            witness: ComplexityWitness {
+                algorithm: "has_eulerian_path".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    // Count odd-degree nodes
+    let mut odd_degree_count = 0usize;
+    for &node in &nodes {
+        let deg = graph
+            .neighbors_iter(node)
+            .map(|iter| {
+                let nbrs: Vec<_> = iter.collect();
+                edges_scanned += nbrs.len();
+                nbrs.len()
+            })
+            .unwrap_or(0);
+        if deg % 2 != 0 {
+            odd_degree_count += 1;
+        }
+    }
+
+    if odd_degree_count != 0 && odd_degree_count != 2 {
+        return HasEulerianPathResult {
+            has_eulerian_path: false,
+            witness: ComplexityWitness {
+                algorithm: "has_eulerian_path".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: n,
+                edges_scanned,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    // Check connectivity among non-isolated nodes
+    let non_isolated: Vec<&str> = nodes
+        .iter()
+        .filter(|&&node| {
+            graph
+                .neighbors_iter(node)
+                .map(|iter| iter.count())
+                .unwrap_or(0)
+                > 0
+        })
+        .copied()
+        .collect();
+
+    if non_isolated.is_empty() {
+        return HasEulerianPathResult {
+            has_eulerian_path: true,
+            witness: ComplexityWitness {
+                algorithm: "has_eulerian_path".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: n,
+                edges_scanned,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    let mut queue_peak = 0usize;
+    visited.insert(non_isolated[0]);
+    queue.push_back(non_isolated[0]);
+
+    while let Some(current) = queue.pop_front() {
+        if let Some(neighbors) = graph.neighbors_iter(current) {
+            for neighbor in neighbors {
+                edges_scanned += 1;
+                if visited.insert(neighbor) {
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        if queue.len() > queue_peak {
+            queue_peak = queue.len();
+        }
+    }
+
+    let connected = non_isolated.iter().all(|n| visited.contains(n));
+
+    HasEulerianPathResult {
+        has_eulerian_path: connected,
+        witness: ComplexityWitness {
+            algorithm: "has_eulerian_path".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched: visited.len(),
+            edges_scanned,
+            queue_peak,
+        },
+    }
+}
+
+/// Checks whether an undirected graph is semi-Eulerian.
+///
+/// A graph is semi-Eulerian iff it has an Eulerian path but NOT an Eulerian circuit
+/// (i.e., exactly 2 nodes of odd degree).
+#[must_use]
+pub fn is_semieulerian(graph: &Graph) -> IsSemiEulerianResult {
+    let has_path = has_eulerian_path(graph);
+    let is_circuit = is_eulerian(graph);
+
+    IsSemiEulerianResult {
+        is_semieulerian: has_path.has_eulerian_path && !is_circuit.is_eulerian,
+        witness: ComplexityWitness {
+            algorithm: "is_semieulerian".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched: has_path.witness.nodes_touched,
+            edges_scanned: has_path.witness.edges_scanned + is_circuit.witness.edges_scanned,
+            queue_peak: has_path
+                .witness
+                .queue_peak
+                .max(is_circuit.witness.queue_peak),
+        },
+    }
+}
+
+/// Finds an Eulerian circuit in the graph using Hierholzer's algorithm.
+///
+/// Returns `None` if no Eulerian circuit exists.
+/// The `source` parameter optionally specifies the starting node; if `None`,
+/// the lexicographically smallest non-isolated node is used.
+/// Neighbor traversal is in sorted order for determinism.
+#[must_use]
+pub fn eulerian_circuit(graph: &Graph, source: Option<&str>) -> Option<EulerianCircuitResult> {
+    let check = is_eulerian(graph);
+    if !check.is_eulerian {
+        return None;
+    }
+
+    // No edges → empty circuit
+    if graph.edge_count() == 0 {
+        return Some(EulerianCircuitResult {
+            edges: Vec::new(),
+            witness: ComplexityWitness {
+                algorithm: "hierholzer_circuit".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: check.witness.nodes_touched,
+                edges_scanned: check.witness.edges_scanned,
+                queue_peak: check.witness.queue_peak,
+            },
+        });
+    }
+
+    let start = if let Some(s) = source {
+        s.to_owned()
+    } else {
+        // Pick lexicographically smallest non-isolated node
+        let nodes = graph.nodes_ordered();
+        let mut sorted = nodes.clone();
+        sorted.sort_unstable();
+        sorted
+            .into_iter()
+            .find(|&n| {
+                graph
+                    .neighbors_iter(n)
+                    .map(|iter| iter.count())
+                    .unwrap_or(0)
+                    > 0
+            })
+            .unwrap_or(nodes[0])
+            .to_owned()
+    };
+
+    let edges = hierholzer_traverse(graph, &start);
+    let edges_scanned = check.witness.edges_scanned + edges.len();
+
+    Some(EulerianCircuitResult {
+        edges,
+        witness: ComplexityWitness {
+            algorithm: "hierholzer_circuit".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched: graph.node_count(),
+            edges_scanned,
+            queue_peak: check.witness.queue_peak,
+        },
+    })
+}
+
+/// Finds an Eulerian path in the graph using Hierholzer's algorithm.
+///
+/// Returns `None` if no Eulerian path exists.
+/// The `source` parameter optionally specifies the starting node; if `None`,
+/// one of the odd-degree nodes is used (lexicographically smallest), or if
+/// all degrees are even, the smallest non-isolated node.
+#[must_use]
+pub fn eulerian_path(graph: &Graph, source: Option<&str>) -> Option<EulerianPathResult> {
+    let check = has_eulerian_path(graph);
+    if !check.has_eulerian_path {
+        return None;
+    }
+
+    if graph.edge_count() == 0 {
+        return Some(EulerianPathResult {
+            edges: Vec::new(),
+            witness: ComplexityWitness {
+                algorithm: "hierholzer_path".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: check.witness.nodes_touched,
+                edges_scanned: check.witness.edges_scanned,
+                queue_peak: check.witness.queue_peak,
+            },
+        });
+    }
+
+    let start = if let Some(s) = source {
+        s.to_owned()
+    } else {
+        // Find odd-degree nodes, pick lexicographically smallest
+        let nodes = graph.nodes_ordered();
+        let mut sorted = nodes.clone();
+        sorted.sort_unstable();
+
+        let odd_node = sorted.iter().find(|&&n| {
+            let deg = graph
+                .neighbors_iter(n)
+                .map(|iter| iter.count())
+                .unwrap_or(0);
+            deg % 2 != 0
+        });
+
+        if let Some(&n) = odd_node {
+            n.to_owned()
+        } else {
+            // All even degrees → circuit case, pick smallest non-isolated
+            sorted
+                .into_iter()
+                .find(|&n| {
+                    graph
+                        .neighbors_iter(n)
+                        .map(|iter| iter.count())
+                        .unwrap_or(0)
+                        > 0
+                })
+                .unwrap_or(nodes[0])
+                .to_owned()
+        }
+    };
+
+    let edges = hierholzer_traverse(graph, &start);
+    let edges_scanned = check.witness.edges_scanned + edges.len();
+
+    Some(EulerianPathResult {
+        edges,
+        witness: ComplexityWitness {
+            algorithm: "hierholzer_path".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched: graph.node_count(),
+            edges_scanned,
+            queue_peak: check.witness.queue_peak,
+        },
+    })
+}
+
+/// Hierholzer's algorithm for finding an Euler trail starting from `start`.
+///
+/// Builds an adjacency structure with edge-usage tracking and walks deterministically
+/// by visiting neighbors in sorted order.
+fn hierholzer_traverse(graph: &Graph, start: &str) -> Vec<(String, String)> {
+    // Build adjacency list with mutable edge tracking.
+    // For undirected graphs, each edge appears twice (once in each direction).
+    // We use a shared "used" flag via indices into a used-edges vector.
+    let nodes = graph.nodes_ordered();
+    let mut sorted_nodes: Vec<&str> = nodes.clone();
+    sorted_nodes.sort_unstable();
+
+    let node_index: HashMap<&str, usize> = sorted_nodes
+        .iter()
+        .enumerate()
+        .map(|(i, &n)| (n, i))
+        .collect();
+
+    // Count edges first to allocate edge_used vector
+    let mut edge_id = 0usize;
+    // adj[node_idx] = Vec<(neighbor_idx, edge_id)> sorted by neighbor name
+    let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); sorted_nodes.len()];
+
+    // Build edges deterministically: iterate in sorted node order
+    let mut seen_edges: HashSet<(usize, usize)> = HashSet::new();
+    for (i, &node) in sorted_nodes.iter().enumerate() {
+        if let Some(neighbors) = graph.neighbors_iter(node) {
+            let mut nbrs: Vec<&str> = neighbors.collect();
+            nbrs.sort_unstable();
+            for &nbr in &nbrs {
+                let j = node_index[nbr];
+                let key = if i <= j { (i, j) } else { (j, i) };
+                if seen_edges.insert(key) {
+                    adj[i].push((j, edge_id));
+                    adj[j].push((i, edge_id));
+                    edge_id += 1;
+                }
+            }
+        }
+    }
+
+    // Sort adjacency lists by neighbor index (already effectively sorted by name)
+    for list in &mut adj {
+        list.sort_unstable_by_key(|&(nbr, _)| nbr);
+    }
+
+    let total_edges = edge_id;
+    let mut edge_used = vec![false; total_edges];
+
+    // Track current position in each adjacency list for efficiency
+    let mut adj_pos: Vec<usize> = vec![0; sorted_nodes.len()];
+
+    let start_idx = node_index[start.as_ref() as &str];
+    let mut stack = vec![start_idx];
+    let mut trail: Vec<usize> = Vec::new();
+
+    while let Some(&current) = stack.last() {
+        // Find next unused edge from current node
+        let mut found = false;
+        while adj_pos[current] < adj[current].len() {
+            let (nbr, eid) = adj[current][adj_pos[current]];
+            adj_pos[current] += 1;
+            if !edge_used[eid] {
+                edge_used[eid] = true;
+                stack.push(nbr);
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            stack.pop();
+            trail.push(current);
+        }
+    }
+
+    // Convert node indices back to edge pairs
+    trail.reverse();
+    let mut edges = Vec::with_capacity(total_edges);
+    for window in trail.windows(2) {
+        edges.push((
+            sorted_nodes[window[0]].to_owned(),
+            sorted_nodes[window[1]].to_owned(),
+        ));
+    }
+
+    edges
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -5663,14 +6134,15 @@ mod tests {
         betweenness_centrality, bridges, cgse_witness_schema_version, closeness_centrality,
         clustering_coefficient, connected_components, cycle_basis, degree_centrality,
         edge_betweenness_centrality,
-        edge_connectivity_edmonds_karp, eigenvector_centrality,
+        edge_connectivity_edmonds_karp, eigenvector_centrality, eulerian_circuit, eulerian_path,
         global_edge_connectivity_edmonds_karp, global_efficiency,
-        global_minimum_edge_cut_edmonds_karp,
-        harmonic_centrality, hits_centrality, is_matching, is_maximal_matching,
-        is_perfect_matching, katz_centrality, local_efficiency, max_flow_edmonds_karp,
-        max_weight_matching, maximal_matching, min_edge_cover, min_weight_matching,
-        minimum_cut_edmonds_karp, minimum_st_edge_cut_edmonds_karp, multi_source_dijkstra,
-        number_connected_components, pagerank, shortest_path_unweighted, shortest_path_weighted,
+        global_minimum_edge_cut_edmonds_karp, has_eulerian_path,
+        harmonic_centrality, hits_centrality, is_eulerian, is_matching, is_maximal_matching,
+        is_perfect_matching, is_semieulerian, katz_centrality, local_efficiency,
+        max_flow_edmonds_karp, max_weight_matching, maximal_matching, min_edge_cover,
+        min_weight_matching, minimum_cut_edmonds_karp, minimum_st_edge_cut_edmonds_karp,
+        multi_source_dijkstra, number_connected_components, pagerank,
+        shortest_path_unweighted, shortest_path_weighted,
     };
     use fnx_classes::Graph;
     use fnx_runtime::{
@@ -9466,5 +9938,336 @@ mod tests {
         assert!(result.is_some());
         let cover = result.unwrap();
         assert_eq!(cover.edges.len(), 2);
+    }
+
+    // ── Euler algorithm tests ──
+
+    #[test]
+    fn is_eulerian_empty_graph() {
+        let graph = Graph::strict();
+        let result = is_eulerian(&graph);
+        assert!(result.is_eulerian);
+    }
+
+    #[test]
+    fn is_eulerian_single_node() {
+        let mut graph = Graph::strict();
+        graph.add_node("a");
+        let result = is_eulerian(&graph);
+        assert!(result.is_eulerian); // No edges, vacuously true
+    }
+
+    #[test]
+    fn is_eulerian_triangle() {
+        // Triangle: all degree 2 (even) → Eulerian circuit exists
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        let result = is_eulerian(&graph);
+        assert!(result.is_eulerian);
+    }
+
+    #[test]
+    fn is_eulerian_path_graph_not_eulerian() {
+        // Path a-b-c: degrees 1,2,1 → not Eulerian
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        let result = is_eulerian(&graph);
+        assert!(!result.is_eulerian);
+    }
+
+    #[test]
+    fn is_eulerian_square_with_diagonals() {
+        // K4 minus one edge: a-b, b-c, c-d, d-a, a-c
+        // Degrees: a=3, b=2, c=3, d=2 → odd degrees exist, not Eulerian
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("c", "d").expect("edge add");
+        graph.add_edge("d", "a").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        let result = is_eulerian(&graph);
+        assert!(!result.is_eulerian);
+    }
+
+    #[test]
+    fn is_eulerian_rectangle() {
+        // Square: a-b-c-d-a → all degree 2 → Eulerian
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("c", "d").expect("edge add");
+        graph.add_edge("d", "a").expect("edge add");
+        let result = is_eulerian(&graph);
+        assert!(result.is_eulerian);
+    }
+
+    #[test]
+    fn is_eulerian_disconnected() {
+        // Two separate triangles: all even degrees but not connected → not Eulerian
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        graph.add_edge("x", "y").expect("edge add");
+        graph.add_edge("y", "z").expect("edge add");
+        graph.add_edge("x", "z").expect("edge add");
+        let result = is_eulerian(&graph);
+        assert!(!result.is_eulerian);
+    }
+
+    #[test]
+    fn has_eulerian_path_triangle() {
+        // Triangle: all even degrees → Eulerian circuit → also has Eulerian path
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        let result = has_eulerian_path(&graph);
+        assert!(result.has_eulerian_path);
+    }
+
+    #[test]
+    fn has_eulerian_path_simple_path() {
+        // Path a-b-c: degrees 1,2,1 → exactly 2 odd → has Eulerian path
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        let result = has_eulerian_path(&graph);
+        assert!(result.has_eulerian_path);
+    }
+
+    #[test]
+    fn has_eulerian_path_k4() {
+        // K4: all degree 3 (odd) → 4 odd-degree nodes → no Eulerian path
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        graph.add_edge("a", "d").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("b", "d").expect("edge add");
+        graph.add_edge("c", "d").expect("edge add");
+        let result = has_eulerian_path(&graph);
+        assert!(!result.has_eulerian_path);
+    }
+
+    #[test]
+    fn is_semieulerian_path_graph() {
+        // Path a-b-c: has Eulerian path but not circuit → semi-Eulerian
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        let result = is_semieulerian(&graph);
+        assert!(result.is_semieulerian);
+    }
+
+    #[test]
+    fn is_semieulerian_triangle() {
+        // Triangle: has Eulerian circuit → NOT semi-Eulerian
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        let result = is_semieulerian(&graph);
+        assert!(!result.is_semieulerian);
+    }
+
+    #[test]
+    fn eulerian_circuit_triangle() {
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        let result = eulerian_circuit(&graph, None);
+        assert!(result.is_some());
+        let circuit = result.unwrap();
+        assert_eq!(circuit.edges.len(), 3);
+        // Circuit should start and end at same node
+        assert_eq!(circuit.edges[0].0, circuit.edges[2].1);
+        // Every edge is used exactly once
+        let mut edge_set: HashSet<(String, String)> = HashSet::new();
+        for (u, v) in &circuit.edges {
+            let key = if u <= v {
+                (u.clone(), v.clone())
+            } else {
+                (v.clone(), u.clone())
+            };
+            assert!(edge_set.insert(key), "duplicate edge in circuit");
+        }
+        assert_eq!(edge_set.len(), 3);
+    }
+
+    #[test]
+    fn eulerian_circuit_rectangle() {
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("c", "d").expect("edge add");
+        graph.add_edge("d", "a").expect("edge add");
+        let result = eulerian_circuit(&graph, None);
+        assert!(result.is_some());
+        let circuit = result.unwrap();
+        assert_eq!(circuit.edges.len(), 4);
+        assert_eq!(circuit.edges[0].0, circuit.edges[3].1);
+    }
+
+    #[test]
+    fn eulerian_circuit_not_eulerian() {
+        // Path graph: no Eulerian circuit
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        let result = eulerian_circuit(&graph, None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn eulerian_circuit_with_source() {
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        let result = eulerian_circuit(&graph, Some("c"));
+        assert!(result.is_some());
+        let circuit = result.unwrap();
+        assert_eq!(circuit.edges[0].0, "c");
+        assert_eq!(circuit.edges[2].1, "c");
+    }
+
+    #[test]
+    fn eulerian_circuit_empty_graph() {
+        let graph = Graph::strict();
+        let result = eulerian_circuit(&graph, None);
+        assert!(result.is_some());
+        assert!(result.unwrap().edges.is_empty());
+    }
+
+    #[test]
+    fn eulerian_path_simple() {
+        // Path a-b-c: exactly 2 odd-degree nodes → Eulerian path exists
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        let result = eulerian_path(&graph, None);
+        assert!(result.is_some());
+        let path = result.unwrap();
+        assert_eq!(path.edges.len(), 2);
+        // Path should start at "a" (smallest odd-degree node)
+        assert_eq!(path.edges[0].0, "a");
+        // Each edge is consecutive
+        assert_eq!(path.edges[0].1, path.edges[1].0);
+    }
+
+    #[test]
+    fn eulerian_path_house_graph() {
+        // House graph: square + triangle on top
+        // a-b, b-c, c-d, d-a, c-e, d-e
+        // Degrees: a=2, b=2, c=3, d=3, e=2 → 2 odd nodes (c,d)
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("c", "d").expect("edge add");
+        graph.add_edge("d", "a").expect("edge add");
+        graph.add_edge("c", "e").expect("edge add");
+        graph.add_edge("d", "e").expect("edge add");
+        let result = eulerian_path(&graph, None);
+        assert!(result.is_some());
+        let path = result.unwrap();
+        assert_eq!(path.edges.len(), 6);
+        // Should start at "c" (smallest odd-degree node)
+        assert_eq!(path.edges[0].0, "c");
+        // Every edge used exactly once
+        let mut edge_set: HashSet<(String, String)> = HashSet::new();
+        for (u, v) in &path.edges {
+            let key = if u <= v {
+                (u.clone(), v.clone())
+            } else {
+                (v.clone(), u.clone())
+            };
+            assert!(edge_set.insert(key), "duplicate edge in path");
+        }
+        assert_eq!(edge_set.len(), 6);
+    }
+
+    #[test]
+    fn eulerian_path_no_path() {
+        // K4: 4 odd-degree nodes → no Eulerian path
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        graph.add_edge("a", "d").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("b", "d").expect("edge add");
+        graph.add_edge("c", "d").expect("edge add");
+        let result = eulerian_path(&graph, None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn eulerian_path_with_source() {
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        let result = eulerian_path(&graph, Some("c"));
+        assert!(result.is_some());
+        let path = result.unwrap();
+        assert_eq!(path.edges[0].0, "c");
+    }
+
+    #[test]
+    fn eulerian_path_circuit_case() {
+        // Triangle: all even → eulerian_path still works (returns circuit as path)
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        let result = eulerian_path(&graph, None);
+        assert!(result.is_some());
+        let path = result.unwrap();
+        assert_eq!(path.edges.len(), 3);
+    }
+
+    #[test]
+    fn eulerian_circuit_butterfly() {
+        // Butterfly / bowtie: two triangles sharing a vertex
+        // a-b, b-c, a-c, c-d, c-e, d-e
+        // Degrees: a=2, b=2, c=4, d=2, e=2 → all even → Eulerian
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("c", "d").expect("edge add");
+        graph.add_edge("c", "e").expect("edge add");
+        graph.add_edge("d", "e").expect("edge add");
+        let result = eulerian_circuit(&graph, None);
+        assert!(result.is_some());
+        let circuit = result.unwrap();
+        assert_eq!(circuit.edges.len(), 6);
+        assert_eq!(circuit.edges[0].0, circuit.edges[5].1);
+        // Verify all edges used exactly once
+        let mut edge_set: HashSet<(String, String)> = HashSet::new();
+        for (u, v) in &circuit.edges {
+            let key = if u <= v {
+                (u.clone(), v.clone())
+            } else {
+                (v.clone(), u.clone())
+            };
+            assert!(edge_set.insert(key), "duplicate edge in circuit");
+        }
+        assert_eq!(edge_set.len(), 6);
+    }
+
+    #[test]
+    fn is_eulerian_with_isolated_node() {
+        // Triangle + isolated node: isolated nodes are ignored for connectivity
+        let mut graph = Graph::strict();
+        graph.add_edge("a", "b").expect("edge add");
+        graph.add_edge("b", "c").expect("edge add");
+        graph.add_edge("a", "c").expect("edge add");
+        graph.add_node("z");
+        let result = is_eulerian(&graph);
+        assert!(result.is_eulerian);
     }
 }
