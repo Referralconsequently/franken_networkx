@@ -1,14 +1,14 @@
 {
   "schema_version": "1.0.0",
   "artifact_id": "e2e-scenario-matrix-oracle-contract-v1",
-  "generated_at_utc": "2026-02-26T03:21:03.531814+00:00",
+  "generated_at_utc": "2026-02-26T03:59:25.888298+00:00",
   "baseline_comparator": "legacy_networkx/main@python3.12",
   "journey_summary": {
     "journey_count": 12,
     "strict_journey_count": 12,
     "hardened_journey_count": 12,
-    "fixture_inventory_count": 57,
-    "covered_fixture_count": 57,
+    "fixture_inventory_count": 59,
+    "covered_fixture_count": 59,
     "uncovered_fixture_count": 0
   },
   "deterministic_seed_policy": {
@@ -870,7 +870,9 @@
           "generated/cliques_strict.json",
           "generated/node_connectivity_strict.json",
           "generated/cycle_basis_strict.json",
-          "generated/paths_efficiency_cover_strict.json"
+          "generated/paths_efficiency_cover_strict.json",
+          "generated/euler_circuit_strict.json",
+          "generated/euler_path_strict.json"
         ],
         "deterministic_seed": 470103415025137257,
         "replay_command": "CARGO_TARGET_DIR=target-codex cargo run -q -p fnx-conformance --bin run_smoke -- --fixture generated/structure_articulation_points_strict.json --mode strict",
@@ -1037,7 +1039,9 @@
           "generated/cliques_strict.json",
           "generated/node_connectivity_strict.json",
           "generated/cycle_basis_strict.json",
-          "generated/paths_efficiency_cover_strict.json"
+          "generated/paths_efficiency_cover_strict.json",
+          "generated/euler_circuit_strict.json",
+          "generated/euler_path_strict.json"
         ],
         "deterministic_seed": 3609198798068896531,
         "replay_command": "CARGO_TARGET_DIR=target-codex cargo run -q -p fnx-conformance --bin run_smoke -- --fixture generated/structure_articulation_points_strict.json --mode hardened",
@@ -2496,6 +2500,8 @@
       "generated/cycle_basis_strict.json",
       "generated/dispatch_route_strict.json",
       "generated/distance_measures_strict.json",
+      "generated/euler_circuit_strict.json",
+      "generated/euler_path_strict.json",
       "generated/flow_edge_connectivity_strict.json",
       "generated/flow_max_strict.json",
       "generated/flow_min_cut_strict.json",
@@ -2555,6 +2561,8 @@
       "generated/cycle_basis_strict.json",
       "generated/dispatch_route_strict.json",
       "generated/distance_measures_strict.json",
+      "generated/euler_circuit_strict.json",
+      "generated/euler_path_strict.json",
       "generated/flow_edge_connectivity_strict.json",
       "generated/flow_max_strict.json",
       "generated/flow_min_cut_strict.json",
@@ -2682,6 +2690,11 @@
       "failure_class": "algorithm_connectivity",
       "description": "Node connectivity or minimum node cut output diverges from oracle expectation.",
       "source": "fnx-algorithms connectivity checks"
+    },
+    {
+      "failure_class": "algorithm_euler",
+      "description": "Euler path/circuit algorithm output diverges from oracle expectation.",
+      "source": "fnx-algorithms euler checks"
     }
   ],
   "alien_uplift_contract_card": {

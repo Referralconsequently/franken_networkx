@@ -1030,6 +1030,82 @@ def main() -> int:
     }
     write_json(fixture_root / "paths_efficiency_cover_strict.json", pec_fixture)
 
+    # --- Euler oracle ---
+    # Eulerian circuit graph: all even degrees, connected
+    # Butterfly/bowtie: a-b, a-c, b-c, c-d, c-e, d-e (all even degrees)
+    euler_circuit_graph = nx.Graph()
+    euler_circuit_graph.add_edge("a", "b")
+    euler_circuit_graph.add_edge("a", "c")
+    euler_circuit_graph.add_edge("b", "c")
+    euler_circuit_graph.add_edge("c", "d")
+    euler_circuit_graph.add_edge("c", "e")
+    euler_circuit_graph.add_edge("d", "e")
+
+    # Eulerian path graph: exactly 2 odd-degree nodes
+    # House graph: a-b, b-c, c-d, d-a, c-e, d-e
+    # Degrees: a=2, b=2, c=3, d=3, e=2 → 2 odd nodes (c,d)
+    euler_path_graph = nx.Graph()
+    euler_path_graph.add_edge("a", "b")
+    euler_path_graph.add_edge("b", "c")
+    euler_path_graph.add_edge("c", "d")
+    euler_path_graph.add_edge("d", "a")
+    euler_path_graph.add_edge("c", "e")
+    euler_path_graph.add_edge("d", "e")
+
+    is_eul = nx.is_eulerian(euler_circuit_graph)
+    has_eul_path_circuit = nx.has_eulerian_path(euler_circuit_graph)
+    is_semi_circuit = nx.is_semieulerian(euler_circuit_graph)
+
+    # Get Eulerian circuit edges
+    circuit_edges = list(nx.eulerian_circuit(euler_circuit_graph, source="a"))
+    circuit_edges_fmt = [{"from": str(u), "to": str(v)} for u, v in circuit_edges]
+
+    is_eul_path = nx.is_eulerian(euler_path_graph)
+    has_eul_path = nx.has_eulerian_path(euler_path_graph)
+    is_semi_path = nx.is_semieulerian(euler_path_graph)
+
+    # Get Eulerian path edges (start from smallest odd-degree node)
+    path_edges = list(nx.eulerian_path(euler_path_graph, source="c"))
+    path_edges_fmt = [{"from": str(u), "to": str(v)} for u, v in path_edges]
+
+    euler_fixture = {
+        "suite": "euler_v1",
+        "mode": "strict",
+        "operations": edge_ops(euler_circuit_graph) + [
+            {"op": "is_eulerian_query"},
+            {"op": "has_eulerian_path_query"},
+            {"op": "is_semieulerian_query"},
+            {"op": "eulerian_circuit_query", "source": "a"},
+        ],
+        "expected": {
+            "graph": graph_snapshot(euler_circuit_graph),
+            "is_eulerian": is_eul,
+            "has_eulerian_path": has_eul_path_circuit,
+            "is_semieulerian": is_semi_circuit,
+            "eulerian_circuit": circuit_edges_fmt,
+        },
+    }
+    write_json(fixture_root / "euler_circuit_strict.json", euler_fixture)
+
+    euler_path_fixture = {
+        "suite": "euler_path_v1",
+        "mode": "strict",
+        "operations": edge_ops(euler_path_graph) + [
+            {"op": "is_eulerian_query"},
+            {"op": "has_eulerian_path_query"},
+            {"op": "is_semieulerian_query"},
+            {"op": "eulerian_path_query", "source": "c"},
+        ],
+        "expected": {
+            "graph": graph_snapshot(euler_path_graph),
+            "is_eulerian": is_eul_path,
+            "has_eulerian_path": has_eul_path,
+            "is_semieulerian": is_semi_path,
+            "eulerian_path": path_edges_fmt,
+        },
+    }
+    write_json(fixture_root / "euler_path_strict.json", euler_path_fixture)
+
     oracle_capture = {
         "oracle": "legacy_networkx",
         "legacy_root": str(legacy_root),
@@ -1071,6 +1147,8 @@ def main() -> int:
             "node_connectivity_strict.json",
             "cycle_basis_strict.json",
             "paths_efficiency_cover_strict.json",
+            "euler_circuit_strict.json",
+            "euler_path_strict.json",
         ],
         "snapshots": {
             "convert_graph": graph_snapshot(convert_graph),
@@ -1101,6 +1179,8 @@ def main() -> int:
             "nc_graph": graph_snapshot(nc_graph),
             "cb_graph": graph_snapshot(cb_graph),
             "pec_graph": graph_snapshot(pec_graph),
+            "euler_circuit_graph": graph_snapshot(euler_circuit_graph),
+            "euler_path_graph": graph_snapshot(euler_path_graph),
         },
     }
     write_json(artifact_root / "legacy_networkx_capture.json", oracle_capture)

@@ -118,7 +118,8 @@
     "algorithm_distance",
     "algorithm_mst",
     "algorithm_coloring",
-    "algorithm_connectivity"
+    "algorithm_connectivity",
+    "algorithm_euler"
   ],
   "required_replay_schema_refs": [
     "artifacts/conformance/schema/v1/structured_test_log_schema_v1.json",

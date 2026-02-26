@@ -108,6 +108,8 @@ JOURNEY_SPECS: list[dict[str, Any]] = [
             "generated/node_connectivity_strict.json",
             "generated/cycle_basis_strict.json",
             "generated/paths_efficiency_cover_strict.json",
+            "generated/euler_circuit_strict.json",
+            "generated/euler_path_strict.json",
         ],
         "hardened_fixture_ids": [
             "generated/structure_articulation_points_strict.json",
@@ -125,6 +127,8 @@ JOURNEY_SPECS: list[dict[str, Any]] = [
             "generated/node_connectivity_strict.json",
             "generated/cycle_basis_strict.json",
             "generated/paths_efficiency_cover_strict.json",
+            "generated/euler_circuit_strict.json",
+            "generated/euler_path_strict.json",
         ],
         "hardened_mode_strategy": "mode_override_fixture",
     },
@@ -384,6 +388,11 @@ TIE_BREAK_BY_OPERATION = {
     "global_efficiency_query": "Global efficiency is deterministic via all-pairs BFS distance computation.",
     "local_efficiency_query": "Local efficiency is deterministic via per-node neighbor subgraph BFS computation.",
     "min_edge_cover_query": "Minimum edge cover is deterministic via max-weight matching with greedy canonical extension.",
+    "is_eulerian_query": "Eulerian circuit check is deterministic via degree parity and BFS connectivity.",
+    "has_eulerian_path_query": "Eulerian path check is deterministic via odd-degree count and BFS connectivity.",
+    "is_semieulerian_query": "Semi-Eulerian check is deterministic via path/circuit check composition.",
+    "eulerian_circuit_query": "Eulerian circuit is deterministic via Hierholzer's algorithm with sorted neighbor traversal.",
+    "eulerian_path_query": "Eulerian path is deterministic via Hierholzer's algorithm with sorted neighbor traversal.",
 }
 
 EXPECTED_REFS_BY_OPERATION = {
@@ -470,6 +479,11 @@ EXPECTED_REFS_BY_OPERATION = {
     "global_efficiency_query": ["expected.global_efficiency"],
     "local_efficiency_query": ["expected.local_efficiency"],
     "min_edge_cover_query": ["expected.min_edge_cover"],
+    "is_eulerian_query": ["expected.is_eulerian"],
+    "has_eulerian_path_query": ["expected.has_eulerian_path"],
+    "is_semieulerian_query": ["expected.is_semieulerian"],
+    "eulerian_circuit_query": ["expected.eulerian_circuit_edge_count"],
+    "eulerian_path_query": ["expected.eulerian_path_edge_count"],
 }
 
 FAILURE_CLASS_BY_OPERATION = {
@@ -537,6 +551,11 @@ FAILURE_CLASS_BY_OPERATION = {
     "global_efficiency_query": "algorithm",
     "local_efficiency_query": "algorithm",
     "min_edge_cover_query": "algorithm",
+    "is_eulerian_query": "algorithm_euler",
+    "has_eulerian_path_query": "algorithm_euler",
+    "is_semieulerian_query": "algorithm_euler",
+    "eulerian_circuit_query": "algorithm_euler",
+    "eulerian_path_query": "algorithm_euler",
 }
 
 ASSERTION_RULES = {
@@ -828,6 +847,36 @@ ASSERTION_RULES = {
         "tie_break_behavior": "Edge pairs are canonicalized and sorted for deterministic output.",
         "failure_class": "algorithm",
     },
+    "is_eulerian": {
+        "expected_ref": "expected.is_eulerian",
+        "contract": "Eulerian circuit existence must match oracle boolean.",
+        "tie_break_behavior": "Deterministic via degree parity check and BFS connectivity.",
+        "failure_class": "algorithm_euler",
+    },
+    "has_eulerian_path": {
+        "expected_ref": "expected.has_eulerian_path",
+        "contract": "Eulerian path existence must match oracle boolean.",
+        "tie_break_behavior": "Deterministic via odd-degree count and BFS connectivity.",
+        "failure_class": "algorithm_euler",
+    },
+    "is_semieulerian": {
+        "expected_ref": "expected.is_semieulerian",
+        "contract": "Semi-Eulerian classification must match oracle boolean.",
+        "tie_break_behavior": "Deterministic via composition of path and circuit checks.",
+        "failure_class": "algorithm_euler",
+    },
+    "eulerian_circuit": {
+        "expected_ref": "expected.eulerian_circuit_edge_count",
+        "contract": "Eulerian circuit must have correct edge count and form valid circuit (structural validation).",
+        "tie_break_behavior": "Hierholzer's algorithm with sorted neighbor traversal ensures deterministic circuit.",
+        "failure_class": "algorithm_euler",
+    },
+    "eulerian_path": {
+        "expected_ref": "expected.eulerian_path_edge_count",
+        "contract": "Eulerian path must have correct edge count and consecutive edges must share endpoints (structural validation).",
+        "tie_break_behavior": "Hierholzer's algorithm with sorted neighbor traversal ensures deterministic path.",
+        "failure_class": "algorithm_euler",
+    },
 }
 
 FAILURE_CLASS_TAXONOMY = [
@@ -920,6 +969,11 @@ FAILURE_CLASS_TAXONOMY = [
         "failure_class": "algorithm_connectivity",
         "description": "Node connectivity or minimum node cut output diverges from oracle expectation.",
         "source": "fnx-algorithms connectivity checks",
+    },
+    {
+        "failure_class": "algorithm_euler",
+        "description": "Euler path/circuit algorithm output diverges from oracle expectation.",
+        "source": "fnx-algorithms euler checks",
     },
 ]
 

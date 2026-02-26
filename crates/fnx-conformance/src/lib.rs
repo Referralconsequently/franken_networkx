@@ -390,6 +390,17 @@ enum Operation {
     GlobalEfficiencyQuery,
     LocalEfficiencyQuery,
     MinEdgeCoverQuery,
+    IsEulerianQuery,
+    HasEulerianPathQuery,
+    IsSemieulerianQuery,
+    EulerianCircuitQuery {
+        #[serde(default)]
+        source: Option<String>,
+    },
+    EulerianPathQuery {
+        #[serde(default)]
+        source: Option<String>,
+    },
     DispatchResolve {
         operation: String,
         #[serde(default)]
@@ -586,6 +597,16 @@ struct ExpectedState {
     local_efficiency: Option<f64>,
     #[serde(default)]
     min_edge_cover: Option<Vec<ExpectedEdgePair>>,
+    #[serde(default)]
+    is_eulerian: Option<bool>,
+    #[serde(default)]
+    has_eulerian_path: Option<bool>,
+    #[serde(default)]
+    is_semieulerian: Option<bool>,
+    #[serde(default)]
+    eulerian_circuit_edge_count: Option<usize>,
+    #[serde(default)]
+    eulerian_path_edge_count: Option<usize>,
     #[serde(default)]
     dispatch: Option<ExpectedDispatch>,
     #[serde(default)]
@@ -793,6 +814,11 @@ struct ExecutionContext {
     global_efficiency_result: Option<GlobalEfficiencyResult>,
     local_efficiency_result: Option<LocalEfficiencyResult>,
     min_edge_cover_result: Option<MinEdgeCoverResult>,
+    is_eulerian_result: Option<fnx_algorithms::IsEulerianResult>,
+    has_eulerian_path_result: Option<fnx_algorithms::HasEulerianPathResult>,
+    is_semieulerian_result: Option<fnx_algorithms::IsSemiEulerianResult>,
+    eulerian_circuit_result: Option<fnx_algorithms::EulerianCircuitResult>,
+    eulerian_path_result: Option<fnx_algorithms::EulerianPathResult>,
     warnings: Vec<String>,
     witness: Option<ComplexityWitness>,
 }
@@ -1587,6 +1613,11 @@ fn run_fixture(path: PathBuf, default_strict_mode: bool, fixture_root: &Path) ->
         global_efficiency_result: None,
         local_efficiency_result: None,
         min_edge_cover_result: None,
+        is_eulerian_result: None,
+        has_eulerian_path_result: None,
+        is_semieulerian_result: None,
+        eulerian_circuit_result: None,
+        eulerian_path_result: None,
         warnings: Vec::new(),
         witness: None,
     };
@@ -1931,6 +1962,41 @@ fn run_fixture(path: PathBuf, default_strict_mode: bool, fixture_root: &Path) ->
             Operation::MinEdgeCoverQuery => {
                 let result = min_edge_cover(&context.graph);
                 context.min_edge_cover_result = result.clone();
+                if let Some(ref r) = result {
+                    context.witness = Some(r.witness.clone());
+                }
+            }
+            Operation::IsEulerianQuery => {
+                let result = fnx_algorithms::is_eulerian(&context.graph);
+                context.is_eulerian_result = Some(result.clone());
+                context.witness = Some(result.witness);
+            }
+            Operation::HasEulerianPathQuery => {
+                let result = fnx_algorithms::has_eulerian_path(&context.graph);
+                context.has_eulerian_path_result = Some(result.clone());
+                context.witness = Some(result.witness);
+            }
+            Operation::IsSemieulerianQuery => {
+                let result = fnx_algorithms::is_semieulerian(&context.graph);
+                context.is_semieulerian_result = Some(result.clone());
+                context.witness = Some(result.witness);
+            }
+            Operation::EulerianCircuitQuery { source } => {
+                let result = fnx_algorithms::eulerian_circuit(
+                    &context.graph,
+                    source.as_deref(),
+                );
+                context.eulerian_circuit_result = result.clone();
+                if let Some(ref r) = result {
+                    context.witness = Some(r.witness.clone());
+                }
+            }
+            Operation::EulerianPathQuery { source } => {
+                let result = fnx_algorithms::eulerian_path(
+                    &context.graph,
+                    source.as_deref(),
+                );
+                context.eulerian_path_result = result.clone();
                 if let Some(ref r) = result {
                     context.witness = Some(r.witness.clone());
                 }
@@ -3790,6 +3856,141 @@ fn run_fixture(path: PathBuf, default_strict_mode: bool, fixture_root: &Path) ->
         }
     }
 
+    if let Some(expected_is_eul) = fixture.expected.is_eulerian {
+        match context.is_eulerian_result.as_ref() {
+            Some(actual) => {
+                if actual.is_eulerian != expected_is_eul {
+                    mismatches.push(Mismatch {
+                        category: "algorithm_euler".to_owned(),
+                        message: format!(
+                            "is_eulerian mismatch: expected {expected_is_eul}, got {}",
+                            actual.is_eulerian
+                        ),
+                    });
+                }
+            }
+            None => mismatches.push(Mismatch {
+                category: "algorithm_euler".to_owned(),
+                message: "expected is_eulerian result but none produced".to_owned(),
+            }),
+        }
+    }
+
+    if let Some(expected_has_path) = fixture.expected.has_eulerian_path {
+        match context.has_eulerian_path_result.as_ref() {
+            Some(actual) => {
+                if actual.has_eulerian_path != expected_has_path {
+                    mismatches.push(Mismatch {
+                        category: "algorithm_euler".to_owned(),
+                        message: format!(
+                            "has_eulerian_path mismatch: expected {expected_has_path}, got {}",
+                            actual.has_eulerian_path
+                        ),
+                    });
+                }
+            }
+            None => mismatches.push(Mismatch {
+                category: "algorithm_euler".to_owned(),
+                message: "expected has_eulerian_path result but none produced".to_owned(),
+            }),
+        }
+    }
+
+    if let Some(expected_is_semi) = fixture.expected.is_semieulerian {
+        match context.is_semieulerian_result.as_ref() {
+            Some(actual) => {
+                if actual.is_semieulerian != expected_is_semi {
+                    mismatches.push(Mismatch {
+                        category: "algorithm_euler".to_owned(),
+                        message: format!(
+                            "is_semieulerian mismatch: expected {expected_is_semi}, got {}",
+                            actual.is_semieulerian
+                        ),
+                    });
+                }
+            }
+            None => mismatches.push(Mismatch {
+                category: "algorithm_euler".to_owned(),
+                message: "expected is_semieulerian result but none produced".to_owned(),
+            }),
+        }
+    }
+
+    if let Some(expected_count) = fixture.expected.eulerian_circuit_edge_count {
+        match context.eulerian_circuit_result.as_ref() {
+            Some(actual) => {
+                if actual.edges.len() != expected_count {
+                    mismatches.push(Mismatch {
+                        category: "algorithm_euler".to_owned(),
+                        message: format!(
+                            "eulerian_circuit edge count mismatch: expected {expected_count}, got {}",
+                            actual.edges.len()
+                        ),
+                    });
+                }
+                // Validate structural correctness: consecutive edges share endpoints
+                for window in actual.edges.windows(2) {
+                    if window[0].1 != window[1].0 {
+                        mismatches.push(Mismatch {
+                            category: "algorithm_euler".to_owned(),
+                            message: format!(
+                                "eulerian_circuit not consecutive: edge ({},{}) not followed by ({},{})",
+                                window[0].0, window[0].1, window[1].0, window[1].1
+                            ),
+                        });
+                        break;
+                    }
+                }
+                // Validate circuit: starts and ends at same node
+                if !actual.edges.is_empty()
+                    && actual.edges.first().unwrap().0 != actual.edges.last().unwrap().1
+                {
+                    mismatches.push(Mismatch {
+                        category: "algorithm_euler".to_owned(),
+                        message: "eulerian_circuit does not form a cycle".to_owned(),
+                    });
+                }
+            }
+            None => mismatches.push(Mismatch {
+                category: "algorithm_euler".to_owned(),
+                message: "expected eulerian_circuit result but none produced".to_owned(),
+            }),
+        }
+    }
+
+    if let Some(expected_count) = fixture.expected.eulerian_path_edge_count {
+        match context.eulerian_path_result.as_ref() {
+            Some(actual) => {
+                if actual.edges.len() != expected_count {
+                    mismatches.push(Mismatch {
+                        category: "algorithm_euler".to_owned(),
+                        message: format!(
+                            "eulerian_path edge count mismatch: expected {expected_count}, got {}",
+                            actual.edges.len()
+                        ),
+                    });
+                }
+                // Validate structural correctness: consecutive edges share endpoints
+                for window in actual.edges.windows(2) {
+                    if window[0].1 != window[1].0 {
+                        mismatches.push(Mismatch {
+                            category: "algorithm_euler".to_owned(),
+                            message: format!(
+                                "eulerian_path not consecutive: edge ({},{}) not followed by ({},{})",
+                                window[0].0, window[0].1, window[1].0, window[1].1
+                            ),
+                        });
+                        break;
+                    }
+                }
+            }
+            None => mismatches.push(Mismatch {
+                category: "algorithm_euler".to_owned(),
+                message: "expected eulerian_path result but none produced".to_owned(),
+            }),
+        }
+    }
+
     if let Some(expected_dispatch) = fixture.expected.dispatch {
         match context.dispatch_decision {
             Some(actual) => {
@@ -4038,6 +4239,11 @@ fn default_dispatch_registry(mode: CompatibilityMode) -> BackendRegistry {
             "global_efficiency",
             "local_efficiency",
             "min_edge_cover",
+            "is_eulerian",
+            "has_eulerian_path",
+            "is_semieulerian",
+            "eulerian_circuit",
+            "eulerian_path",
         ]),
         allow_in_strict: true,
         allow_in_hardened: true,

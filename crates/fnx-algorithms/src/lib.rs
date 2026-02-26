@@ -5688,7 +5688,7 @@ pub fn is_eulerian(graph: &Graph) -> IsEulerianResult {
                 nbrs.len()
             })
             .unwrap_or(0);
-        if deg % 2 != 0 {
+        if !deg.is_multiple_of(2) {
             return IsEulerianResult {
                 is_eulerian: false,
                 witness: ComplexityWitness {
@@ -5799,7 +5799,7 @@ pub fn has_eulerian_path(graph: &Graph) -> HasEulerianPathResult {
                 nbrs.len()
             })
             .unwrap_or(0);
-        if deg % 2 != 0 {
+        if !deg.is_multiple_of(2) {
             odd_degree_count += 1;
         }
     }
@@ -6002,7 +6002,7 @@ pub fn eulerian_path(graph: &Graph, source: Option<&str>) -> Option<EulerianPath
                 .neighbors_iter(n)
                 .map(|iter| iter.count())
                 .unwrap_or(0);
-            deg % 2 != 0
+            !deg.is_multiple_of(2)
         });
 
         if let Some(&n) = odd_node {
@@ -6090,7 +6090,7 @@ fn hierholzer_traverse(graph: &Graph, start: &str) -> Vec<(String, String)> {
     // Track current position in each adjacency list for efficiency
     let mut adj_pos: Vec<usize> = vec![0; sorted_nodes.len()];
 
-    let start_idx = node_index[start.as_ref() as &str];
+    let start_idx = node_index[start];
     let mut stack = vec![start_idx];
     let mut trail: Vec<usize> = Vec::new();
 
