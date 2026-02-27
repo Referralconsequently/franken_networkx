@@ -371,6 +371,14 @@ impl GraphGenerator {
             }
         }
 
+        // When m=1 the initial K_1 has no edges, so repeated_nodes is empty.
+        // Seed it with each initial node once so the first attachment can proceed.
+        if repeated_nodes.is_empty() {
+            for i in 0..m {
+                repeated_nodes.push(i);
+            }
+        }
+
         // Grow the graph: add nodes m..n-1 one at a time.
         for source in m..n {
             // Choose m distinct targets from existing nodes proportional to degree.
@@ -790,6 +798,17 @@ mod tests {
             .expect("ba with m=n should succeed");
         // m=n means we just get a complete graph on 5 nodes = 10 edges.
         assert_eq!(report.graph.edge_count(), 10);
+    }
+
+    #[test]
+    fn barabasi_albert_m_one_does_not_panic() {
+        let mut gg = GraphGenerator::strict();
+        let report = gg
+            .barabasi_albert_graph(10, 1, 42)
+            .expect("ba with m=1 should succeed");
+        assert_eq!(report.graph.node_count(), 10);
+        // Initial K_1 has 0 edges; 9 new nodes each attach 1 edge → 9 edges.
+        assert_eq!(report.graph.edge_count(), 9);
     }
 
     #[test]

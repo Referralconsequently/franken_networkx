@@ -54,19 +54,22 @@ def timed(func):
 # ---------------------------------------------------------------------------
 # Pytest fixture: pre-built weighted triangle graph for tests that need G
 # ---------------------------------------------------------------------------
-import pytest
+try:
+    import pytest
 
-@pytest.fixture
-def G(fnx):
-    """Build the same 3-node weighted triangle used by standalone main()."""
-    g = fnx.Graph()
-    g.add_node("a", color="red")
-    g.add_node("b")
-    g.add_node("c")
-    g.add_edge("a", "b", weight=1.0)
-    g.add_edge("b", "c", weight=2.5)
-    g.add_edge("a", "c", weight=10.0)
-    return g
+    @pytest.fixture
+    def G(fnx):
+        """Build the same 3-node weighted triangle used by standalone main()."""
+        g = fnx.Graph()
+        g.add_node("a", color="red")
+        g.add_node("b")
+        g.add_node("c")
+        g.add_edge("a", "b", weight=1.0)
+        g.add_edge("b", "c", weight=2.5)
+        g.add_edge("a", "c", weight=10.0)
+        return g
+except ImportError:
+    pass
 
 
 # ===========================================================================

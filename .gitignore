@@ -7,6 +7,14 @@ target-codex-*/
 __pycache__/
 *.py[cod]
 
+# Python native extension build artifacts
+*.so
+*.abi3.so
+*.pyd
+
+# Hypothesis test framework state
+.hypothesis/
+
 # Editor and OS noise
 .DS_Store
 ._*
