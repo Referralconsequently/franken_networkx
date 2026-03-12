@@ -231,6 +231,11 @@ _SUPPORTED_ALGORITHMS = {
     "is_negatively_weighted": fnx.is_negatively_weighted,
     "is_path": fnx.is_path,
     "is_distance_regular": fnx.is_distance_regular,
+    # DAG algorithms — additional
+    "is_aperiodic": fnx.is_aperiodic,
+    "antichains": fnx.antichains,
+    "immediate_dominators": fnx.immediate_dominators,
+    "dominance_frontiers": fnx.dominance_frontiers,
     # Additional shortest path algorithms
     "dijkstra_path_length": fnx.dijkstra_path_length,
     "bellman_ford_path_length": fnx.bellman_ford_path_length,

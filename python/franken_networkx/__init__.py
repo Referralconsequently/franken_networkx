@@ -401,6 +401,14 @@ from franken_networkx._fnx import (
     is_distance_regular,
 )
 
+# Algorithm functions — DAG additional
+from franken_networkx._fnx import (
+    is_aperiodic,
+    antichains,
+    immediate_dominators,
+    dominance_frontiers,
+)
+
 # Algorithm functions — additional shortest path
 from franken_networkx._fnx import (
     dijkstra_path_length,
@@ -1262,6 +1270,11 @@ __all__ = [
     "is_negatively_weighted",
     "is_path",
     "is_distance_regular",
+    # Algorithms — DAG additional
+    "is_aperiodic",
+    "antichains",
+    "immediate_dominators",
+    "dominance_frontiers",
     # Exception
     "NetworkXNoCycle",
     # Algorithms — additional shortest path

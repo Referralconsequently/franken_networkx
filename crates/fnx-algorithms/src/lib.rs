@@ -12631,6 +12631,290 @@ pub fn is_distance_regular(graph: &Graph) -> bool {
     true
 }
 
+// ===========================================================================
+// DAG algorithms — additional
+// ===========================================================================
+
+/// Check if a directed graph is aperiodic.
+/// A strongly connected digraph is aperiodic if the GCD of all cycle lengths is 1.
+/// A general digraph is aperiodic if every strongly connected component is aperiodic.
+#[must_use]
+pub fn is_aperiodic(digraph: &DiGraph) -> bool {
+    let nodes = digraph.nodes_ordered();
+    if nodes.is_empty() {
+        return true;
+    }
+    // Get SCCs
+    let sccs = strongly_connected_components(digraph);
+    if sccs.is_empty() {
+        return true;
+    }
+    // For each non-trivial SCC, compute GCD of cycle lengths
+    for scc in &sccs {
+        if scc.len() <= 1 {
+            continue;
+        }
+        let scc_set: HashSet<&str> = scc.iter().map(|s| s.as_str()).collect();
+        let start = scc[0].as_str();
+        // BFS to compute distances within the SCC
+        let mut dist: HashMap<&str, usize> = HashMap::new();
+        dist.insert(start, 0);
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+        let mut gcd_val = 0usize;
+        while let Some(u) = queue.pop_front() {
+            let d_u = dist[u];
+            if let Some(succs) = digraph.successors(u) {
+                for s in succs {
+                    if !scc_set.contains(s) {
+                        continue;
+                    }
+                    if let Some(&d_s) = dist.get(s) {
+                        // Back edge: cycle length = d_u - d_s + 1
+                        let cycle_len = d_u - d_s + 1;
+                        gcd_val = gcd(gcd_val, cycle_len);
+                    } else {
+                        dist.insert(s, d_u + 1);
+                        queue.push_back(s);
+                    }
+                }
+            }
+        }
+        if gcd_val != 1 {
+            return false;
+        }
+    }
+    true
+}
+
+fn gcd(a: usize, b: usize) -> usize {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// Return all antichains of a DAG.
+/// An antichain is a set of nodes where no two are connected by a directed path.
+#[must_use]
+pub fn antichains(digraph: &DiGraph) -> Vec<Vec<String>> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return vec![vec![]]; // Empty set is an antichain
+    }
+
+    // Compute transitive closure as reachability matrix
+    let node_to_idx: HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, &nd)| (nd, i)).collect();
+    let mut reachable = vec![vec![false; n]; n];
+    for (i, &node) in nodes.iter().enumerate() {
+        reachable[i][i] = true;
+        let mut stack = vec![node];
+        let mut visited = HashSet::new();
+        visited.insert(node);
+        while let Some(u) = stack.pop() {
+            if let Some(succs) = digraph.successors(u) {
+                for s in succs {
+                    if visited.insert(s) {
+                        reachable[i][node_to_idx[s]] = true;
+                        stack.push(s);
+                    }
+                }
+            }
+        }
+    }
+
+    // Enumerate all antichains: subsets where no two nodes are comparable
+    let mut result = vec![vec![]]; // Empty set
+    enumerate_antichains(&nodes, &reachable, &node_to_idx, &mut vec![], 0, &mut result);
+    result
+}
+
+fn enumerate_antichains(
+    nodes: &[&str],
+    reachable: &[Vec<bool>],
+    node_to_idx: &HashMap<&str, usize>,
+    current: &mut Vec<usize>,
+    start: usize,
+    result: &mut Vec<Vec<String>>,
+) {
+    for i in start..nodes.len() {
+        let idx = node_to_idx[nodes[i]];
+        // Check if idx is comparable with any node in current
+        let compatible = current.iter().all(|&c| !reachable[c][idx] && !reachable[idx][c]);
+        if compatible {
+            current.push(idx);
+            result.push(current.iter().map(|&j| nodes[j].to_string()).collect());
+            enumerate_antichains(nodes, reachable, node_to_idx, current, i + 1, result);
+            current.pop();
+        }
+    }
+}
+
+/// Compute immediate dominators for all nodes reachable from start.
+/// Uses the Cooper-Harvey-Kennedy algorithm (iterative).
+/// Returns a map from node -> its immediate dominator.
+#[must_use]
+pub fn immediate_dominators(digraph: &DiGraph, start: &str) -> HashMap<String, String> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    let node_to_idx: HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, &nd)| (nd, i)).collect();
+
+    if !node_to_idx.contains_key(start) {
+        return HashMap::new();
+    }
+    let start_idx = node_to_idx[start];
+
+    // Compute reverse postorder via DFS
+    let mut visited = vec![false; n];
+    let mut postorder = Vec::new();
+    let mut stack = vec![(start_idx, false)];
+    while let Some((node, processed)) = stack.pop() {
+        if processed {
+            postorder.push(node);
+            continue;
+        }
+        if visited[node] {
+            continue;
+        }
+        visited[node] = true;
+        stack.push((node, true));
+        if let Some(succs) = digraph.successors(nodes[node]) {
+            for s in succs {
+                let s_idx = node_to_idx[s];
+                if !visited[s_idx] {
+                    stack.push((s_idx, false));
+                }
+            }
+        }
+    }
+
+    let rpo: Vec<usize> = postorder.iter().rev().copied().collect();
+    let mut rpo_order = vec![usize::MAX; n];
+    for (order, &node) in rpo.iter().enumerate() {
+        rpo_order[node] = order;
+    }
+
+    // Build predecessor map (only for reachable nodes)
+    let mut preds = vec![vec![]; n];
+    for &node in &rpo {
+        if let Some(succs) = digraph.successors(nodes[node]) {
+            for s in succs {
+                let s_idx = node_to_idx[s];
+                if visited[s_idx] {
+                    preds[s_idx].push(node);
+                }
+            }
+        }
+    }
+
+    // Iterative dominator computation
+    let mut idom = vec![usize::MAX; n];
+    idom[start_idx] = start_idx;
+
+    let intersect = |mut a: usize, mut b: usize, doms: &[usize]| -> usize {
+        while a != b {
+            while rpo_order[a] > rpo_order[b] {
+                a = doms[a];
+            }
+            while rpo_order[b] > rpo_order[a] {
+                b = doms[b];
+            }
+        }
+        a
+    };
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &node in &rpo {
+            if node == start_idx {
+                continue;
+            }
+            let mut new_idom = usize::MAX;
+            for &pred in &preds[node] {
+                if idom[pred] != usize::MAX {
+                    if new_idom == usize::MAX {
+                        new_idom = pred;
+                    } else {
+                        new_idom = intersect(new_idom, pred, &idom);
+                    }
+                }
+            }
+            if new_idom != idom[node] {
+                idom[node] = new_idom;
+                changed = true;
+            }
+        }
+    }
+
+    let mut result = HashMap::new();
+    for &node in &rpo {
+        if idom[node] != usize::MAX && idom[node] != node {
+            result.insert(nodes[node].to_string(), nodes[idom[node]].to_string());
+        }
+    }
+    // Include start node dominating itself
+    result.insert(start.to_string(), start.to_string());
+    result
+}
+
+/// Compute dominance frontiers for all nodes reachable from start.
+/// Returns a map from node -> set of nodes in its dominance frontier.
+#[must_use]
+pub fn dominance_frontiers(digraph: &DiGraph, start: &str) -> HashMap<String, Vec<String>> {
+    let idom = immediate_dominators(digraph, start);
+    let nodes = digraph.nodes_ordered();
+    let mut frontiers: HashMap<String, Vec<String>> = HashMap::new();
+
+    // Initialize empty frontiers for all dominated nodes
+    for node_str in idom.keys() {
+        frontiers.insert(node_str.clone(), Vec::new());
+    }
+
+    // For each node with multiple predecessors, walk up dominator tree
+    for &node in &nodes {
+        let node_s = node.to_string();
+        if !idom.contains_key(&node_s) {
+            continue;
+        }
+        if let Some(preds) = digraph.predecessors(node) {
+            let pred_list: Vec<&str> = preds.iter().map(|s| s as &str).collect();
+            if pred_list.len() >= 2 {
+                for &pred in &pred_list {
+                    let pred_s = pred.to_string();
+                    if !idom.contains_key(&pred_s) {
+                        continue;
+                    }
+                    let mut runner = pred_s.clone();
+                    while runner != idom[&node_s] {
+                        if let Some(frontier) = frontiers.get_mut(&runner)
+                            && !frontier.contains(&node_s)
+                        {
+                            frontier.push(node_s.clone());
+                        }
+                        if let Some(dom) = idom.get(&runner) {
+                            if *dom == runner {
+                                break;
+                            }
+                            runner = dom.clone();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    frontiers
+}
+
+/// Check if a directed graph is aperiodic using a DiGraph.
+#[must_use]
+pub fn is_aperiodic_digraph(digraph: &DiGraph) -> bool {
+    is_aperiodic(digraph)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -12714,6 +12998,8 @@ mod tests {
         is_regular, is_k_regular, is_tournament,
         is_weighted, is_negatively_weighted, is_path_graph,
         non_edges, is_distance_regular,
+        // DAG algorithms — additional
+        is_aperiodic, antichains, immediate_dominators, dominance_frontiers,
         // Additional shortest path algorithms
         dijkstra_path_length, bellman_ford_path_length,
         single_source_dijkstra_full, single_source_dijkstra_path, single_source_dijkstra_path_length,
@@ -20514,5 +20800,104 @@ mod tests {
         let _ = g.add_edge("b", "c");
         let _ = g.add_edge("c", "d");
         assert!(!is_distance_regular(&g));
+    }
+
+    // -----------------------------------------------------------------------
+    // DAG algorithms — additional
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_aperiodic_cycle() {
+        // a->b->c->a is periodic (period=3)
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!(!is_aperiodic(&g));
+    }
+
+    #[test]
+    fn test_is_aperiodic_with_self_loop() {
+        // a->b->c->a with a->a (self-loop makes GCD=1)
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        let _ = g.add_edge("a", "a");
+        assert!(is_aperiodic(&g));
+    }
+
+    #[test]
+    fn test_is_aperiodic_two_cycles() {
+        // Cycles of length 2 and 3: gcd(2,3)=1 => aperiodic
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "a");
+        let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("c", "d");
+        let _ = g.add_edge("d", "a");
+        assert!(is_aperiodic(&g));
+    }
+
+    #[test]
+    fn test_antichains_chain() {
+        // a->b->c: antichains are {}, {a}, {b}, {c}
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let acs = antichains(&g);
+        assert_eq!(acs.len(), 4);
+    }
+
+    #[test]
+    fn test_antichains_diamond() {
+        // a->b, a->c, b->d, c->d: antichains include {b,c}
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("b", "d");
+        let _ = g.add_edge("c", "d");
+        let acs = antichains(&g);
+        let has_bc = acs.iter().any(|ac| {
+            ac.len() == 2 && ac.contains(&"b".to_string()) && ac.contains(&"c".to_string())
+        });
+        assert!(has_bc);
+    }
+
+    #[test]
+    fn test_immediate_dominators_chain() {
+        // a->b->c: idom(b)=a, idom(c)=b
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let idom = immediate_dominators(&g, "a");
+        assert_eq!(idom.get("a").map(|s| s.as_str()), Some("a"));
+        assert_eq!(idom.get("b").map(|s| s.as_str()), Some("a"));
+        assert_eq!(idom.get("c").map(|s| s.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn test_immediate_dominators_diamond() {
+        // a->b, a->c, b->d, c->d: idom(d)=a
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("b", "d");
+        let _ = g.add_edge("c", "d");
+        let idom = immediate_dominators(&g, "a");
+        assert_eq!(idom.get("d").map(|s| s.as_str()), Some("a"));
+    }
+
+    #[test]
+    fn test_dominance_frontiers_diamond() {
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("b", "d");
+        let _ = g.add_edge("c", "d");
+        let df = dominance_frontiers(&g, "a");
+        // b's frontier is {d}, c's frontier is {d}
+        assert!(df.get("b").is_some_and(|f| f.contains(&"d".to_string())));
+        assert!(df.get("c").is_some_and(|f| f.contains(&"d".to_string())));
     }
 }

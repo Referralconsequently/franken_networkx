@@ -4829,6 +4829,107 @@ pub fn is_distance_regular(
 }
 
 // ===========================================================================
+// DAG algorithms — additional
+// ===========================================================================
+
+#[pyfunction]
+#[pyo3(signature = (g,))]
+pub fn is_aperiodic(
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "is_aperiodic is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        Ok(fnx_algorithms::is_aperiodic(&dg.inner))
+    } else {
+        unreachable!()
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (g,))]
+pub fn antichains(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Vec<PyObject>>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "antichains is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let result = fnx_algorithms::antichains(&dg.inner);
+        Ok(result
+            .into_iter()
+            .map(|chain| chain.iter().map(|n| gr.py_node_key(py, n)).collect())
+            .collect())
+    } else {
+        unreachable!()
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, start))]
+pub fn immediate_dominators(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    start: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "immediate_dominators is not defined for undirected graphs.",
+        ));
+    }
+    let src = node_key_to_string(py, start)?;
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let result = fnx_algorithms::immediate_dominators(&dg.inner, &src);
+        let dict = pyo3::types::PyDict::new(py);
+        for (node, dom) in &result {
+            dict.set_item(gr.py_node_key(py, node), gr.py_node_key(py, dom))?;
+        }
+        Ok(dict.into_any().unbind())
+    } else {
+        unreachable!()
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, start))]
+pub fn dominance_frontiers(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    start: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "dominance_frontiers is not defined for undirected graphs.",
+        ));
+    }
+    let src = node_key_to_string(py, start)?;
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let result = fnx_algorithms::dominance_frontiers(&dg.inner, &src);
+        let dict = pyo3::types::PyDict::new(py);
+        for (node, frontier) in &result {
+            let fset = pyo3::types::PySet::new(
+                py,
+                frontier.iter().map(|n| gr.py_node_key(py, n)).collect::<Vec<_>>().as_slice(),
+            )?;
+            dict.set_item(gr.py_node_key(py, node), fset)?;
+        }
+        Ok(dict.into_any().unbind())
+    } else {
+        unreachable!()
+    }
+}
+
+// ===========================================================================
 // Registration
 // ===========================================================================
 
@@ -5080,5 +5181,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_negatively_weighted, m)?)?;
     m.add_function(wrap_pyfunction!(is_path, m)?)?;
     m.add_function(wrap_pyfunction!(is_distance_regular, m)?)?;
+    // DAG algorithms — additional
+    m.add_function(wrap_pyfunction!(is_aperiodic, m)?)?;
+    m.add_function(wrap_pyfunction!(antichains, m)?)?;
+    m.add_function(wrap_pyfunction!(immediate_dominators, m)?)?;
+    m.add_function(wrap_pyfunction!(dominance_frontiers, m)?)?;
     Ok(())
 }
