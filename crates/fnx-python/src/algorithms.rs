@@ -4829,6 +4829,48 @@ pub fn is_distance_regular(
 }
 
 // ===========================================================================
+// Traversal algorithms — additional
+// ===========================================================================
+
+#[pyfunction]
+#[pyo3(signature = (g, source))]
+pub fn edge_bfs(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let gr = extract_graph(g)?;
+    let src = node_key_to_string(py, source)?;
+    let result = match &gr {
+        GraphRef::Undirected(pg) => fnx_algorithms::edge_bfs(&pg.inner, &src),
+        GraphRef::Directed { dg, .. } => fnx_algorithms::edge_bfs_directed(&dg.inner, &src),
+    };
+    Ok(result
+        .iter()
+        .map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v)))
+        .collect())
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, source))]
+pub fn edge_dfs(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let gr = extract_graph(g)?;
+    let src = node_key_to_string(py, source)?;
+    let result = match &gr {
+        GraphRef::Undirected(pg) => fnx_algorithms::edge_dfs(&pg.inner, &src),
+        GraphRef::Directed { dg, .. } => fnx_algorithms::edge_dfs_directed(&dg.inner, &src),
+    };
+    Ok(result
+        .iter()
+        .map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v)))
+        .collect())
+}
+
+// ===========================================================================
 // Matching algorithms — additional
 // ===========================================================================
 
@@ -5227,6 +5269,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_negatively_weighted, m)?)?;
     m.add_function(wrap_pyfunction!(is_path, m)?)?;
     m.add_function(wrap_pyfunction!(is_distance_regular, m)?)?;
+    // Traversal algorithms — additional
+    m.add_function(wrap_pyfunction!(edge_bfs, m)?)?;
+    m.add_function(wrap_pyfunction!(edge_dfs, m)?)?;
     // Matching algorithms — additional
     m.add_function(wrap_pyfunction!(is_edge_cover, m)?)?;
     m.add_function(wrap_pyfunction!(max_weight_clique, m)?)?;

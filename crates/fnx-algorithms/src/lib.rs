@@ -12632,6 +12632,135 @@ pub fn is_distance_regular(graph: &Graph) -> bool {
 }
 
 // ===========================================================================
+// Traversal algorithms — additional
+// ===========================================================================
+
+/// BFS traversal yielding edges. Similar to `bfs_edges` but explicitly returns
+/// edges as (u, v) tuples in BFS order.
+#[must_use]
+pub fn edge_bfs(graph: &Graph, source: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(source.to_string());
+    queue.push_back(source.to_string());
+    while let Some(u) = queue.pop_front() {
+        if let Some(neighbors) = graph.neighbors_iter(&u) {
+            for v in neighbors {
+                if !visited.contains(v) {
+                    visited.insert(v.to_string());
+                    result.push((u.clone(), v.to_string()));
+                    queue.push_back(v.to_string());
+                } else {
+                    // Also yield non-tree edges for edge_bfs
+                    result.push((u.clone(), v.to_string()));
+                }
+            }
+        }
+    }
+    result
+}
+
+/// BFS traversal yielding edges on a directed graph.
+#[must_use]
+pub fn edge_bfs_directed(digraph: &DiGraph, source: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(source.to_string());
+    queue.push_back(source.to_string());
+    while let Some(u) = queue.pop_front() {
+        if let Some(succs) = digraph.successors(&u) {
+            for v in &succs {
+                if !visited.contains(*v) {
+                    visited.insert(v.to_string());
+                    queue.push_back(v.to_string());
+                }
+                result.push((u.clone(), v.to_string()));
+            }
+        }
+    }
+    result
+}
+
+/// DFS traversal yielding edges.
+#[must_use]
+pub fn edge_dfs(graph: &Graph, source: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut visited_edges: HashSet<(String, String)> = HashSet::new();
+    let mut visited_nodes: HashSet<String> = HashSet::new();
+    let mut stack: Vec<(String, Option<String>)> = vec![(source.to_string(), None)];
+    visited_nodes.insert(source.to_string());
+
+    while let Some((u, parent)) = stack.pop() {
+        if let Some(p) = &parent {
+            let edge_key = if p < &u {
+                (p.clone(), u.clone())
+            } else {
+                (u.clone(), p.clone())
+            };
+            if visited_edges.insert(edge_key) {
+                result.push((p.clone(), u.clone()));
+            }
+        }
+        if let Some(neighbors) = graph.neighbors_iter(&u) {
+            for v in neighbors {
+                let edge_key = if u.as_str() < v {
+                    (u.clone(), v.to_string())
+                } else {
+                    (v.to_string(), u.clone())
+                };
+                if !visited_edges.contains(&edge_key) {
+                    if visited_nodes.insert(v.to_string()) {
+                        stack.push((v.to_string(), Some(u.clone())));
+                    } else {
+                        // Non-tree edge
+                        if visited_edges.insert(edge_key) {
+                            result.push((u.clone(), v.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+/// DFS traversal yielding edges on a directed graph.
+#[must_use]
+pub fn edge_dfs_directed(digraph: &DiGraph, source: &str) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut visited_edges: HashSet<(String, String)> = HashSet::new();
+    let mut visited_nodes: HashSet<String> = HashSet::new();
+    let mut stack: Vec<(String, Option<String>)> = vec![(source.to_string(), None)];
+    visited_nodes.insert(source.to_string());
+
+    while let Some((u, parent)) = stack.pop() {
+        if let Some(p) = &parent {
+            let edge_key = (p.clone(), u.clone());
+            if visited_edges.insert(edge_key) {
+                result.push((p.clone(), u.clone()));
+            }
+        }
+        if let Some(succs) = digraph.successors(&u) {
+            for v in &succs {
+                let edge_key = (u.clone(), v.to_string());
+                if !visited_edges.contains(&edge_key) {
+                    if visited_nodes.insert(v.to_string()) {
+                        stack.push((v.to_string(), Some(u.clone())));
+                    } else {
+                        if visited_edges.insert(edge_key) {
+                            result.push((u.clone(), v.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+// ===========================================================================
 // Matching algorithms — additional
 // ===========================================================================
 
@@ -13118,6 +13247,9 @@ mod tests {
         is_weighted, is_negatively_weighted, is_path_graph,
         non_edges, is_distance_regular,
         // DAG algorithms — additional
+        // Matching — additional
+        // Traversal — additional
+        edge_bfs, edge_bfs_directed, edge_dfs, edge_dfs_directed,
         // Matching — additional
         is_edge_cover, max_weight_clique,
         // DAG — additional
@@ -21081,5 +21213,49 @@ mod tests {
         let (clique, weight) = max_weight_clique(&g, "weight");
         assert!(clique.is_empty());
         assert!((weight - 0.0).abs() < 1e-9);
+    }
+
+    // -----------------------------------------------------------------------
+    // Traversal — additional
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_edge_bfs_path() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let edges = edge_bfs(&g, "a");
+        // Should find tree edges (a,b) and (b,c)
+        assert!(edges.contains(&("a".to_string(), "b".to_string())));
+        assert!(edges.contains(&("b".to_string(), "c".to_string())));
+    }
+
+    #[test]
+    fn test_edge_bfs_directed() {
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let edges = edge_bfs_directed(&g, "a");
+        assert!(edges.contains(&("a".to_string(), "b".to_string())));
+        assert!(edges.contains(&("b".to_string(), "c".to_string())));
+    }
+
+    #[test]
+    fn test_edge_dfs_path() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let edges = edge_dfs(&g, "a");
+        assert!(!edges.is_empty());
+    }
+
+    #[test]
+    fn test_edge_dfs_directed() {
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let edges = edge_dfs_directed(&g, "a");
+        assert!(edges.contains(&("a".to_string(), "b".to_string())));
+        assert!(edges.contains(&("b".to_string(), "c".to_string())));
     }
 }

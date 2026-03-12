@@ -401,6 +401,12 @@ from franken_networkx._fnx import (
     is_distance_regular,
 )
 
+# Algorithm functions — traversal additional
+from franken_networkx._fnx import (
+    edge_bfs,
+    edge_dfs,
+)
+
 # Algorithm functions — matching additional
 from franken_networkx._fnx import (
     is_edge_cover,
@@ -1276,6 +1282,9 @@ __all__ = [
     "is_negatively_weighted",
     "is_path",
     "is_distance_regular",
+    # Algorithms — traversal additional
+    "edge_bfs",
+    "edge_dfs",
     # Algorithms — matching additional
     "is_edge_cover",
     "max_weight_clique",

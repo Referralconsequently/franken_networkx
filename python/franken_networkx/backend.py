@@ -233,6 +233,9 @@ _SUPPORTED_ALGORITHMS = {
     "is_distance_regular": fnx.is_distance_regular,
     # DAG algorithms — additional
     "is_aperiodic": fnx.is_aperiodic,
+    # Traversal algorithms — additional
+    "edge_bfs": fnx.edge_bfs,
+    "edge_dfs": fnx.edge_dfs,
     # Matching algorithms — additional
     "is_edge_cover": fnx.is_edge_cover,
     "max_weight_clique": fnx.max_weight_clique,
