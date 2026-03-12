@@ -408,6 +408,17 @@ from franken_networkx._fnx import (
     path_weight,
 )
 
+# Additional centrality algorithms
+from franken_networkx._fnx import (
+    in_degree_centrality,
+    out_degree_centrality,
+    local_reaching_centrality,
+    global_reaching_centrality,
+    group_degree_centrality,
+    group_in_degree_centrality,
+    group_out_degree_centrality,
+)
+
 # Component algorithms
 from franken_networkx._fnx import (
     node_connected_component,
@@ -1243,6 +1254,14 @@ __all__ = [
     "negative_edge_cycle",
     "predecessor",
     "path_weight",
+    # Algorithms — additional centrality
+    "in_degree_centrality",
+    "out_degree_centrality",
+    "local_reaching_centrality",
+    "global_reaching_centrality",
+    "group_degree_centrality",
+    "group_in_degree_centrality",
+    "group_out_degree_centrality",
     # Algorithms — component
     "node_connected_component",
     "is_biconnected",

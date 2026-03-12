@@ -238,6 +238,14 @@ _SUPPORTED_ALGORITHMS = {
     "negative_edge_cycle": fnx.negative_edge_cycle,
     "predecessor": fnx.predecessor,
     "path_weight": fnx.path_weight,
+    # Additional centrality
+    "in_degree_centrality": fnx.in_degree_centrality,
+    "out_degree_centrality": fnx.out_degree_centrality,
+    "local_reaching_centrality": fnx.local_reaching_centrality,
+    "global_reaching_centrality": fnx.global_reaching_centrality,
+    "group_degree_centrality": fnx.group_degree_centrality,
+    "group_in_degree_centrality": fnx.group_in_degree_centrality,
+    "group_out_degree_centrality": fnx.group_out_degree_centrality,
     # Component algorithms
     "node_connected_component": fnx.node_connected_component,
     "is_biconnected": fnx.is_biconnected,

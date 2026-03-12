@@ -4335,6 +4335,155 @@ fn path_weight(
 }
 
 // ===========================================================================
+// Additional centrality algorithms
+// ===========================================================================
+
+/// Return the in-degree centrality for directed graph nodes.
+#[pyfunction]
+pub fn in_degree_centrality(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "in_degree_centrality is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let scores = fnx_algorithms::in_degree_centrality(&dg.inner);
+        centrality_to_dict(py, &gr, &scores)
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the out-degree centrality for directed graph nodes.
+#[pyfunction]
+pub fn out_degree_centrality(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "out_degree_centrality is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let scores = fnx_algorithms::out_degree_centrality(&dg.inner);
+        centrality_to_dict(py, &gr, &scores)
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the local reaching centrality of a node.
+#[pyfunction]
+pub fn local_reaching_centrality(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    v: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    let node = node_key_to_string(py, v)?;
+    validate_node(&gr, &node, v)?;
+    match &gr {
+        GraphRef::Undirected(pg) => {
+            Ok(fnx_algorithms::local_reaching_centrality(&pg.inner, &node))
+        }
+        GraphRef::Directed { dg, .. } => {
+            Ok(fnx_algorithms::local_reaching_centrality_directed(&dg.inner, &node))
+        }
+    }
+}
+
+/// Return the global reaching centrality.
+#[pyfunction]
+pub fn global_reaching_centrality(
+    _py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    match &gr {
+        GraphRef::Undirected(pg) => {
+            Ok(fnx_algorithms::global_reaching_centrality(&pg.inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            Ok(fnx_algorithms::global_reaching_centrality_directed(&dg.inner))
+        }
+    }
+}
+
+/// Return the group degree centrality for a group of nodes.
+#[pyfunction]
+pub fn group_degree_centrality(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    s: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "group_degree_centrality")?;
+    let inner = gr.undirected();
+    let group_iter = s.try_iter()?;
+    let group_strings: Vec<String> = group_iter
+        .map(|item| node_key_to_string(py, &item?))
+        .collect::<PyResult<Vec<String>>>()?;
+    let group_refs: Vec<&str> = group_strings.iter().map(|s| s.as_str()).collect();
+    Ok(fnx_algorithms::group_degree_centrality(inner, &group_refs))
+}
+
+/// Return the group in-degree centrality.
+#[pyfunction]
+pub fn group_in_degree_centrality(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    s: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "group_in_degree_centrality is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let group_iter = s.try_iter()?;
+        let group_strings: Vec<String> = group_iter
+            .map(|item| node_key_to_string(py, &item?))
+            .collect::<PyResult<Vec<String>>>()?;
+        let group_refs: Vec<&str> = group_strings.iter().map(|s| s.as_str()).collect();
+        Ok(fnx_algorithms::group_in_degree_centrality(&dg.inner, &group_refs))
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the group out-degree centrality.
+#[pyfunction]
+pub fn group_out_degree_centrality(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    s: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "group_out_degree_centrality is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let group_iter = s.try_iter()?;
+        let group_strings: Vec<String> = group_iter
+            .map(|item| node_key_to_string(py, &item?))
+            .collect::<PyResult<Vec<String>>>()?;
+        let group_refs: Vec<&str> = group_strings.iter().map(|s| s.as_str()).collect();
+        Ok(fnx_algorithms::group_out_degree_centrality(&dg.inner, &group_refs))
+    } else {
+        unreachable!()
+    }
+}
+
+// ===========================================================================
 // Component algorithms
 // ===========================================================================
 
@@ -4739,6 +4888,14 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(negative_edge_cycle, m)?)?;
     m.add_function(wrap_pyfunction!(predecessor_fn, m)?)?;
     m.add_function(wrap_pyfunction!(path_weight, m)?)?;
+    // Additional centrality algorithms
+    m.add_function(wrap_pyfunction!(in_degree_centrality, m)?)?;
+    m.add_function(wrap_pyfunction!(out_degree_centrality, m)?)?;
+    m.add_function(wrap_pyfunction!(local_reaching_centrality, m)?)?;
+    m.add_function(wrap_pyfunction!(global_reaching_centrality, m)?)?;
+    m.add_function(wrap_pyfunction!(group_degree_centrality, m)?)?;
+    m.add_function(wrap_pyfunction!(group_in_degree_centrality, m)?)?;
+    m.add_function(wrap_pyfunction!(group_out_degree_centrality, m)?)?;
     // Component algorithms
     m.add_function(wrap_pyfunction!(node_connected_component, m)?)?;
     m.add_function(wrap_pyfunction!(is_biconnected, m)?)?;

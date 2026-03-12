@@ -11592,6 +11592,219 @@ pub fn reconstruct_path(
 }
 
 // ===========================================================================
+// Additional centrality algorithms
+// ===========================================================================
+
+/// In-degree centrality for directed graphs.
+/// `c_in(v) = in_degree(v) / (n - 1)` for `n > 1`, else 1.0 if isolated.
+/// Matches `networkx.in_degree_centrality(G)`.
+#[must_use]
+pub fn in_degree_centrality(digraph: &DiGraph) -> Vec<CentralityScore> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let denom = if n <= 1 { 1.0 } else { (n - 1) as f64 };
+    nodes
+        .iter()
+        .map(|&node| {
+            let in_deg = digraph
+                .predecessors(node)
+                .map(|it| it.len())
+                .unwrap_or(0);
+            CentralityScore {
+                node: node.to_owned(),
+                score: in_deg as f64 / denom,
+            }
+        })
+        .collect()
+}
+
+/// Out-degree centrality for directed graphs.
+/// `c_out(v) = out_degree(v) / (n - 1)` for `n > 1`, else 1.0 if isolated.
+/// Matches `networkx.out_degree_centrality(G)`.
+#[must_use]
+pub fn out_degree_centrality(digraph: &DiGraph) -> Vec<CentralityScore> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let denom = if n <= 1 { 1.0 } else { (n - 1) as f64 };
+    nodes
+        .iter()
+        .map(|&node| {
+            let out_deg = digraph
+                .successors(node)
+                .map(|it| it.len())
+                .unwrap_or(0);
+            CentralityScore {
+                node: node.to_owned(),
+                score: out_deg as f64 / denom,
+            }
+        })
+        .collect()
+}
+
+/// Local reaching centrality for a given node.
+/// `C_L(v) = (|R(v)| / (n - 1))` where `R(v)` is the set of nodes reachable from `v`.
+/// Matches `networkx.local_reaching_centrality(G, v)`.
+#[must_use]
+pub fn local_reaching_centrality_directed(digraph: &DiGraph, node: &str) -> f64 {
+    let n = digraph.node_count();
+    if n <= 1 || !digraph.has_node(node) {
+        return 0.0;
+    }
+    // BFS from node counting reachable nodes
+    let mut visited = HashSet::<&str>::new();
+    let mut queue = VecDeque::new();
+    visited.insert(node);
+    queue.push_back(node);
+    while let Some(current) = queue.pop_front() {
+        if let Some(succs) = digraph.successors(current) {
+            for s in succs {
+                if visited.insert(s) {
+                    queue.push_back(s);
+                }
+            }
+        }
+    }
+    let reachable = visited.len() - 1; // exclude node itself
+    reachable as f64 / (n - 1) as f64
+}
+
+/// Local reaching centrality for undirected graph.
+#[must_use]
+pub fn local_reaching_centrality(graph: &Graph, node: &str) -> f64 {
+    let n = graph.node_count();
+    if n <= 1 || !graph.has_node(node) {
+        return 0.0;
+    }
+    let mut visited = HashSet::<&str>::new();
+    let mut queue = VecDeque::new();
+    visited.insert(node);
+    queue.push_back(node);
+    while let Some(current) = queue.pop_front() {
+        if let Some(neighbors) = graph.neighbors_iter(current) {
+            for nbr in neighbors {
+                if visited.insert(nbr) {
+                    queue.push_back(nbr);
+                }
+            }
+        }
+    }
+    let reachable = visited.len() - 1;
+    reachable as f64 / (n - 1) as f64
+}
+
+/// Global reaching centrality.
+/// `C_G = sum(C_max - C_L(v)) / (n - 1)` where `C_max = max(C_L(v))`.
+/// Matches `networkx.global_reaching_centrality(G)`.
+#[must_use]
+pub fn global_reaching_centrality_directed(digraph: &DiGraph) -> f64 {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return 0.0;
+    }
+    let local_vals: Vec<f64> = nodes
+        .iter()
+        .map(|&node| local_reaching_centrality_directed(digraph, node))
+        .collect();
+    let c_max = local_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let sum_diff: f64 = local_vals.iter().map(|c| c_max - c).sum();
+    sum_diff / (n - 1) as f64
+}
+
+/// Global reaching centrality for undirected graphs.
+#[must_use]
+pub fn global_reaching_centrality(graph: &Graph) -> f64 {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return 0.0;
+    }
+    let local_vals: Vec<f64> = nodes
+        .iter()
+        .map(|&node| local_reaching_centrality(graph, node))
+        .collect();
+    let c_max = local_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let sum_diff: f64 = local_vals.iter().map(|c| c_max - c).sum();
+    sum_diff / (n - 1) as f64
+}
+
+/// Group degree centrality.
+/// `C_g(S) = |N(S) \ S| / (n - |S|)` where `N(S)` is the set of neighbors of `S`.
+/// Matches `networkx.group_degree_centrality(G, S)`.
+#[must_use]
+pub fn group_degree_centrality(graph: &Graph, group: &[&str]) -> f64 {
+    let n = graph.node_count();
+    let s_len = group.len();
+    if n == 0 || s_len >= n {
+        return 0.0;
+    }
+    let group_set: HashSet<&str> = group.iter().copied().collect();
+    let mut neighbors_outside = HashSet::new();
+    for &node in group {
+        if let Some(neighbors) = graph.neighbors_iter(node) {
+            for nbr in neighbors {
+                if !group_set.contains(nbr) {
+                    neighbors_outside.insert(nbr);
+                }
+            }
+        }
+    }
+    neighbors_outside.len() as f64 / (n - s_len) as f64
+}
+
+/// Group in-degree centrality for directed graphs.
+/// `C_gin(S) = |{v : v->s for some s in S, v not in S}| / (n - |S|)`
+#[must_use]
+pub fn group_in_degree_centrality(digraph: &DiGraph, group: &[&str]) -> f64 {
+    let n = digraph.node_count();
+    let s_len = group.len();
+    if n == 0 || s_len >= n {
+        return 0.0;
+    }
+    let group_set: HashSet<&str> = group.iter().copied().collect();
+    let mut predecessors_outside = HashSet::new();
+    for &node in group {
+        if let Some(preds) = digraph.predecessors(node) {
+            for p in preds {
+                if !group_set.contains(p) {
+                    predecessors_outside.insert(p);
+                }
+            }
+        }
+    }
+    predecessors_outside.len() as f64 / (n - s_len) as f64
+}
+
+/// Group out-degree centrality for directed graphs.
+/// `C_gout(S) = |{v : s->v for some s in S, v not in S}| / (n - |S|)`
+#[must_use]
+pub fn group_out_degree_centrality(digraph: &DiGraph, group: &[&str]) -> f64 {
+    let n = digraph.node_count();
+    let s_len = group.len();
+    if n == 0 || s_len >= n {
+        return 0.0;
+    }
+    let group_set: HashSet<&str> = group.iter().copied().collect();
+    let mut successors_outside = HashSet::new();
+    for &node in group {
+        if let Some(succs) = digraph.successors(node) {
+            for s in succs {
+                if !group_set.contains(s) {
+                    successors_outside.insert(s);
+                }
+            }
+        }
+    }
+    successors_outside.len() as f64 / (n - s_len) as f64
+}
+
+// ===========================================================================
 // Additional component algorithms
 // ===========================================================================
 
@@ -12058,6 +12271,11 @@ mod tests {
         is_arborescence, is_branching,
         // Cycle detection
         simple_cycles, find_cycle_directed, find_cycle_undirected,
+        // Additional centrality
+        in_degree_centrality, out_degree_centrality,
+        local_reaching_centrality, local_reaching_centrality_directed,
+        global_reaching_centrality, global_reaching_centrality_directed,
+        group_degree_centrality, group_in_degree_centrality, group_out_degree_centrality,
         // Component algorithms
         node_connected_component, is_biconnected, biconnected_components, biconnected_component_edges,
         is_semiconnected, kosaraju_strongly_connected_components,
@@ -19471,5 +19689,149 @@ mod tests {
     fn test_is_attracting_component_empty() {
         let dg = DiGraph::strict();
         assert!(!is_attracting_component(&dg, &[]));
+    }
+
+    // -----------------------------------------------------------------------
+    // in_degree_centrality / out_degree_centrality
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_in_degree_centrality_chain() {
+        // a->b->c: in-degrees are 0, 1, 1
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        let scores = in_degree_centrality(&dg);
+        let map: std::collections::HashMap<&str, f64> = scores.iter().map(|s| (s.node.as_str(), s.score)).collect();
+        assert!((map["a"] - 0.0).abs() < 1e-10);
+        assert!((map["b"] - 0.5).abs() < 1e-10);
+        assert!((map["c"] - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_out_degree_centrality_chain() {
+        // a->b->c: out-degrees are 1, 1, 0
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        let scores = out_degree_centrality(&dg);
+        let map: std::collections::HashMap<&str, f64> = scores.iter().map(|s| (s.node.as_str(), s.score)).collect();
+        assert!((map["a"] - 0.5).abs() < 1e-10);
+        assert!((map["b"] - 0.5).abs() < 1e-10);
+        assert!((map["c"] - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_in_degree_centrality_empty() {
+        let dg = DiGraph::strict();
+        assert!(in_degree_centrality(&dg).is_empty());
+    }
+
+    #[test]
+    fn test_in_out_degree_centrality_single() {
+        let mut dg = DiGraph::strict();
+        let _ = dg.add_node("x");
+        let in_scores = in_degree_centrality(&dg);
+        let out_scores = out_degree_centrality(&dg);
+        assert_eq!(in_scores.len(), 1);
+        assert!((in_scores[0].score - 0.0).abs() < 1e-10);
+        assert!((out_scores[0].score - 0.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // local_reaching_centrality / global_reaching_centrality
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_local_reaching_centrality_connected() {
+        // Fully connected triangle: each node can reach the other 2
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!((local_reaching_centrality(&g, "a") - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_local_reaching_centrality_disconnected() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        g.add_node("c");
+        // a can reach b but not c
+        assert!((local_reaching_centrality(&g, "a") - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_local_reaching_centrality_directed_chain() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        // a can reach b and c
+        assert!((local_reaching_centrality_directed(&dg, "a") - 1.0).abs() < 1e-10);
+        // c can reach nobody
+        assert!((local_reaching_centrality_directed(&dg, "c") - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_global_reaching_centrality_connected() {
+        // All nodes fully reachable: GRC = 0
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!((global_reaching_centrality(&g) - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_global_reaching_centrality_directed_chain() {
+        // a->b->c: local reaching = [1.0, 0.5, 0.0], max=1.0
+        // GRC = ((1.0-1.0) + (1.0-0.5) + (1.0-0.0)) / 2 = 1.5/2 = 0.75
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        assert!((global_reaching_centrality_directed(&dg) - 0.75).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // group_degree_centrality / group_in_degree_centrality / group_out_degree_centrality
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_group_degree_centrality_triangle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        // Group {a}: neighbors outside = {b, c}, non-group = 2, so 2/2 = 1.0
+        assert!((group_degree_centrality(&g, &["a"]) - 1.0).abs() < 1e-10);
+        // Group {a, b}: neighbors outside = {c}, non-group = 1, so 1/1 = 1.0
+        assert!((group_degree_centrality(&g, &["a", "b"]) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_group_degree_centrality_disconnected() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        g.add_node("c");
+        // Group {a}: neighbors outside = {b}, non-group = 2, so 1/2 = 0.5
+        assert!((group_degree_centrality(&g, &["a"]) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_group_in_degree_centrality() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("c", "b").unwrap();
+        // Group {b}: predecessors outside = {a, c}, non-group = 2, so 2/2 = 1.0
+        assert!((group_in_degree_centrality(&dg, &["b"]) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_group_out_degree_centrality() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("a", "c").unwrap();
+        // Group {a}: successors outside = {b, c}, non-group = 2, so 2/2 = 1.0
+        assert!((group_out_degree_centrality(&dg, &["a"]) - 1.0).abs() < 1e-10);
     }
 }
