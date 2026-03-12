@@ -6838,6 +6838,126 @@ pub fn descendants(digraph: &DiGraph, node: &str) -> HashSet<String> {
 }
 
 // ===========================================================================
+// DAG — Longest Path & Lexicographic Topological Sort
+// ===========================================================================
+
+/// Return the longest path in a DAG.
+///
+/// Uses dynamic programming on topological order: for each node, compute the
+/// longest path ending at that node. Matches `networkx.dag_longest_path(G)`.
+///
+/// Returns `None` if the graph has a cycle.
+#[must_use]
+pub fn dag_longest_path(digraph: &DiGraph) -> Option<Vec<String>> {
+    let topo = topological_sort(digraph)?;
+    let order = &topo.order;
+    if order.is_empty() {
+        return Some(Vec::new());
+    }
+
+    // dist[node] = length of longest path ending at node
+    let mut dist: HashMap<&str, usize> = HashMap::with_capacity(order.len());
+    let mut pred: HashMap<&str, Option<&str>> = HashMap::with_capacity(order.len());
+
+    for node in order {
+        dist.insert(node.as_str(), 0);
+        pred.insert(node.as_str(), None);
+    }
+
+    for u in order {
+        if let Some(succs) = digraph.successors(u) {
+            for v in succs {
+                let new_dist = dist[u.as_str()] + 1;
+                if new_dist > dist[v] {
+                    dist.insert(v, new_dist);
+                    pred.insert(v, Some(u.as_str()));
+                }
+            }
+        }
+    }
+
+    // Find the node with maximum distance
+    let mut best_node = order[0].as_str();
+    let mut best_dist = 0;
+    for node in order {
+        let d = dist[node.as_str()];
+        if d > best_dist {
+            best_dist = d;
+            best_node = node.as_str();
+        }
+    }
+
+    // Reconstruct path by following predecessors
+    let mut path = vec![best_node.to_owned()];
+    let mut current = best_node;
+    while let Some(Some(p)) = pred.get(current) {
+        path.push(p.to_string());
+        current = p;
+    }
+    path.reverse();
+    Some(path)
+}
+
+/// Return the length of the longest path in a DAG.
+///
+/// Matches `networkx.dag_longest_path_length(G)`.
+/// Returns `None` if the graph has a cycle.
+#[must_use]
+pub fn dag_longest_path_length(digraph: &DiGraph) -> Option<usize> {
+    dag_longest_path(digraph).map(|path| if path.is_empty() { 0 } else { path.len() - 1 })
+}
+
+/// Return a topological ordering of nodes, breaking ties lexicographically.
+///
+/// Uses a BinaryHeap (min-heap via Reverse) to always pick the lexicographically
+/// smallest available node. Matches `networkx.lexicographic_topological_sort(G)`.
+///
+/// Returns `None` if the graph has a cycle.
+#[must_use]
+pub fn lexicographic_topological_sort(digraph: &DiGraph) -> Option<Vec<String>> {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    let mut in_degree: HashMap<&str, usize> = HashMap::with_capacity(n);
+    for &node in &nodes {
+        in_degree.insert(node, digraph.in_degree(node));
+    }
+
+    // Min-heap for lexicographic ordering
+    let mut heap: BinaryHeap<Reverse<&str>> = BinaryHeap::new();
+    for (&node, &deg) in &in_degree {
+        if deg == 0 {
+            heap.push(Reverse(node));
+        }
+    }
+
+    let mut result: Vec<String> = Vec::with_capacity(n);
+
+    while let Some(Reverse(node)) = heap.pop() {
+        result.push(node.to_owned());
+        if let Some(succs) = digraph.successors(node) {
+            for succ in succs {
+                if let Some(deg) = in_degree.get_mut(succ) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        heap.push(Reverse(succ));
+                    }
+                }
+            }
+        }
+    }
+
+    if result.len() != n {
+        return None; // cycle detected
+    }
+
+    Some(result)
+}
+
+// ===========================================================================
 // All shortest paths (unweighted BFS)
 // ===========================================================================
 
@@ -7158,7 +7278,7 @@ pub fn complement(graph: &Graph) -> Graph {
 #[must_use]
 pub fn complement_directed(digraph: &DiGraph) -> DiGraph {
     let nodes: Vec<&str> = digraph.nodes_ordered().into_iter().collect();
-    let mut result = DiGraph::strict();
+    let mut result = DiGraph::new(digraph.mode());
 
     for &node in &nodes {
         result.add_node(node);
@@ -7175,29 +7295,313 @@ pub fn complement_directed(digraph: &DiGraph) -> DiGraph {
     result
 }
 
+// ===========================================================================
+// Reciprocity
+// ===========================================================================
+
+/// Compute the overall reciprocity of a directed graph.
+///
+/// Returns the ratio of reciprocated edges to total edges.
+/// If there are no edges, returns 0.0.
+/// Matches `networkx.overall_reciprocity(G)`.
+#[must_use]
+pub fn overall_reciprocity(digraph: &DiGraph) -> f64 {
+    let mut total_edges = 0usize;
+    let mut reciprocated = 0usize;
+
+    for node in digraph.nodes_ordered() {
+        if let Some(succs) = digraph.successors(node) {
+            for succ in succs {
+                total_edges += 1;
+                if digraph.has_edge(succ, node) {
+                    reciprocated += 1;
+                }
+            }
+        }
+    }
+
+    if total_edges == 0 {
+        0.0
+    } else {
+        reciprocated as f64 / total_edges as f64
+    }
+}
+
+/// Compute the reciprocity for each node in a directed graph.
+///
+/// For each node, reciprocity = (reciprocated edges incident to node) / (total edges incident to node).
+/// Returns a map from node to reciprocity value.
+/// Matches `networkx.reciprocity(G, nodes)`.
+#[must_use]
+pub fn reciprocity(digraph: &DiGraph, nodes: &[&str]) -> HashMap<String, f64> {
+    let mut result = HashMap::with_capacity(nodes.len());
+
+    for &node in nodes {
+        let mut total = 0usize;
+        let mut reciprocated = 0usize;
+
+        // Count outgoing edges
+        if let Some(succs) = digraph.successors(node) {
+            for succ in succs {
+                total += 1;
+                if digraph.has_edge(succ, node) {
+                    reciprocated += 1;
+                }
+            }
+        }
+
+        // Count incoming edges (that are not already counted as reciprocated)
+        if let Some(preds) = digraph.predecessors(node) {
+            for pred in preds {
+                total += 1;
+                if digraph.has_edge(node, pred) {
+                    reciprocated += 1;
+                }
+            }
+        }
+
+        let r = if total == 0 {
+            0.0
+        } else {
+            reciprocated as f64 / total as f64
+        };
+        result.insert(node.to_owned(), r);
+    }
+
+    result
+}
+
+// ===========================================================================
+// Wiener Index
+// ===========================================================================
+
+/// Compute the Wiener index of a connected graph.
+///
+/// The Wiener index is the sum of the shortest-path distances between all
+/// pairs of nodes. Returns `None` if the graph is disconnected.
+/// Matches `networkx.wiener_index(G)`.
+#[must_use]
+pub fn wiener_index(graph: &Graph) -> Option<f64> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return Some(0.0);
+    }
+
+    // Check connectivity first
+    let components = connected_components(graph);
+    if components.components.len() > 1 {
+        return None; // disconnected
+    }
+
+    let mut total: f64 = 0.0;
+
+    // BFS from each node, sum distances to nodes with higher index
+    // to avoid double-counting
+    for (i, source) in nodes.iter().enumerate() {
+        // Single-source BFS to get all distances
+        let mut dist: HashMap<&str, usize> = HashMap::new();
+        dist.insert(source, 0);
+        let mut queue: VecDeque<&str> = VecDeque::new();
+        queue.push_back(source);
+
+        while let Some(current) = queue.pop_front() {
+            let d = dist[current];
+            if let Some(nbrs) = graph.neighbors(current) {
+                for nbr in nbrs {
+                    if !dist.contains_key(nbr) {
+                        dist.insert(nbr, d + 1);
+                        queue.push_back(nbr);
+                    }
+                }
+            }
+        }
+
+        // Sum distances to nodes with higher index only (avoid double-counting)
+        for v in &nodes[i + 1..] {
+            if let Some(&d) = dist.get(v as &str) {
+                total += d as f64;
+            }
+        }
+    }
+
+    Some(total)
+}
+
+// ===========================================================================
+// Link Prediction
+// ===========================================================================
+
+/// Return the common neighbors of two nodes in an undirected graph.
+///
+/// Matches `networkx.common_neighbors(G, u, v)`.
+#[must_use]
+pub fn common_neighbors(graph: &Graph, u: &str, v: &str) -> Vec<String> {
+    let u_neighbors: HashSet<&str> = graph
+        .neighbors(u)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let v_neighbors: HashSet<&str> = graph
+        .neighbors(v)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let mut result: Vec<String> = u_neighbors
+        .intersection(&v_neighbors)
+        .map(|&s| s.to_owned())
+        .collect();
+    result.sort_unstable();
+    result
+}
+
+/// Compute the Jaccard coefficient for pairs of nodes.
+///
+/// For each `(u, v)` pair, returns `|common_neighbors(u,v)| / |N(u) ∪ N(v)|`.
+/// If the union is empty, the coefficient is 0.
+/// Matches `networkx.jaccard_coefficient(G, ebunch)`.
+#[must_use]
+pub fn jaccard_coefficient(graph: &Graph, ebunch: &[(String, String)]) -> Vec<(String, String, f64)> {
+    ebunch
+        .iter()
+        .map(|(u, v)| {
+            let u_nbrs: HashSet<&str> = graph
+                .neighbors(u)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let v_nbrs: HashSet<&str> = graph
+                .neighbors(v)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let common = u_nbrs.intersection(&v_nbrs).count();
+            let union = u_nbrs.union(&v_nbrs).count();
+            let score = if union == 0 {
+                0.0
+            } else {
+                common as f64 / union as f64
+            };
+            (u.clone(), v.clone(), score)
+        })
+        .collect()
+}
+
+/// Compute the Adamic-Adar index for pairs of nodes.
+///
+/// For each `(u, v)` pair, returns `Σ_{w ∈ common(u,v)} 1/log(|N(w)|)`.
+/// Matches `networkx.adamic_adar_index(G, ebunch)`.
+#[must_use]
+pub fn adamic_adar_index(graph: &Graph, ebunch: &[(String, String)]) -> Vec<(String, String, f64)> {
+    ebunch
+        .iter()
+        .map(|(u, v)| {
+            let u_nbrs: HashSet<&str> = graph
+                .neighbors(u)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let v_nbrs: HashSet<&str> = graph
+                .neighbors(v)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let score: f64 = u_nbrs
+                .intersection(&v_nbrs)
+                .map(|&w| {
+                    let deg = graph.neighbor_count(w);
+                    if deg > 1 {
+                        1.0 / (deg as f64).ln()
+                    } else {
+                        0.0
+                    }
+                })
+                .sum();
+            (u.clone(), v.clone(), score)
+        })
+        .collect()
+}
+
+/// Compute the preferential attachment score for pairs of nodes.
+///
+/// For each `(u, v)` pair, returns `|N(u)| * |N(v)|`.
+/// Matches `networkx.preferential_attachment(G, ebunch)`.
+#[must_use]
+pub fn preferential_attachment(graph: &Graph, ebunch: &[(String, String)]) -> Vec<(String, String, f64)> {
+    ebunch
+        .iter()
+        .map(|(u, v)| {
+            let u_deg = graph.neighbor_count(u);
+            let v_deg = graph.neighbor_count(v);
+            let score = (u_deg * v_deg) as f64;
+            (u.clone(), v.clone(), score)
+        })
+        .collect()
+}
+
+/// Compute the resource allocation index for pairs of nodes.
+///
+/// For each `(u, v)` pair, returns `Σ_{w ∈ common(u,v)} 1/|N(w)|`.
+/// Matches `networkx.resource_allocation_index(G, ebunch)`.
+#[must_use]
+pub fn resource_allocation_index(graph: &Graph, ebunch: &[(String, String)]) -> Vec<(String, String, f64)> {
+    ebunch
+        .iter()
+        .map(|(u, v)| {
+            let u_nbrs: HashSet<&str> = graph
+                .neighbors(u)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let v_nbrs: HashSet<&str> = graph
+                .neighbors(v)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let score: f64 = u_nbrs
+                .intersection(&v_nbrs)
+                .map(|&w| {
+                    let deg = graph.neighbor_count(w);
+                    if deg > 0 {
+                        1.0 / deg as f64
+                    } else {
+                        0.0
+                    }
+                })
+                .sum();
+            (u.clone(), v.clone(), score)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CGSE_WITNESS_LEDGER_PATH, CGSE_WITNESS_POLICY_SPEC_PATH, CentralityScore,
-        ComplexityWitness, all_shortest_paths, all_shortest_paths_directed,
+        ComplexityWitness, adamic_adar_index, all_shortest_paths, all_shortest_paths_directed,
         all_shortest_paths_weighted, all_simple_paths,
         ancestors, articulation_points, bellman_ford_shortest_paths, betweenness_centrality,
         bfs_edges, bfs_edges_directed, bfs_layers, bfs_layers_directed, bfs_predecessors,
         bfs_successors, bridges, cgse_witness_schema_version, closeness_centrality,
-        clustering_coefficient, complement, complement_directed, connected_components, cycle_basis,
-        degree_centrality, descendants, descendants_at_distance, dfs_edges, dfs_edges_directed,
+        clustering_coefficient, common_neighbors, complement, complement_directed,
+        connected_components, cycle_basis, dag_longest_path, dag_longest_path_length,
+        degree_centrality, descendants, descendants_at_distance,
+        dfs_edges, dfs_edges_directed,
         dfs_postorder_nodes, dfs_postorder_nodes_directed, dfs_predecessors, dfs_preorder_nodes,
         dfs_successors, edge_betweenness_centrality, edge_connectivity_edmonds_karp,
         eigenvector_centrality, eulerian_circuit, eulerian_path,
         global_edge_connectivity_edmonds_karp, global_efficiency,
         global_minimum_edge_cut_edmonds_karp, harmonic_centrality, has_eulerian_path,
         hits_centrality, is_directed_acyclic_graph, is_eulerian, is_matching,
-        is_maximal_matching, is_perfect_matching, is_semieulerian, katz_centrality,
+        is_maximal_matching, is_perfect_matching, is_semieulerian, jaccard_coefficient,
+        katz_centrality, lexicographic_topological_sort,
         local_efficiency, max_flow_edmonds_karp, max_weight_matching, maximal_matching,
         min_edge_cover, min_weight_matching, minimum_cut_edmonds_karp,
         minimum_st_edge_cut_edmonds_karp, multi_source_dijkstra, number_connected_components,
-        pagerank, shortest_path_unweighted, shortest_path_weighted, topological_generations,
-        topological_sort,
+        overall_reciprocity, pagerank, preferential_attachment, reciprocity,
+        resource_allocation_index,
+        shortest_path_unweighted, shortest_path_weighted, topological_generations,
+        topological_sort, wiener_index,
     };
     use fnx_classes::Graph;
     use fnx_classes::digraph::DiGraph;
@@ -11892,5 +12296,336 @@ mod tests {
         assert!(c.has_edge("0", "2"));
         assert!(c.has_edge("2", "0"));
         assert!(c.has_edge("2", "1"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Link Prediction tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn common_neighbors_basic() {
+        // Diamond graph: 0-1, 0-2, 1-3, 2-3
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("1", "3");
+        let _ = g.add_edge("2", "3");
+        // common_neighbors(0, 3) = {1, 2}
+        let cn = common_neighbors(&g, "0", "3");
+        assert_eq!(cn, vec!["1", "2"]);
+        // common_neighbors(0, 1) = {} (no shared neighbors)
+        let cn2 = common_neighbors(&g, "0", "1");
+        // 0 neighbors: {1, 2}, 1 neighbors: {0, 3} — intersection is empty
+        assert!(cn2.is_empty());
+    }
+
+    #[test]
+    fn common_neighbors_triangle() {
+        // Triangle: a-b, b-c, a-c
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "c");
+        // common_neighbors(a, b) = {c}
+        let cn = common_neighbors(&g, "a", "b");
+        assert_eq!(cn, vec!["c"]);
+    }
+
+    #[test]
+    fn jaccard_coefficient_basic() {
+        // Triangle: 0-1, 1-2, 0-2
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("1", "2");
+        let _ = g.add_edge("0", "2");
+        let pairs = vec![("0".to_owned(), "1".to_owned())];
+        let result = jaccard_coefficient(&g, &pairs);
+        assert_eq!(result.len(), 1);
+        // N(0) = {1, 2}, N(1) = {0, 2}, common = {2}, union = {0, 1, 2}
+        // Jaccard = 1/3
+        let (_, _, score) = &result[0];
+        assert!((score - 1.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn jaccard_coefficient_no_common() {
+        // Path: 0-1-2
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("1", "2");
+        let pairs = vec![("0".to_owned(), "2".to_owned())];
+        let result = jaccard_coefficient(&g, &pairs);
+        // N(0) = {1}, N(2) = {1}, common = {1}, union = {1}
+        // Jaccard = 1/1 = 1.0
+        let (_, _, score) = &result[0];
+        assert!((score - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn adamic_adar_index_basic() {
+        // 0-1, 0-2, 1-2, plus 2-3
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("1", "2");
+        let _ = g.add_edge("2", "3");
+        let pairs = vec![("0".to_owned(), "1".to_owned())];
+        let result = adamic_adar_index(&g, &pairs);
+        // N(0) = {1, 2}, N(1) = {0, 2}, common = {2}, deg(2) = 3
+        // AA = 1/ln(3)
+        let (_, _, score) = &result[0];
+        assert!((score - 1.0 / 3.0_f64.ln()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn preferential_attachment_basic() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("1", "2");
+        let pairs = vec![("0".to_owned(), "1".to_owned())];
+        let result = preferential_attachment(&g, &pairs);
+        // deg(0) = 2, deg(1) = 2 => PA = 4.0
+        let (_, _, score) = &result[0];
+        assert!((score - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn resource_allocation_index_basic() {
+        // Same as adamic_adar test
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("1", "2");
+        let _ = g.add_edge("2", "3");
+        let pairs = vec![("0".to_owned(), "1".to_owned())];
+        let result = resource_allocation_index(&g, &pairs);
+        // N(0) = {1, 2}, N(1) = {0, 2}, common = {2}, deg(2) = 3
+        // RA = 1/3
+        let (_, _, score) = &result[0];
+        assert!((score - 1.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn link_prediction_empty_ebunch() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let pairs: Vec<(String, String)> = vec![];
+        assert!(jaccard_coefficient(&g, &pairs).is_empty());
+        assert!(adamic_adar_index(&g, &pairs).is_empty());
+        assert!(preferential_attachment(&g, &pairs).is_empty());
+        assert!(resource_allocation_index(&g, &pairs).is_empty());
+    }
+
+    #[test]
+    fn link_prediction_isolated_nodes() {
+        let mut g = Graph::strict();
+        g.add_node("a");
+        g.add_node("b");
+        let pairs = vec![("a".to_owned(), "b".to_owned())];
+        // No neighbors for either => Jaccard = 0/0 = 0
+        let jc = jaccard_coefficient(&g, &pairs);
+        assert!((jc[0].2 - 0.0).abs() < 1e-10);
+        // PA = 0 * 0 = 0
+        let pa = preferential_attachment(&g, &pairs);
+        assert!((pa[0].2 - 0.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // DAG extras tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dag_longest_path_linear() {
+        // Linear DAG: 0 -> 1 -> 2 -> 3
+        let mut dg = DiGraph::strict();
+        dg.add_edge("0", "1").unwrap();
+        dg.add_edge("1", "2").unwrap();
+        dg.add_edge("2", "3").unwrap();
+        let path = dag_longest_path(&dg).unwrap();
+        assert_eq!(path, vec!["0", "1", "2", "3"]);
+    }
+
+    #[test]
+    fn dag_longest_path_diamond() {
+        // Diamond: 0->1, 0->2, 1->3, 2->3
+        let mut dg = DiGraph::strict();
+        dg.add_edge("0", "1").unwrap();
+        dg.add_edge("0", "2").unwrap();
+        dg.add_edge("1", "3").unwrap();
+        dg.add_edge("2", "3").unwrap();
+        let path = dag_longest_path(&dg).unwrap();
+        // Longest is length 2 (3 nodes), either 0->1->3 or 0->2->3
+        assert_eq!(path.len(), 3);
+        assert_eq!(path[0], "0");
+        assert_eq!(path[2], "3");
+    }
+
+    #[test]
+    fn dag_longest_path_cycle_returns_none() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        assert!(dag_longest_path(&dg).is_none());
+    }
+
+    #[test]
+    fn dag_longest_path_length_basic() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("0", "1").unwrap();
+        dg.add_edge("1", "2").unwrap();
+        dg.add_edge("2", "3").unwrap();
+        assert_eq!(dag_longest_path_length(&dg), Some(3));
+    }
+
+    #[test]
+    fn dag_longest_path_length_single_node() {
+        let mut dg = DiGraph::strict();
+        dg.add_node("0");
+        assert_eq!(dag_longest_path_length(&dg), Some(0));
+    }
+
+    #[test]
+    fn dag_longest_path_empty() {
+        let dg = DiGraph::strict();
+        let path = dag_longest_path(&dg).unwrap();
+        assert!(path.is_empty());
+        assert_eq!(dag_longest_path_length(&dg), Some(0));
+    }
+
+    #[test]
+    fn lexicographic_topological_sort_basic() {
+        // DAG: a->c, b->c
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "c").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        let result = lexicographic_topological_sort(&dg).unwrap();
+        // a and b are both sources; lexicographic order: a, b, c
+        assert_eq!(result, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn lexicographic_topological_sort_cycle_returns_none() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        assert!(lexicographic_topological_sort(&dg).is_none());
+    }
+
+    #[test]
+    fn lexicographic_topological_sort_linear() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("c", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        let result = lexicographic_topological_sort(&dg).unwrap();
+        assert_eq!(result, vec!["c", "b", "a"]);
+    }
+
+    #[test]
+    fn lexicographic_topological_sort_numeric() {
+        // 1->3, 2->3, 1->2
+        let mut dg = DiGraph::strict();
+        dg.add_edge("1", "3").unwrap();
+        dg.add_edge("2", "3").unwrap();
+        dg.add_edge("1", "2").unwrap();
+        let result = lexicographic_topological_sort(&dg).unwrap();
+        assert_eq!(result, vec!["1", "2", "3"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Reciprocity tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overall_reciprocity_fully_reciprocal() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        let r = overall_reciprocity(&dg);
+        assert!((r - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn overall_reciprocity_no_reciprocal() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        let r = overall_reciprocity(&dg);
+        assert!((r - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn overall_reciprocity_partial() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        // 3 edges total, 2 reciprocated (a->b and b->a)
+        let r = overall_reciprocity(&dg);
+        assert!((r - 2.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn overall_reciprocity_empty() {
+        let dg = DiGraph::strict();
+        assert!((overall_reciprocity(&dg) - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn reciprocity_per_node() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        let r = reciprocity(&dg, &["a", "b", "c"]);
+        // a: out={b}, in={b}, total=2, reciprocated=2 -> 1.0
+        assert!((r["a"] - 1.0).abs() < 1e-10);
+        // b: out={a,c}, in={a}, total=3, reciprocated=2 (b->a reciprocated, a->b reciprocated) -> 2/3
+        assert!((r["b"] - 2.0 / 3.0).abs() < 1e-10);
+        // c: out={}, in={b}, total=1, reciprocated=0 -> 0.0
+        assert!((r["c"] - 0.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // Wiener Index tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn wiener_index_path() {
+        // Path: 0-1-2
+        // Distances: d(0,1)=1, d(0,2)=2, d(1,2)=1
+        // Wiener = 1 + 2 + 1 = 4
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("1", "2");
+        let w = wiener_index(&g).unwrap();
+        assert!((w - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn wiener_index_triangle() {
+        // Complete graph K3: 0-1, 1-2, 0-2
+        // All distances = 1, so Wiener = 3
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("1", "2");
+        let _ = g.add_edge("0", "2");
+        let w = wiener_index(&g).unwrap();
+        assert!((w - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn wiener_index_disconnected_returns_none() {
+        let mut g = Graph::strict();
+        g.add_node("a");
+        g.add_node("b");
+        assert!(wiener_index(&g).is_none());
+    }
+
+    #[test]
+    fn wiener_index_single_node() {
+        let mut g = Graph::strict();
+        g.add_node("a");
+        assert!((wiener_index(&g).unwrap() - 0.0).abs() < 1e-10);
     }
 }

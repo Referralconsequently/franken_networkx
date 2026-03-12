@@ -1978,6 +1978,118 @@ pub fn topological_sort(
     }
 }
 
+/// Return a list of generations in topological order.
+///
+/// Each generation is a list of nodes with the same topological depth.
+/// Matches `networkx.topological_generations`.
+#[pyfunction]
+pub fn topological_generations(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Vec<PyObject>>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(NetworkXError::new_err(
+            "Topological generations not defined on undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        match fnx_algorithms::topological_generations(&dg.inner) {
+            Some(result) => {
+                let gens: Vec<Vec<PyObject>> = result
+                    .generations
+                    .iter()
+                    .map(|g| g.iter().map(|n| gr.py_node_key(py, n)).collect())
+                    .collect();
+                Ok(gens)
+            }
+            None => Err(crate::HasACycle::new_err(
+                "Graph contains a cycle, topological generations is not possible.",
+            )),
+        }
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the longest path in a DAG.
+///
+/// Matches `networkx.dag_longest_path(G)`.
+#[pyfunction]
+pub fn dag_longest_path(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(NetworkXError::new_err(
+            "dag_longest_path not defined on undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        match fnx_algorithms::dag_longest_path(&dg.inner) {
+            Some(path) => Ok(path.iter().map(|n| gr.py_node_key(py, n)).collect()),
+            None => Err(crate::HasACycle::new_err(
+                "Graph contains a cycle.",
+            )),
+        }
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the length of the longest path in a DAG.
+///
+/// Matches `networkx.dag_longest_path_length(G)`.
+#[pyfunction]
+pub fn dag_longest_path_length(
+    _py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<usize> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(NetworkXError::new_err(
+            "dag_longest_path_length not defined on undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        match fnx_algorithms::dag_longest_path_length(&dg.inner) {
+            Some(length) => Ok(length),
+            None => Err(crate::HasACycle::new_err(
+                "Graph contains a cycle.",
+            )),
+        }
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return a topological ordering, breaking ties lexicographically.
+///
+/// Matches `networkx.lexicographic_topological_sort(G)`.
+#[pyfunction]
+pub fn lexicographic_topological_sort(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(NetworkXError::new_err(
+            "Lexicographic topological sort not defined on undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        match fnx_algorithms::lexicographic_topological_sort(&dg.inner) {
+            Some(order) => Ok(order.iter().map(|n| gr.py_node_key(py, n)).collect()),
+            None => Err(crate::HasACycle::new_err(
+                "Graph contains a cycle, topological sort is not possible.",
+            )),
+        }
+    } else {
+        unreachable!()
+    }
+}
+
 /// Return True if the directed graph G is a directed acyclic graph (DAG).
 #[pyfunction]
 pub fn is_directed_acyclic_graph(
@@ -2091,6 +2203,11 @@ pub fn all_shortest_paths(
     }
 
     let paths = if gr.is_directed() {
+        if weight.is_some() {
+            return Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                "weighted all_shortest_paths is not yet supported for DiGraph",
+            ));
+        }
         if let GraphRef::Directed { dg, .. } = &gr {
             fnx_algorithms::all_shortest_paths_directed(&dg.inner, &source_key, &target_key)
         } else {
@@ -2150,10 +2267,10 @@ pub fn complement(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
             );
             py_graph.inner.add_node(node);
         }
-        // Add edges
-        for (u, v) in complement_edges(&result) {
-            let _ = py_graph.inner.add_edge(&u, &v);
-            let ek = PyGraph::edge_key(&u, &v);
+        // Add edges from the complement result
+        for edge in result.edges_ordered() {
+            let _ = py_graph.inner.add_edge(&edge.left, &edge.right);
+            let ek = PyGraph::edge_key(&edge.left, &edge.right);
             py_graph
                 .edge_py_attrs
                 .insert(ek, pyo3::types::PyDict::new(py).unbind());
@@ -2173,10 +2290,10 @@ pub fn complement(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
             );
             py_dg.inner.add_node(node);
         }
-        for (u, v) in complement_directed_edges(&result) {
-            let _ = py_dg.inner.add_edge(&u, &v);
+        for edge in result.edges_ordered() {
+            let _ = py_dg.inner.add_edge(&edge.left, &edge.right);
             py_dg.edge_py_attrs.insert(
-                (u, v),
+                (edge.left, edge.right),
                 pyo3::types::PyDict::new(py).unbind(),
             );
         }
@@ -2189,32 +2306,155 @@ pub fn complement(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     }
 }
 
-/// Extract edges from an undirected complement graph as (String, String) pairs.
-fn complement_edges(graph: &fnx_classes::Graph) -> Vec<(String, String)> {
-    let nodes = graph.nodes_ordered();
-    let mut edges = Vec::new();
-    for (i, u) in nodes.iter().enumerate() {
-        for v in &nodes[i + 1..] {
-            if graph.has_edge(u, v) {
-                edges.push((u.to_string(), v.to_string()));
-            }
-        }
-    }
-    edges
+// ===========================================================================
+// Link Prediction
+// ===========================================================================
+
+/// Return the common neighbors of u and v in the graph.
+///
+/// Matches `networkx.common_neighbors(G, u, v)`.
+#[pyfunction]
+pub fn common_neighbors(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    u: &Bound<'_, PyAny>,
+    v: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "common_neighbors")?;
+    let u_key = node_key_to_string(py, u)?;
+    let v_key = node_key_to_string(py, v)?;
+    validate_node(&gr, &u_key, u)?;
+    validate_node(&gr, &v_key, v)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::common_neighbors(inner, &u_key, &v_key));
+    Ok(result.iter().map(|n| gr.py_node_key(py, n)).collect())
 }
 
-/// Extract edges from a directed complement graph as (String, String) pairs.
-fn complement_directed_edges(graph: &fnx_classes::digraph::DiGraph) -> Vec<(String, String)> {
-    let nodes = graph.nodes_ordered();
-    let mut edges = Vec::new();
-    for u in &nodes {
-        if let Some(succs) = graph.successors(u) {
-            for v in succs {
-                edges.push((u.to_string(), v.to_string()));
+/// Helper to extract node pairs (ebunch) from Python.
+/// If ebunch is None, returns all non-edges.
+fn extract_ebunch(
+    py: Python<'_>,
+    gr: &GraphRef<'_>,
+    ebunch: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(String, String)>> {
+    if let Some(eb) = ebunch {
+        let pairs: Vec<(String, String)> = eb
+            .try_iter()?
+            .map(|item| {
+                let item = item?;
+                let pair: &Bound<'_, PyAny> = &item;
+                let iter_result: PyResult<Vec<_>> = pair.try_iter()?.collect();
+                let items = iter_result?;
+                if items.len() != 2 {
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "ebunch must contain 2-tuples",
+                    ));
+                }
+                let u_key = node_key_to_string(py, &items[0])?;
+                let v_key = node_key_to_string(py, &items[1])?;
+                Ok((u_key, v_key))
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(pairs)
+    } else {
+        // Default: all non-edges
+        let inner = gr.undirected();
+        let nodes = inner.nodes_ordered();
+        let mut pairs = Vec::new();
+        for (i, u) in nodes.iter().enumerate() {
+            for v in &nodes[i + 1..] {
+                if !inner.has_edge(u, v) {
+                    pairs.push((u.to_string(), v.to_string()));
+                }
             }
         }
+        Ok(pairs)
     }
-    edges
+}
+
+/// Compute the Jaccard coefficient for all node pairs in ebunch.
+///
+/// Matches `networkx.jaccard_coefficient(G, ebunch)`.
+#[pyfunction]
+#[pyo3(signature = (g, ebunch=None))]
+pub fn jaccard_coefficient(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    ebunch: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, PyObject, f64)>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "jaccard_coefficient")?;
+    let pairs = extract_ebunch(py, &gr, ebunch)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::jaccard_coefficient(inner, &pairs));
+    Ok(result
+        .into_iter()
+        .map(|(u, v, s)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), s))
+        .collect())
+}
+
+/// Compute the Adamic-Adar index for all node pairs in ebunch.
+///
+/// Matches `networkx.adamic_adar_index(G, ebunch)`.
+#[pyfunction]
+#[pyo3(signature = (g, ebunch=None))]
+pub fn adamic_adar_index(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    ebunch: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, PyObject, f64)>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "adamic_adar_index")?;
+    let pairs = extract_ebunch(py, &gr, ebunch)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::adamic_adar_index(inner, &pairs));
+    Ok(result
+        .into_iter()
+        .map(|(u, v, s)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), s))
+        .collect())
+}
+
+/// Compute the preferential attachment score for all node pairs in ebunch.
+///
+/// Matches `networkx.preferential_attachment(G, ebunch)`.
+#[pyfunction]
+#[pyo3(signature = (g, ebunch=None))]
+pub fn preferential_attachment(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    ebunch: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, PyObject, f64)>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "preferential_attachment")?;
+    let pairs = extract_ebunch(py, &gr, ebunch)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::preferential_attachment(inner, &pairs));
+    Ok(result
+        .into_iter()
+        .map(|(u, v, s)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), s))
+        .collect())
+}
+
+/// Compute the resource allocation index for all node pairs in ebunch.
+///
+/// Matches `networkx.resource_allocation_index(G, ebunch)`.
+#[pyfunction]
+#[pyo3(signature = (g, ebunch=None))]
+pub fn resource_allocation_index(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    ebunch: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, PyObject, f64)>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "resource_allocation_index")?;
+    let pairs = extract_ebunch(py, &gr, ebunch)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::resource_allocation_index(inner, &pairs));
+    Ok(result
+        .into_iter()
+        .map(|(u, v, s)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), s))
+        .collect())
 }
 
 // ===========================================================================
@@ -2312,6 +2552,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(dfs_postorder_nodes, m)?)?;
     // DAG algorithms
     m.add_function(wrap_pyfunction!(topological_sort, m)?)?;
+    m.add_function(wrap_pyfunction!(topological_generations, m)?)?;
+    m.add_function(wrap_pyfunction!(dag_longest_path, m)?)?;
+    m.add_function(wrap_pyfunction!(dag_longest_path_length, m)?)?;
+    m.add_function(wrap_pyfunction!(lexicographic_topological_sort, m)?)?;
     m.add_function(wrap_pyfunction!(is_directed_acyclic_graph, m)?)?;
     m.add_function(wrap_pyfunction!(ancestors, m)?)?;
     m.add_function(wrap_pyfunction!(descendants, m)?)?;
@@ -2319,5 +2563,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(all_shortest_paths, m)?)?;
     // Complement
     m.add_function(wrap_pyfunction!(complement, m)?)?;
+    // Link prediction
+    m.add_function(wrap_pyfunction!(common_neighbors, m)?)?;
+    m.add_function(wrap_pyfunction!(jaccard_coefficient, m)?)?;
+    m.add_function(wrap_pyfunction!(adamic_adar_index, m)?)?;
+    m.add_function(wrap_pyfunction!(preferential_attachment, m)?)?;
+    m.add_function(wrap_pyfunction!(resource_allocation_index, m)?)?;
     Ok(())
 }

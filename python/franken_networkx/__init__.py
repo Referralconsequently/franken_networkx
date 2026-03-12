@@ -206,12 +206,25 @@ from franken_networkx._fnx import (
     dfs_tree,
 )
 
+# Algorithm functions — link prediction
+from franken_networkx._fnx import (
+    common_neighbors,
+    jaccard_coefficient,
+    adamic_adar_index,
+    preferential_attachment,
+    resource_allocation_index,
+)
+
 # Algorithm functions — DAG
 from franken_networkx._fnx import (
     ancestors,
+    dag_longest_path,
+    dag_longest_path_length,
     descendants,
     is_directed_acyclic_graph,
+    lexicographic_topological_sort,
     topological_sort,
+    topological_generations,
 )
 
 # Graph generators — classic
@@ -897,6 +910,35 @@ __all__ = [
     # Algorithms — efficiency
     "global_efficiency",
     "local_efficiency",
+    # Algorithms — link prediction
+    "common_neighbors",
+    "jaccard_coefficient",
+    "adamic_adar_index",
+    "preferential_attachment",
+    "resource_allocation_index",
+    # Algorithms — traversal (BFS)
+    "bfs_edges",
+    "bfs_layers",
+    "bfs_predecessors",
+    "bfs_successors",
+    "bfs_tree",
+    "descendants_at_distance",
+    # Algorithms — traversal (DFS)
+    "dfs_edges",
+    "dfs_postorder_nodes",
+    "dfs_predecessors",
+    "dfs_preorder_nodes",
+    "dfs_successors",
+    "dfs_tree",
+    # Algorithms — DAG
+    "ancestors",
+    "dag_longest_path",
+    "dag_longest_path_length",
+    "descendants",
+    "is_directed_acyclic_graph",
+    "lexicographic_topological_sort",
+    "topological_sort",
+    "topological_generations",
     # Generators — classic
     "complete_graph",
     "cycle_graph",
