@@ -45,11 +45,11 @@ nx.shortest_path(G, 0, 99)
 | Connectivity | `is_connected`, `connected_components`, `number_connected_components`, `node_connectivity`, `edge_connectivity`, `minimum_node_cut`, `bridges`, `articulation_points`, `strongly_connected_components`, `number_strongly_connected_components`, `is_strongly_connected`, `condensation`, `weakly_connected_components`, `number_weakly_connected_components`, `is_weakly_connected` |
 | Centrality | `pagerank`, `betweenness_centrality`, `edge_betweenness_centrality`, `closeness_centrality`, `harmonic_centrality`, `eigenvector_centrality`, `degree_centrality`, `katz_centrality`, `hits` |
 | Clustering | `clustering`, `triangles`, `transitivity`, `average_clustering`, `square_clustering` |
-| Matching | `max_weight_matching`, `min_weight_matching`, `maximal_matching`, `min_edge_cover` |
+| Matching | `max_weight_matching`, `min_weight_matching`, `maximal_matching`, `min_edge_cover`, `is_matching`, `is_maximal_matching`, `is_perfect_matching` |
 | Flow | `maximum_flow_value`, `minimum_cut_value` |
-| Trees | `minimum_spanning_tree`, `maximum_spanning_tree`, `is_tree`, `is_forest` |
+| Trees | `minimum_spanning_tree`, `maximum_spanning_tree`, `is_tree`, `is_forest`, `is_arborescence`, `is_branching` |
 | Euler | `eulerian_circuit`, `eulerian_path`, `is_eulerian`, `has_eulerian_path`, `is_semieulerian` |
-| Paths & Cycles | `all_simple_paths`, `cycle_basis` |
+| Paths & Cycles | `all_simple_paths`, `cycle_basis`, `simple_cycles`, `find_cycle`, `is_simple_path` |
 | Operators | `complement`, `union`, `intersection`, `compose`, `difference`, `symmetric_difference` |
 | Bipartite | `is_bipartite`, `bipartite_sets` |
 | Coloring | `greedy_color` |
@@ -65,6 +65,8 @@ nx.shortest_path(G, 0, 99)
 | Planarity | `is_planar` |
 | Approximation | `min_weighted_vertex_cover`, `maximum_independent_set`, `max_clique`, `clique_removal`, `large_clique_size` |
 | Dominating | `dominating_set`, `is_dominating_set` |
+| Isolates | `isolates`, `is_isolate`, `number_of_isolates` |
+| Boundary | `edge_boundary`, `node_boundary` |
 | Other | `core_number`, `voterank`, `find_cliques`, `graph_clique_number`, `number_of_cliques`, `degree_assortativity_coefficient`, `average_neighbor_degree`, `wiener_index`, `non_neighbors`, `is_empty`, `relabel_nodes`, `degree_histogram` |
 | Generators | `path_graph`, `cycle_graph`, `star_graph`, `complete_graph`, `empty_graph`, `gnp_random_graph`, `watts_strogatz_graph`, `barabasi_albert_graph` |
 | I/O | `read_edgelist`, `write_edgelist`, `read_adjlist`, `write_adjlist`, `read_graphml`, `write_graphml`, `node_link_data`, `node_link_graph` |

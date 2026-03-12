@@ -1,0 +1,343 @@
+"""Tests for newly-added Python bindings: tree recognition, isolates,
+boundary, is_simple_path, matching validators, simple_cycles, find_cycle."""
+
+import pytest
+
+import franken_networkx as fnx
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def triangle():
+    G = fnx.Graph()
+    G.add_edge(0, 1)
+    G.add_edge(1, 2)
+    G.add_edge(0, 2)
+    return G
+
+
+@pytest.fixture
+def path4():
+    G = fnx.Graph()
+    G.add_edge(0, 1)
+    G.add_edge(1, 2)
+    G.add_edge(2, 3)
+    return G
+
+
+@pytest.fixture
+def arborescence():
+    """Directed rooted tree: 0 -> 1, 0 -> 2, 1 -> 3."""
+    D = fnx.DiGraph()
+    D.add_edge(0, 1)
+    D.add_edge(0, 2)
+    D.add_edge(1, 3)
+    return D
+
+
+@pytest.fixture
+def directed_cycle():
+    """Directed cycle: 0 -> 1 -> 2 -> 0."""
+    D = fnx.DiGraph()
+    D.add_edge(0, 1)
+    D.add_edge(1, 2)
+    D.add_edge(2, 0)
+    return D
+
+
+# ---------------------------------------------------------------------------
+# is_arborescence
+# ---------------------------------------------------------------------------
+
+
+class TestIsArborescence:
+    def test_arborescence(self, arborescence):
+        assert fnx.is_arborescence(arborescence) is True
+
+    def test_cycle_not_arborescence(self, directed_cycle):
+        assert fnx.is_arborescence(directed_cycle) is False
+
+    def test_undirected_returns_false(self, triangle):
+        assert fnx.is_arborescence(triangle) is False
+
+    def test_empty_digraph(self):
+        D = fnx.DiGraph()
+        assert fnx.is_arborescence(D) is False
+
+    def test_single_node(self):
+        D = fnx.DiGraph()
+        D.add_node(0)
+        assert fnx.is_arborescence(D) is True
+
+    def test_forest_not_arborescence(self):
+        """A forest with two trees is not an arborescence."""
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(2, 3)
+        assert fnx.is_arborescence(D) is False
+
+
+# ---------------------------------------------------------------------------
+# is_branching
+# ---------------------------------------------------------------------------
+
+
+class TestIsBranching:
+    def test_arborescence_is_branching(self, arborescence):
+        assert fnx.is_branching(arborescence) is True
+
+    def test_forest_is_branching(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(2, 3)
+        assert fnx.is_branching(D) is True
+
+    def test_cycle_not_branching(self, directed_cycle):
+        assert fnx.is_branching(directed_cycle) is False
+
+    def test_undirected_returns_false(self, triangle):
+        assert fnx.is_branching(triangle) is False
+
+    def test_empty_digraph(self):
+        D = fnx.DiGraph()
+        assert fnx.is_branching(D) is True
+
+
+# ---------------------------------------------------------------------------
+# is_isolate, isolates, number_of_isolates
+# ---------------------------------------------------------------------------
+
+
+class TestIsolates:
+    def test_is_isolate_true(self):
+        G = fnx.Graph()
+        G.add_node(42)
+        assert fnx.is_isolate(G, 42) is True
+
+    def test_is_isolate_false(self):
+        G = fnx.Graph()
+        G.add_edge(0, 1)
+        assert fnx.is_isolate(G, 0) is False
+
+    def test_isolates_list(self):
+        G = fnx.Graph()
+        G.add_node(0)
+        G.add_node(1)
+        G.add_edge(2, 3)
+        iso = list(fnx.isolates(G))
+        assert set(iso) == {0, 1}
+
+    def test_number_of_isolates(self):
+        G = fnx.Graph()
+        G.add_node(0)
+        G.add_node(1)
+        G.add_edge(2, 3)
+        assert fnx.number_of_isolates(G) == 2
+
+    def test_no_isolates(self, triangle):
+        assert fnx.number_of_isolates(triangle) == 0
+        assert list(fnx.isolates(triangle)) == []
+
+    def test_directed_isolates(self):
+        D = fnx.DiGraph()
+        D.add_node(0)
+        D.add_edge(1, 2)
+        assert fnx.is_isolate(D, 0) is True
+        assert fnx.is_isolate(D, 1) is False
+        assert fnx.number_of_isolates(D) == 1
+
+    def test_is_isolate_nonexistent_raises(self):
+        G = fnx.Graph()
+        G.add_node(0)
+        with pytest.raises(fnx.NodeNotFound):
+            fnx.is_isolate(G, 99)
+
+
+# ---------------------------------------------------------------------------
+# edge_boundary, node_boundary
+# ---------------------------------------------------------------------------
+
+
+class TestBoundary:
+    def test_edge_boundary(self, path4):
+        edges = fnx.edge_boundary(path4, [0, 1])
+        # Edges crossing from {0,1} to {2,3}: should be (1,2)
+        assert len(edges) == 1
+        assert set(edges[0]) == {1, 2}
+
+    def test_edge_boundary_with_nbunch2(self, path4):
+        edges = fnx.edge_boundary(path4, [0, 1], [2])
+        assert len(edges) == 1
+        assert set(edges[0]) == {1, 2}
+
+    def test_edge_boundary_empty(self, triangle):
+        edges = fnx.edge_boundary(triangle, [0, 1, 2])
+        assert len(edges) == 0
+
+    def test_node_boundary(self, path4):
+        nodes = fnx.node_boundary(path4, [0, 1])
+        assert set(nodes) == {2}
+
+    def test_node_boundary_with_nbunch2(self, path4):
+        nodes = fnx.node_boundary(path4, [0], [1, 2, 3])
+        assert set(nodes) == {1}
+
+    def test_node_boundary_empty(self, triangle):
+        nodes = fnx.node_boundary(triangle, [0, 1, 2])
+        assert len(nodes) == 0
+
+
+# ---------------------------------------------------------------------------
+# is_simple_path
+# ---------------------------------------------------------------------------
+
+
+class TestIsSimplePath:
+    def test_valid_path(self, path4):
+        assert fnx.is_simple_path(path4, [0, 1, 2, 3]) is True
+
+    def test_partial_path(self, path4):
+        assert fnx.is_simple_path(path4, [0, 1, 2]) is True
+
+    def test_not_a_path(self, path4):
+        assert fnx.is_simple_path(path4, [0, 2]) is False
+
+    def test_empty_path(self, path4):
+        assert fnx.is_simple_path(path4, []) is False
+
+    def test_single_node(self, path4):
+        assert fnx.is_simple_path(path4, [0]) is True
+
+    def test_repeated_node(self, triangle):
+        assert fnx.is_simple_path(triangle, [0, 1, 0]) is False
+
+    def test_directed(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(1, 2)
+        assert fnx.is_simple_path(D, [0, 1, 2]) is True
+        assert fnx.is_simple_path(D, [2, 1, 0]) is False  # wrong direction
+
+
+# ---------------------------------------------------------------------------
+# is_matching, is_maximal_matching, is_perfect_matching
+# ---------------------------------------------------------------------------
+
+
+class TestMatchingValidators:
+    def test_is_matching_valid(self):
+        G = fnx.Graph()
+        G.add_edge(0, 1)
+        G.add_edge(2, 3)
+        assert fnx.is_matching(G, [(0, 1)]) is True
+
+    def test_is_matching_invalid_overlap(self):
+        G = fnx.Graph()
+        G.add_edge(0, 1)
+        G.add_edge(1, 2)
+        # Both edges share node 1
+        assert fnx.is_matching(G, [(0, 1), (1, 2)]) is False
+
+    def test_is_matching_empty(self, triangle):
+        assert fnx.is_matching(triangle, []) is True
+
+    def test_is_maximal_matching(self):
+        G = fnx.Graph()
+        G.add_edge(0, 1)
+        G.add_edge(2, 3)
+        # {(0,1)} alone is not maximal — could add (2,3)
+        assert fnx.is_maximal_matching(G, [(0, 1)]) is False
+        assert fnx.is_maximal_matching(G, [(0, 1), (2, 3)]) is True
+
+    def test_is_perfect_matching(self):
+        G = fnx.Graph()
+        G.add_edge(0, 1)
+        G.add_edge(2, 3)
+        assert fnx.is_perfect_matching(G, [(0, 1), (2, 3)]) is True
+        assert fnx.is_perfect_matching(G, [(0, 1)]) is False
+
+    def test_is_perfect_matching_odd_nodes(self):
+        G = fnx.Graph()
+        G.add_edge(0, 1)
+        G.add_edge(1, 2)
+        # 3 nodes — can't have a perfect matching
+        assert fnx.is_perfect_matching(G, [(0, 1)]) is False
+
+
+# ---------------------------------------------------------------------------
+# simple_cycles
+# ---------------------------------------------------------------------------
+
+
+class TestSimpleCycles:
+    def test_triangle_cycle(self, directed_cycle):
+        cycles = fnx.simple_cycles(directed_cycle)
+        assert len(cycles) == 1
+        assert set(cycles[0]) == {0, 1, 2}
+
+    def test_no_cycles(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(1, 2)
+        cycles = fnx.simple_cycles(D)
+        assert len(cycles) == 0
+
+    def test_self_loop(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 0)
+        cycles = fnx.simple_cycles(D)
+        assert len(cycles) == 1
+
+    def test_two_cycles(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(1, 0)
+        D.add_edge(1, 2)
+        D.add_edge(2, 1)
+        cycles = fnx.simple_cycles(D)
+        assert len(cycles) == 2
+
+    def test_undirected_raises(self, triangle):
+        with pytest.raises(fnx.NetworkXError):
+            fnx.simple_cycles(triangle)
+
+
+# ---------------------------------------------------------------------------
+# find_cycle
+# ---------------------------------------------------------------------------
+
+
+class TestFindCycle:
+    def test_finds_cycle_undirected(self, triangle):
+        cycle = fnx.find_cycle(triangle)
+        assert len(cycle) >= 3
+        # Each element should be an edge tuple
+        for u, v in cycle:
+            assert triangle.has_edge(u, v)
+
+    def test_finds_cycle_directed(self, directed_cycle):
+        cycle = fnx.find_cycle(directed_cycle)
+        assert len(cycle) >= 2
+
+    def test_no_cycle_raises(self):
+        G = fnx.Graph()
+        G.add_edge(0, 1)
+        G.add_edge(1, 2)
+        with pytest.raises(fnx.NetworkXNoCycle):
+            fnx.find_cycle(G)
+
+    def test_no_cycle_directed_raises(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(1, 2)
+        with pytest.raises(fnx.NetworkXNoCycle):
+            fnx.find_cycle(D)
+
+    def test_single_node_no_cycle(self):
+        G = fnx.Graph()
+        G.add_node(0)
+        with pytest.raises(fnx.NetworkXNoCycle):
+            fnx.find_cycle(G)

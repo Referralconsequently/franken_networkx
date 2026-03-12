@@ -10234,20 +10234,29 @@ pub fn edge_boundary(
 
 /// Return the set of nodes on the boundary of `nbunch`.
 /// The node boundary is the set of nodes outside `nbunch` that have
-/// a neighbor in `nbunch`.
+/// a neighbor in `nbunch`. If `nbunch2` is given, only nodes in `nbunch2`
+/// are considered for the boundary.
 #[must_use]
 pub fn node_boundary(
     graph: &Graph,
     nbunch: &[&str],
+    nbunch2: Option<&[&str]>,
 ) -> Vec<String> {
     let set: HashSet<&str> = nbunch.iter().copied().collect();
+    let set2: Option<HashSet<&str>> = nbunch2.map(|s| s.iter().copied().collect());
     let mut boundary: BTreeMap<&str, ()> = BTreeMap::new();
     for &node in nbunch {
         if let Some(nbrs) = graph.neighbors(node) {
             for &nbr in &nbrs {
-                if !set.contains(nbr) {
-                    boundary.insert(nbr, ());
+                if set.contains(nbr) {
+                    continue;
                 }
+                if let Some(ref s2) = set2
+                    && !s2.contains(nbr)
+                {
+                    continue;
+                }
+                boundary.insert(nbr, ());
             }
         }
     }
@@ -10289,15 +10298,23 @@ pub fn edge_boundary_directed(
 pub fn node_boundary_directed(
     graph: &DiGraph,
     nbunch: &[&str],
+    nbunch2: Option<&[&str]>,
 ) -> Vec<String> {
     let set: HashSet<&str> = nbunch.iter().copied().collect();
+    let set2: Option<HashSet<&str>> = nbunch2.map(|s| s.iter().copied().collect());
     let mut boundary: BTreeMap<&str, ()> = BTreeMap::new();
     for &node in nbunch {
         if let Some(succs) = graph.successors(node) {
             for &succ in &succs {
-                if !set.contains(succ) {
-                    boundary.insert(succ, ());
+                if set.contains(succ) {
+                    continue;
                 }
+                if let Some(ref s2) = set2
+                    && !s2.contains(succ)
+                {
+                    continue;
+                }
+                boundary.insert(succ, ());
             }
         }
     }
@@ -17332,7 +17349,7 @@ mod tests {
         let _ = g.add_edge("a", "b");
         let _ = g.add_edge("b", "c");
         let _ = g.add_edge("c", "d");
-        let nb = node_boundary(&g, &["a", "b"]);
+        let nb = node_boundary(&g, &["a", "b"], None);
         assert_eq!(nb, vec!["c"]);
     }
 
@@ -17352,7 +17369,7 @@ mod tests {
         let _ = g.add_edge("a", "b");
         let _ = g.add_edge("b", "c");
         let _ = g.add_edge("c", "a");
-        let nb = node_boundary_directed(&g, &["a"]);
+        let nb = node_boundary_directed(&g, &["a"], None);
         // Only successors of "a" outside the set: "b"
         assert_eq!(nb, vec!["b"]);
     }

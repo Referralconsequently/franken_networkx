@@ -3589,7 +3589,7 @@ fn is_branching(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
 #[pyo3(signature = (g, node))]
 fn is_isolate(py: Python<'_>, g: &Bound<'_, PyAny>, node: &Bound<'_, PyAny>) -> PyResult<bool> {
     let gr = extract_graph(g)?;
-    let key = node_key_to_string(py, node);
+    let key = node_key_to_string(py, node)?;
     validate_node(&gr, &key, node)?;
     match &gr {
         GraphRef::Undirected(pg) => Ok(fnx_algorithms::is_isolate(&pg.inner, &key)),
@@ -3634,10 +3634,11 @@ fn edge_boundary(
     nbunch2: Option<Vec<Bound<'_, PyAny>>>,
 ) -> PyResult<Vec<(PyObject, PyObject)>> {
     let gr = extract_graph(g)?;
-    let s1: Vec<String> = nbunch1.iter().map(|n| node_key_to_string(py, n)).collect();
-    let s2: Option<Vec<String>> = nbunch2
-        .as_ref()
-        .map(|v| v.iter().map(|n| node_key_to_string(py, n)).collect());
+    let s1: Vec<String> = nbunch1.iter().map(|n| node_key_to_string(py, n)).collect::<PyResult<_>>()?;
+    let s2: Option<Vec<String>> = match nbunch2.as_ref() {
+        Some(v) => Some(v.iter().map(|n| node_key_to_string(py, n)).collect::<PyResult<_>>()?),
+        None => None,
+    };
     let s1_refs: Vec<&str> = s1.iter().map(|s| s.as_str()).collect();
     let s2_refs: Option<Vec<&str>> = s2.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
     let result = match &gr {
@@ -3664,10 +3665,11 @@ fn node_boundary(
     nbunch2: Option<Vec<Bound<'_, PyAny>>>,
 ) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
-    let s1: Vec<String> = nbunch1.iter().map(|n| node_key_to_string(py, n)).collect();
-    let s2: Option<Vec<String>> = nbunch2
-        .as_ref()
-        .map(|v| v.iter().map(|n| node_key_to_string(py, n)).collect());
+    let s1: Vec<String> = nbunch1.iter().map(|n| node_key_to_string(py, n)).collect::<PyResult<_>>()?;
+    let s2: Option<Vec<String>> = match nbunch2.as_ref() {
+        Some(v) => Some(v.iter().map(|n| node_key_to_string(py, n)).collect::<PyResult<_>>()?),
+        None => None,
+    };
     let s1_refs: Vec<&str> = s1.iter().map(|s| s.as_str()).collect();
     let s2_refs: Option<Vec<&str>> = s2.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
     let result = match &gr {
@@ -3694,7 +3696,7 @@ fn is_simple_path(
     path: Vec<Bound<'_, PyAny>>,
 ) -> PyResult<bool> {
     let gr = extract_graph(g)?;
-    let keys: Vec<String> = path.iter().map(|n| node_key_to_string(py, n)).collect();
+    let keys: Vec<String> = path.iter().map(|n| node_key_to_string(py, n)).collect::<PyResult<_>>()?;
     let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
     match &gr {
         GraphRef::Undirected(pg) => Ok(fnx_algorithms::is_simple_path(&pg.inner, &key_refs)),
@@ -3721,8 +3723,8 @@ fn is_matching(
     let inner = gr.undirected();
     let edges: Vec<(String, String)> = matching
         .iter()
-        .map(|(u, v)| (node_key_to_string(py, u), node_key_to_string(py, v)))
-        .collect();
+        .map(|(u, v)| Ok((node_key_to_string(py, u)?, node_key_to_string(py, v)?)))
+        .collect::<PyResult<_>>()?;
     Ok(fnx_algorithms::is_matching(inner, &edges))
 }
 
@@ -3739,8 +3741,8 @@ fn is_maximal_matching(
     let inner = gr.undirected();
     let edges: Vec<(String, String)> = matching
         .iter()
-        .map(|(u, v)| (node_key_to_string(py, u), node_key_to_string(py, v)))
-        .collect();
+        .map(|(u, v)| Ok((node_key_to_string(py, u)?, node_key_to_string(py, v)?)))
+        .collect::<PyResult<_>>()?;
     Ok(fnx_algorithms::is_maximal_matching(inner, &edges))
 }
 
@@ -3757,8 +3759,8 @@ fn is_perfect_matching(
     let inner = gr.undirected();
     let edges: Vec<(String, String)> = matching
         .iter()
-        .map(|(u, v)| (node_key_to_string(py, u), node_key_to_string(py, v)))
-        .collect();
+        .map(|(u, v)| Ok((node_key_to_string(py, u)?, node_key_to_string(py, v)?)))
+        .collect::<PyResult<_>>()?;
     Ok(fnx_algorithms::is_perfect_matching(inner, &edges))
 }
 
@@ -3799,16 +3801,14 @@ fn find_cycle(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<(PyObject, P
     };
     match result {
         Some(cycle) => {
-            // Return as edge list: [(u, v), (v, w), ..., (last, first)]
+            // Return as edge list from consecutive node pairs
             let mut edges = Vec::new();
-            for i in 0..cycle.len() {
-                let u = &cycle[i];
-                let v = &cycle[(i + 1) % cycle.len()];
-                edges.push((gr.py_node_key(py, u), gr.py_node_key(py, v)));
+            for w in cycle.windows(2) {
+                edges.push((gr.py_node_key(py, &w[0]), gr.py_node_key(py, &w[1])));
             }
             Ok(edges)
         }
-        None => Err(crate::NetworkXNoCycle::new_err("No cycle found.")),
+        None => Err(NetworkXNoCycle::new_err("No cycle found.")),
     }
 }
 
