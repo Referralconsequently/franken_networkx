@@ -130,6 +130,15 @@ _SUPPORTED_ALGORITHMS = {
     "adamic_adar_index": fnx.adamic_adar_index,
     "preferential_attachment": fnx.preferential_attachment,
     "resource_allocation_index": fnx.resource_allocation_index,
+    # Reciprocity
+    "overall_reciprocity": fnx.overall_reciprocity,
+    "reciprocity": fnx.reciprocity,
+    # Wiener index
+    "wiener_index": fnx.wiener_index,
+    # Graph metrics
+    "average_degree_connectivity": fnx.average_degree_connectivity,
+    "rich_club_coefficient": fnx.rich_club_coefficient,
+    "s_metric": fnx.s_metric,
 }
 
 

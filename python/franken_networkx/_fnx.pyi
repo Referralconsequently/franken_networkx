@@ -560,6 +560,14 @@ def resource_allocation_index(
 ) -> list[tuple[Any, Any, float]]: ...
 
 # ---------------------------------------------------------------------------
+# Graph metrics
+# ---------------------------------------------------------------------------
+
+def average_degree_connectivity(g: Graph) -> dict[int, float]: ...
+def rich_club_coefficient(g: Graph) -> dict[int, float]: ...
+def s_metric(g: Graph) -> float: ...
+
+# ---------------------------------------------------------------------------
 # Read/write — graph I/O
 # ---------------------------------------------------------------------------
 

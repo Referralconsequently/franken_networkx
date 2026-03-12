@@ -59,6 +59,7 @@ nx.shortest_path(G, 0, 99)
 | DAG | `topological_sort`, `topological_generations`, `dag_longest_path`, `dag_longest_path_length`, `lexicographic_topological_sort`, `is_directed_acyclic_graph`, `ancestors`, `descendants` |
 | Link prediction | `common_neighbors`, `jaccard_coefficient`, `adamic_adar_index`, `preferential_attachment`, `resource_allocation_index` |
 | Reciprocity | `reciprocity`, `overall_reciprocity` |
+| Graph metrics | `average_degree_connectivity`, `rich_club_coefficient`, `s_metric` |
 | Other | `core_number`, `voterank`, `find_cliques`, `graph_clique_number`, `degree_assortativity_coefficient`, `average_neighbor_degree`, `wiener_index`, `relabel_nodes` |
 | Generators | `path_graph`, `cycle_graph`, `star_graph`, `complete_graph`, `empty_graph`, `gnp_random_graph`, `watts_strogatz_graph`, `barabasi_albert_graph` |
 | I/O | `read_edgelist`, `write_edgelist`, `read_adjlist`, `write_adjlist`, `read_graphml`, `write_graphml`, `node_link_data`, `node_link_graph` |

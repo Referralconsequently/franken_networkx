@@ -2307,6 +2307,70 @@ pub fn complement(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
 }
 
 // ===========================================================================
+// Average Degree Connectivity
+// ===========================================================================
+
+/// Compute the average degree connectivity of a graph.
+///
+/// Matches `networkx.average_degree_connectivity(G)`.
+#[pyfunction]
+pub fn average_degree_connectivity(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "average_degree_connectivity")?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::average_degree_connectivity(inner));
+    let dict = pyo3::types::PyDict::new(py);
+    for (k, v) in &result {
+        dict.set_item(*k, *v)?;
+    }
+    Ok(dict.into_any().unbind())
+}
+
+// ===========================================================================
+// Rich-Club Coefficient
+// ===========================================================================
+
+/// Compute the rich-club coefficient for the graph.
+///
+/// Matches `networkx.rich_club_coefficient(G, normalized=False)`.
+#[pyfunction]
+pub fn rich_club_coefficient(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "rich_club_coefficient")?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::rich_club_coefficient(inner));
+    let dict = pyo3::types::PyDict::new(py);
+    for (k, v) in &result {
+        dict.set_item(*k, *v)?;
+    }
+    Ok(dict.into_any().unbind())
+}
+
+// ===========================================================================
+// s-metric
+// ===========================================================================
+
+/// Compute the s-metric of a graph.
+///
+/// Matches `networkx.s_metric(G, normalized=False)`.
+#[pyfunction]
+pub fn s_metric(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "s_metric")?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::s_metric(inner)))
+}
+
+// ===========================================================================
 // Reciprocity
 // ===========================================================================
 
@@ -2351,14 +2415,12 @@ pub fn reciprocity(
     if let GraphRef::Directed { dg, .. } = &gr {
         let node_list: Vec<String> = if let Some(ns) = nodes {
             // Check if it's a single node (not iterable list)
-            if let Ok(s) = node_key_to_string(py, ns) {
-                if dg.inner.has_node(&s) {
-                    // Single node: return a float directly
-                    let node_refs: Vec<&str> = vec![s.as_str()];
-                    let result = fnx_algorithms::reciprocity(&dg.inner, &node_refs);
-                    let val = result.get(&s).copied().unwrap_or(0.0);
-                    return Ok(val.into_pyobject(py).unwrap().into_any().unbind());
-                }
+            if let Ok(s) = node_key_to_string(py, ns) && dg.inner.has_node(&s) {
+                // Single node: return a float directly
+                let node_refs: Vec<&str> = vec![s.as_str()];
+                let result = fnx_algorithms::reciprocity(&dg.inner, &node_refs);
+                let val = result.get(&s).copied().unwrap_or(0.0);
+                return Ok(val.into_pyobject(py).unwrap().into_any().unbind());
             }
             // Try as iterable
             ns.try_iter()?
@@ -2673,5 +2735,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(adamic_adar_index, m)?)?;
     m.add_function(wrap_pyfunction!(preferential_attachment, m)?)?;
     m.add_function(wrap_pyfunction!(resource_allocation_index, m)?)?;
+    // Graph metrics
+    m.add_function(wrap_pyfunction!(average_degree_connectivity, m)?)?;
+    m.add_function(wrap_pyfunction!(rich_club_coefficient, m)?)?;
+    m.add_function(wrap_pyfunction!(s_metric, m)?)?;
     Ok(())
 }

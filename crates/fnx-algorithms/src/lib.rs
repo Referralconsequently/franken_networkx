@@ -7429,6 +7429,137 @@ pub fn wiener_index(graph: &Graph) -> Option<f64> {
 }
 
 // ===========================================================================
+// Average Degree Connectivity
+// ===========================================================================
+
+/// Compute the average degree connectivity of a graph.
+///
+/// For each degree `k`, compute the average degree of the neighbors of
+/// nodes with degree `k`. Returns a map from degree to average neighbor degree.
+/// Matches `networkx.average_degree_connectivity(G)`.
+#[must_use]
+pub fn average_degree_connectivity(graph: &Graph) -> HashMap<usize, f64> {
+    let mut degree_sum: HashMap<usize, f64> = HashMap::new();
+    let mut degree_count: HashMap<usize, usize> = HashMap::new();
+
+    for node in graph.nodes_ordered() {
+        let k = graph.neighbor_count(node);
+        if k == 0 {
+            continue;
+        }
+        // Average degree of neighbors
+        let nbr_deg_sum: usize = graph
+            .neighbors(node)
+            .unwrap_or_default()
+            .iter()
+            .map(|nbr| graph.neighbor_count(nbr))
+            .sum();
+        let avg_nbr_deg = nbr_deg_sum as f64 / k as f64;
+
+        *degree_sum.entry(k).or_insert(0.0) += avg_nbr_deg;
+        *degree_count.entry(k).or_insert(0) += 1;
+    }
+
+    let mut result = HashMap::with_capacity(degree_sum.len());
+    for (k, total) in &degree_sum {
+        let count = degree_count[k];
+        result.insert(*k, *total / count as f64);
+    }
+
+    result
+}
+
+// ===========================================================================
+// Rich-Club Coefficient
+// ===========================================================================
+
+/// Compute the rich-club coefficient for each degree `k`.
+///
+/// The rich-club coefficient `phi(k)` is the density of edges among nodes
+/// with degree greater than `k`. Returns a map from `k` to `phi(k)`.
+/// Matches `networkx.rich_club_coefficient(G, normalized=False)`.
+#[must_use]
+pub fn rich_club_coefficient(graph: &Graph) -> HashMap<usize, f64> {
+    let nodes = graph.nodes_ordered();
+    let mut degrees: Vec<(usize, &str)> = nodes
+        .iter()
+        .map(|&n| (graph.neighbor_count(n), n))
+        .collect();
+    degrees.sort_unstable_by_key(|b| std::cmp::Reverse(b.0)); // Sort descending by degree
+
+    // Get all unique degrees
+    let mut unique_degrees: Vec<usize> = degrees.iter().map(|(d, _)| *d).collect();
+    unique_degrees.sort_unstable();
+    unique_degrees.dedup();
+
+    let mut result = HashMap::new();
+
+    for &k in &unique_degrees {
+        // Nodes with degree > k
+        let rich_nodes: HashSet<&str> = degrees
+            .iter()
+            .filter(|(d, _)| *d > k)
+            .map(|(_, n)| *n)
+            .collect();
+
+        let n_rich = rich_nodes.len();
+        if n_rich < 2 {
+            result.insert(k, 0.0);
+            continue;
+        }
+
+        // Count edges among rich nodes
+        let mut edge_count = 0usize;
+        for &node in &rich_nodes {
+            if let Some(nbrs) = graph.neighbors(node) {
+                for nbr in nbrs {
+                    if rich_nodes.contains(nbr) {
+                        edge_count += 1;
+                    }
+                }
+            }
+        }
+        // Each undirected edge counted twice
+        edge_count /= 2;
+
+        let max_possible = n_rich * (n_rich - 1) / 2;
+        let phi = if max_possible == 0 {
+            0.0
+        } else {
+            edge_count as f64 / max_possible as f64
+        };
+        result.insert(k, phi);
+    }
+
+    result
+}
+
+// ===========================================================================
+// s-metric
+// ===========================================================================
+
+/// Compute the s-metric of a graph.
+///
+/// The s-metric is the sum of the product of degrees for each edge.
+/// `s(G) = Σ_{(u,v) ∈ E} deg(u) * deg(v)`
+/// Matches `networkx.s_metric(G)`.
+#[must_use]
+pub fn s_metric(graph: &Graph) -> f64 {
+    let mut total: f64 = 0.0;
+    for node in graph.nodes_ordered() {
+        let u_deg = graph.neighbor_count(node);
+        if let Some(nbrs) = graph.neighbors(node) {
+            for nbr in nbrs {
+                let v_deg = graph.neighbor_count(nbr);
+                total += (u_deg * v_deg) as f64;
+            }
+        }
+    }
+    // Each undirected edge counted twice
+    total / 2.0
+}
+
+// ===========================================================================
 // Link Prediction
 // ===========================================================================
 
@@ -7585,6 +7716,7 @@ mod tests {
         bfs_successors, bridges, cgse_witness_schema_version, closeness_centrality,
         clustering_coefficient, common_neighbors, complement, complement_directed,
         connected_components, cycle_basis, dag_longest_path, dag_longest_path_length,
+        average_degree_connectivity,
         degree_centrality, descendants, descendants_at_distance,
         dfs_edges, dfs_edges_directed,
         dfs_postorder_nodes, dfs_postorder_nodes_directed, dfs_predecessors, dfs_preorder_nodes,
@@ -7599,7 +7731,7 @@ mod tests {
         min_edge_cover, min_weight_matching, minimum_cut_edmonds_karp,
         minimum_st_edge_cut_edmonds_karp, multi_source_dijkstra, number_connected_components,
         overall_reciprocity, pagerank, preferential_attachment, reciprocity,
-        resource_allocation_index,
+        resource_allocation_index, rich_club_coefficient, s_metric,
         shortest_path_unweighted, shortest_path_weighted, topological_generations,
         topological_sort, wiener_index,
     };
@@ -12627,5 +12759,106 @@ mod tests {
         let mut g = Graph::strict();
         g.add_node("a");
         assert!((wiener_index(&g).unwrap() - 0.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // Average Degree Connectivity tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn average_degree_connectivity_complete() {
+        // K4: all nodes have degree 3, all neighbors have degree 3
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("0", "3");
+        let _ = g.add_edge("1", "2");
+        let _ = g.add_edge("1", "3");
+        let _ = g.add_edge("2", "3");
+        let adc = average_degree_connectivity(&g);
+        // All nodes have degree 3, neighbors all have degree 3
+        assert!((adc[&3] - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn average_degree_connectivity_star() {
+        // Star: center connected to 3 leaves
+        let mut g = Graph::strict();
+        let _ = g.add_edge("c", "a");
+        let _ = g.add_edge("c", "b");
+        let _ = g.add_edge("c", "d");
+        let adc = average_degree_connectivity(&g);
+        // Center (deg=3): neighbors all have deg 1 → avg=1.0
+        assert!((adc[&3] - 1.0).abs() < 1e-10);
+        // Leaves (deg=1): neighbor is center with deg 3 → avg=3.0
+        assert!((adc[&1] - 3.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // Rich-Club Coefficient tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn rich_club_coefficient_complete() {
+        // K4: all degrees = 3
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("0", "3");
+        let _ = g.add_edge("1", "2");
+        let _ = g.add_edge("1", "3");
+        let _ = g.add_edge("2", "3");
+        let rc = rich_club_coefficient(&g);
+        // Only degree present is 3
+        // k=3: no nodes with deg>3 → 0.0
+        assert!((rc[&3] - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn rich_club_coefficient_star() {
+        // Star: center(deg=3) + 3 leaves(deg=1)
+        let mut g = Graph::strict();
+        let _ = g.add_edge("c", "a");
+        let _ = g.add_edge("c", "b");
+        let _ = g.add_edge("c", "d");
+        let rc = rich_club_coefficient(&g);
+        // k=1: nodes with deg>1 = {c (deg 3)}, only 1 node → phi=0.0
+        assert!((rc[&1] - 0.0).abs() < 1e-10);
+        // k=3: no nodes with deg>3 → 0.0
+        assert!((rc[&3] - 0.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // s-metric tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn s_metric_triangle() {
+        // Triangle: all degrees = 2
+        // s = deg(0)*deg(1) + deg(0)*deg(2) + deg(1)*deg(2) = 4+4+4 = 12
+        let mut g = Graph::strict();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("1", "2");
+        let _ = g.add_edge("0", "2");
+        let s = s_metric(&g);
+        assert!((s - 12.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn s_metric_star() {
+        // Star with 3 leaves: center has deg 3, leaves deg 1
+        // s = 3*1 + 3*1 + 3*1 = 9
+        let mut g = Graph::strict();
+        let _ = g.add_edge("c", "a");
+        let _ = g.add_edge("c", "b");
+        let _ = g.add_edge("c", "d");
+        let s = s_metric(&g);
+        assert!((s - 9.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn s_metric_empty() {
+        let g = Graph::strict();
+        assert!((s_metric(&g) - 0.0).abs() < 1e-10);
     }
 }

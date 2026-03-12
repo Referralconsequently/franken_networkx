@@ -217,6 +217,13 @@ from franken_networkx._fnx import (
     wiener_index,
 )
 
+# Algorithm functions — graph metrics
+from franken_networkx._fnx import (
+    average_degree_connectivity,
+    rich_club_coefficient,
+    s_metric,
+)
+
 # Algorithm functions — link prediction
 from franken_networkx._fnx import (
     common_neighbors,
@@ -926,6 +933,10 @@ __all__ = [
     "reciprocity",
     # Algorithms — Wiener index
     "wiener_index",
+    # Algorithms — graph metrics
+    "average_degree_connectivity",
+    "rich_club_coefficient",
+    "s_metric",
     # Algorithms — link prediction
     "common_neighbors",
     "jaccard_coefficient",
