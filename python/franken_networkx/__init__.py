@@ -382,6 +382,8 @@ from franken_networkx._fnx import (
 from franken_networkx._fnx import (
     simple_cycles,
     find_cycle,
+    girth,
+    find_negative_cycle,
 )
 
 # Algorithm functions — additional shortest path
@@ -1231,6 +1233,8 @@ __all__ = [
     # Algorithms — cycles
     "simple_cycles",
     "find_cycle",
+    "girth",
+    "find_negative_cycle",
     # Exception
     "NetworkXNoCycle",
     # Algorithms — additional shortest path

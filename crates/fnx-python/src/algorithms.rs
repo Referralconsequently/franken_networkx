@@ -4670,6 +4670,42 @@ pub fn is_attracting_component(
 }
 
 // ===========================================================================
+// Cycle algorithms — additional
+// ===========================================================================
+
+#[pyfunction]
+#[pyo3(signature = (g,))]
+pub fn girth(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Option<usize>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "girth")?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::girth(inner)))
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, source, weight = "weight"))]
+pub fn find_negative_cycle(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    weight: &str,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "find_negative_cycle")?;
+    let src = node_key_to_string(py, source)?;
+    let inner = gr.undirected();
+    match fnx_algorithms::find_negative_cycle(inner, &src, weight) {
+        Some(cycle) => Ok(cycle.iter().map(|n| gr.py_node_key(py, n)).collect()),
+        None => Err(crate::NetworkXError::new_err(
+            "No negative cycle found.",
+        )),
+    }
+}
+
+// ===========================================================================
 // Registration
 // ===========================================================================
 
@@ -4906,5 +4942,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(attracting_components, m)?)?;
     m.add_function(wrap_pyfunction!(number_attracting_components, m)?)?;
     m.add_function(wrap_pyfunction!(is_attracting_component, m)?)?;
+    // Cycle algorithms — additional
+    m.add_function(wrap_pyfunction!(girth, m)?)?;
+    m.add_function(wrap_pyfunction!(find_negative_cycle, m)?)?;
     Ok(())
 }

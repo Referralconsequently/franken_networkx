@@ -217,6 +217,8 @@ _SUPPORTED_ALGORITHMS = {
     # Cycles
     "simple_cycles": fnx.simple_cycles,
     "find_cycle": fnx.find_cycle,
+    "girth": fnx.girth,
+    "find_negative_cycle": fnx.find_negative_cycle,
     # Additional shortest path algorithms
     "dijkstra_path_length": fnx.dijkstra_path_length,
     "bellman_ford_path_length": fnx.bellman_ford_path_length,

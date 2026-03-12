@@ -10822,6 +10822,136 @@ pub fn find_cycle_undirected(graph: &Graph) -> Option<Vec<String>> {
     None
 }
 
+/// Return the girth (length of the shortest cycle) of an undirected graph.
+/// Returns None if the graph is acyclic (a forest).
+/// Matches `networkx.girth(G)`.
+#[must_use]
+pub fn girth(graph: &Graph) -> Option<usize> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return None;
+    }
+
+    let mut min_girth = usize::MAX;
+
+    // BFS from each node, looking for the shortest back-edge
+    for &source in &nodes {
+        let mut dist: HashMap<&str, usize> = HashMap::new();
+        let mut parent: HashMap<&str, &str> = HashMap::new();
+        let mut queue = VecDeque::new();
+        dist.insert(source, 0);
+        queue.push_back(source);
+
+        while let Some(v) = queue.pop_front() {
+            let d_v = dist[v];
+            if d_v * 2 + 1 >= min_girth {
+                break; // Can't improve
+            }
+            if let Some(neighbors) = graph.neighbors_iter(v) {
+                for w in neighbors {
+                    if let Some(&d_w) = dist.get(w) {
+                        // Skip parent edge (tree edge in BFS)
+                        if parent.get(v) == Some(&w) {
+                            continue;
+                        }
+                        let cycle_len = d_v + d_w + 1;
+                        if cycle_len < min_girth {
+                            min_girth = cycle_len;
+                        }
+                    } else {
+                        dist.insert(w, d_v + 1);
+                        parent.insert(w, v);
+                        queue.push_back(w);
+                    }
+                }
+            }
+        }
+    }
+
+    if min_girth == usize::MAX {
+        None
+    } else {
+        Some(min_girth)
+    }
+}
+
+/// Find a negative cycle in a weighted graph using Bellman-Ford.
+/// Returns Some(cycle) if a negative-weight cycle exists, None otherwise.
+/// Matches `networkx.find_negative_cycle(G, source, weight)`.
+#[must_use]
+pub fn find_negative_cycle(graph: &Graph, source: &str, weight_attr: &str) -> Option<Vec<String>> {
+    if !graph.has_node(source) {
+        return None;
+    }
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return None;
+    }
+
+    let node_to_idx: HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+    let mut dist = vec![f64::INFINITY; n];
+    let mut pred = vec![usize::MAX; n];
+    dist[node_to_idx[source]] = 0.0;
+
+    // Collect all edges (undirected, so both directions)
+    let mut edges: Vec<(usize, usize, f64)> = Vec::new();
+    for &u_str in &nodes {
+        let u = node_to_idx[u_str];
+        if let Some(neighbors) = graph.neighbors_iter(u_str) {
+            for v_str in neighbors {
+                let v = node_to_idx[v_str];
+                let w = graph
+                    .edge_attrs(u_str, v_str)
+                    .and_then(|attrs| attrs.get(weight_attr).and_then(|v| v.parse::<f64>().ok()))
+                    .unwrap_or(1.0);
+                edges.push((u, v, w));
+            }
+        }
+    }
+
+    // Relax n-1 times
+    for _ in 0..n - 1 {
+        for &(u, v, w) in &edges {
+            if dist[u] + w < dist[v] {
+                dist[v] = dist[u] + w;
+                pred[v] = u;
+            }
+        }
+    }
+
+    // Check for negative cycle (n-th relaxation)
+    for &(u, v, w) in &edges {
+        if dist[u] + w < dist[v] {
+            // Found a node in a negative cycle
+            // Trace back to find the cycle
+            let mut visited = vec![false; n];
+            let mut cur = v;
+            // Follow predecessors n times to ensure we're in the cycle
+            for _ in 0..n {
+                cur = pred[cur];
+            }
+            let cycle_start = cur;
+            let mut cycle = vec![nodes[cycle_start].to_owned()];
+            cur = pred[cycle_start];
+            while cur != cycle_start {
+                cycle.push(nodes[cur].to_owned());
+                cur = pred[cur];
+                if visited[cur] {
+                    break;
+                }
+                visited[cur] = true;
+            }
+            cycle.push(nodes[cycle_start].to_owned());
+            cycle.reverse();
+            return Some(cycle);
+        }
+    }
+
+    None
+}
+
 // ===========================================================================
 // Additional shortest path algorithms
 // ===========================================================================
@@ -12271,6 +12401,8 @@ mod tests {
         is_arborescence, is_branching,
         // Cycle detection
         simple_cycles, find_cycle_directed, find_cycle_undirected,
+        // Cycle algorithms
+        girth, find_negative_cycle,
         // Additional centrality
         in_degree_centrality, out_degree_centrality,
         local_reaching_centrality, local_reaching_centrality_directed,
@@ -19833,5 +19965,93 @@ mod tests {
         dg.add_edge("a", "c").unwrap();
         // Group {a}: successors outside = {b, c}, non-group = 2, so 2/2 = 1.0
         assert!((group_out_degree_centrality(&dg, &["a"]) - 1.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // girth
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_girth_triangle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert_eq!(girth(&g), Some(3));
+    }
+
+    #[test]
+    fn test_girth_square() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        let _ = g.add_edge("d", "a");
+        assert_eq!(girth(&g), Some(4));
+    }
+
+    #[test]
+    fn test_girth_tree() {
+        // Tree has no cycles
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("b", "d");
+        assert_eq!(girth(&g), None);
+    }
+
+    #[test]
+    fn test_girth_empty() {
+        let g = Graph::strict();
+        assert_eq!(girth(&g), None);
+    }
+
+    #[test]
+    fn test_girth_multiple_cycles() {
+        // Triangle + square: girth should be 3
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        let _ = g.add_edge("c", "d");
+        let _ = g.add_edge("d", "e");
+        let _ = g.add_edge("e", "f");
+        let _ = g.add_edge("f", "c");
+        assert_eq!(girth(&g), Some(3));
+    }
+
+    // -----------------------------------------------------------------------
+    // find_negative_cycle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_find_negative_cycle_no_cycle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        assert_eq!(find_negative_cycle(&g, "a", "weight"), None);
+    }
+
+    #[test]
+    fn test_find_negative_cycle_positive_cycle() {
+        let mut g = Graph::strict();
+        g.add_edge_with_attrs("a", "b", [("weight".to_owned(), "1.0".to_owned())].into()).unwrap();
+        g.add_edge_with_attrs("b", "c", [("weight".to_owned(), "2.0".to_owned())].into()).unwrap();
+        g.add_edge_with_attrs("c", "a", [("weight".to_owned(), "3.0".to_owned())].into()).unwrap();
+        assert_eq!(find_negative_cycle(&g, "a", "weight"), None);
+    }
+
+    #[test]
+    fn test_find_negative_cycle_exists() {
+        let mut g = Graph::strict();
+        g.add_edge_with_attrs("a", "b", [("weight".to_owned(), "-2.0".to_owned())].into()).unwrap();
+        g.add_edge_with_attrs("b", "c", [("weight".to_owned(), "-3.0".to_owned())].into()).unwrap();
+        g.add_edge_with_attrs("c", "a", [("weight".to_owned(), "-1.0".to_owned())].into()).unwrap();
+        let cycle = find_negative_cycle(&g, "a", "weight");
+        assert!(cycle.is_some());
+        let cycle = cycle.unwrap();
+        // Cycle should start and end with the same node
+        assert_eq!(cycle.first(), cycle.last());
+        assert!(cycle.len() >= 3);
     }
 }
