@@ -408,6 +408,19 @@ from franken_networkx._fnx import (
     path_weight,
 )
 
+# Component algorithms
+from franken_networkx._fnx import (
+    node_connected_component,
+    is_biconnected,
+    biconnected_components,
+    biconnected_component_edges,
+    is_semiconnected,
+    kosaraju_strongly_connected_components,
+    attracting_components,
+    number_attracting_components,
+    is_attracting_component,
+)
+
 # Graph generators — classic
 from franken_networkx._fnx import (
     complete_graph,
@@ -1230,6 +1243,16 @@ __all__ = [
     "negative_edge_cycle",
     "predecessor",
     "path_weight",
+    # Algorithms — component
+    "node_connected_component",
+    "is_biconnected",
+    "biconnected_components",
+    "biconnected_component_edges",
+    "is_semiconnected",
+    "kosaraju_strongly_connected_components",
+    "attracting_components",
+    "number_attracting_components",
+    "is_attracting_component",
     # Algorithms — planarity
     "is_planar",
     # Algorithms — barycenter

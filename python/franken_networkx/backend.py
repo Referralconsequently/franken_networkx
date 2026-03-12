@@ -238,6 +238,16 @@ _SUPPORTED_ALGORITHMS = {
     "negative_edge_cycle": fnx.negative_edge_cycle,
     "predecessor": fnx.predecessor,
     "path_weight": fnx.path_weight,
+    # Component algorithms
+    "node_connected_component": fnx.node_connected_component,
+    "is_biconnected": fnx.is_biconnected,
+    "biconnected_components": fnx.biconnected_components,
+    "biconnected_component_edges": fnx.biconnected_component_edges,
+    "is_semiconnected": fnx.is_semiconnected,
+    "kosaraju_strongly_connected_components": fnx.kosaraju_strongly_connected_components,
+    "attracting_components": fnx.attracting_components,
+    "number_attracting_components": fnx.number_attracting_components,
+    "is_attracting_component": fnx.is_attracting_component,
 }
 
 

@@ -4,7 +4,7 @@ use fnx_classes::Graph;
 use fnx_classes::digraph::DiGraph;
 use mwmatching::{Matching as BlossomMatching, SENTINEL as BLOSSOM_SENTINEL};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 pub const CGSE_WITNESS_ARTIFACT_SCHEMA_VERSION_V1: &str = "1.0.0";
 pub const CGSE_WITNESS_POLICY_SPEC_PATH: &str =
@@ -11591,6 +11591,406 @@ pub fn reconstruct_path(
     path
 }
 
+// ===========================================================================
+// Additional component algorithms
+// ===========================================================================
+
+/// Return the connected component containing the given node.
+/// Matches `networkx.node_connected_component(G, n)`.
+#[must_use]
+pub fn node_connected_component(graph: &Graph, node: &str) -> Vec<String> {
+    if !graph.has_node(node) {
+        return Vec::new();
+    }
+    let mut visited = HashSet::<&str>::new();
+    let mut queue = VecDeque::new();
+    visited.insert(node);
+    queue.push_back(node);
+    while let Some(current) = queue.pop_front() {
+        if let Some(neighbors) = graph.neighbors_iter(current) {
+            for nbr in neighbors {
+                if visited.insert(nbr) {
+                    queue.push_back(nbr);
+                }
+            }
+        }
+    }
+    let mut result: Vec<String> = visited.iter().map(|s| (*s).to_owned()).collect();
+    result.sort_unstable();
+    result
+}
+
+/// Return True if the graph is biconnected (connected and no articulation points).
+/// Matches `networkx.is_biconnected(G)`.
+#[must_use]
+pub fn is_biconnected(graph: &Graph) -> bool {
+    if graph.node_count() < 2 {
+        return false;
+    }
+    let cc = connected_components(graph);
+    if cc.components.len() != 1 {
+        return false;
+    }
+    let ap = articulation_points(graph);
+    ap.nodes.is_empty()
+}
+
+/// Return the biconnected components of the graph.
+/// Each component is a set of edges. Uses edge-stack based DFS.
+/// Matches `networkx.biconnected_components(G)`.
+#[must_use]
+pub fn biconnected_components(graph: &Graph) -> Vec<Vec<String>> {
+    let edge_components = biconnected_component_edges(graph);
+    let mut components = Vec::new();
+    for edges in &edge_components {
+        let mut nodes = BTreeSet::new();
+        for (u, v) in edges {
+            nodes.insert(u.clone());
+            nodes.insert(v.clone());
+        }
+        components.push(nodes.into_iter().collect());
+    }
+    components
+}
+
+/// Return the biconnected component edges.
+/// Each component is a list of (u, v) edges.
+/// Matches `networkx.biconnected_component_edges(G)`.
+#[must_use]
+pub fn biconnected_component_edges(graph: &Graph) -> Vec<Vec<(String, String)>> {
+    let nodes = graph.nodes_ordered();
+    let mut discovery: HashMap<&str, usize> = HashMap::new();
+    let mut low: HashMap<&str, usize> = HashMap::new();
+    let mut parent: HashMap<&str, Option<&str>> = HashMap::new();
+    let mut edge_stack: Vec<(&str, &str)> = Vec::new();
+    let mut components: Vec<Vec<(String, String)>> = Vec::new();
+    let mut time = 0usize;
+
+    for &root in &nodes {
+        if discovery.contains_key(root) {
+            continue;
+        }
+
+        // Iterative DFS
+        let mut stack: Vec<(&str, Vec<&str>, usize)> = Vec::new();
+        discovery.insert(root, time);
+        low.insert(root, time);
+        parent.insert(root, None);
+        time += 1;
+
+        let succs: Vec<&str> = graph
+            .neighbors_iter(root)
+            .map(|it| it.collect())
+            .unwrap_or_default();
+        stack.push((root, succs, 0));
+
+        while let Some((v, neighbors, idx)) = stack.last_mut() {
+            let v_str = *v;
+            if *idx < neighbors.len() {
+                let w = neighbors[*idx];
+                *idx += 1;
+                if !discovery.contains_key(w) {
+                    parent.insert(w, Some(v_str));
+                    discovery.insert(w, time);
+                    low.insert(w, time);
+                    time += 1;
+                    edge_stack.push((v_str, w));
+                    let w_succs: Vec<&str> = graph
+                        .neighbors_iter(w)
+                        .map(|it| it.collect())
+                        .unwrap_or_default();
+                    stack.push((w, w_succs, 0));
+                } else if parent.get(v_str) != Some(&Some(w)) && discovery[w] < discovery[v_str] {
+                    edge_stack.push((v_str, w));
+                    let w_low = low[w];
+                    if let Some(v_low) = low.get_mut(v_str)
+                        && w_low < *v_low
+                    {
+                        *v_low = w_low;
+                    }
+                }
+            } else {
+                // Finished processing v
+                let v_str = *v;
+                let v_low = low[v_str];
+                let v_disc = discovery[v_str];
+                let v_parent = parent.get(v_str).copied().flatten();
+                stack.pop();
+
+                if let Some(p) = v_parent {
+                    // Update parent's low value
+                    if let Some(p_low) = low.get_mut(p)
+                        && v_low < *p_low
+                    {
+                        *p_low = v_low;
+                    }
+                    // If v is the root of a biconnected component
+                    let p_disc = discovery[p];
+                    if v_low >= p_disc {
+                        let mut component = Vec::new();
+                        while let Some(&(u, w)) = edge_stack.last() {
+                            edge_stack.pop();
+                            let edge = if u <= w {
+                                (u.to_owned(), w.to_owned())
+                            } else {
+                                (w.to_owned(), u.to_owned())
+                            };
+                            component.push(edge);
+                            if (u == p && w == v_str) || (u == v_str && w == p) {
+                                break;
+                            }
+                        }
+                        if !component.is_empty() {
+                            component.sort_unstable();
+                            components.push(component);
+                        }
+                    }
+                }
+                let _ = v_low;
+                let _ = v_disc;
+            }
+        }
+    }
+
+    components
+}
+
+/// Return True if the directed graph is semiconnected.
+/// A digraph is semiconnected if for every pair u,v there is a path u->v or v->u.
+/// Matches `networkx.is_semiconnected(G)`.
+#[must_use]
+pub fn is_semiconnected(digraph: &DiGraph) -> bool {
+    if digraph.node_count() == 0 {
+        return true;
+    }
+    // Get the condensation (DAG of SCCs)
+    let sccs = strongly_connected_components(digraph);
+    if sccs.len() == 1 {
+        return true;
+    }
+
+    // Build condensation DAG
+    let mut node_to_scc: HashMap<&str, usize> = HashMap::new();
+    for (i, scc) in sccs.iter().enumerate() {
+        for node in scc {
+            node_to_scc.insert(node.as_str(), i);
+        }
+    }
+
+    let n = sccs.len();
+    let mut adj: Vec<HashSet<usize>> = vec![HashSet::new(); n];
+    for &node in digraph.nodes_ordered().iter() {
+        let u_scc = node_to_scc[node];
+        if let Some(succs) = digraph.successors(node) {
+            for s in succs {
+                let v_scc = node_to_scc[s];
+                if u_scc != v_scc {
+                    adj[u_scc].insert(v_scc);
+                }
+            }
+        }
+    }
+
+    // Topological sort of condensation DAG
+    let mut in_degree = vec![0usize; n];
+    for neighbors in &adj {
+        for &v in neighbors {
+            in_degree[v] += 1;
+        }
+    }
+    let mut queue = VecDeque::new();
+    for (i, &deg) in in_degree.iter().enumerate() {
+        if deg == 0 {
+            queue.push_back(i);
+        }
+    }
+
+    let mut topo_order = Vec::new();
+    while let Some(v) = queue.pop_front() {
+        topo_order.push(v);
+        for &w in &adj[v] {
+            in_degree[w] -= 1;
+            if in_degree[w] == 0 {
+                queue.push_back(w);
+            }
+        }
+    }
+
+    // Semiconnected iff there's a Hamiltonian path in the condensation DAG
+    // (each consecutive pair in topological order is connected by an edge)
+    for window in topo_order.windows(2) {
+        if !adj[window[0]].contains(&window[1]) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Kosaraju's algorithm for strongly connected components.
+/// Matches `networkx.kosaraju_strongly_connected_components(G)`.
+#[must_use]
+pub fn kosaraju_strongly_connected_components(digraph: &DiGraph) -> Vec<Vec<String>> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    // Phase 1: DFS on original graph, record finish order
+    let mut visited = HashSet::<&str>::new();
+    let mut finish_order: Vec<&str> = Vec::with_capacity(n);
+
+    for &start in &nodes {
+        if visited.contains(start) {
+            continue;
+        }
+        let mut stack: Vec<(&str, bool)> = vec![(start, false)];
+        while let Some((v, processed)) = stack.pop() {
+            if processed {
+                finish_order.push(v);
+                continue;
+            }
+            if !visited.insert(v) {
+                continue;
+            }
+            stack.push((v, true));
+            if let Some(succs) = digraph.successors(v) {
+                for s in succs {
+                    if !visited.contains(s) {
+                        stack.push((s, false));
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: DFS on reversed graph in reverse finish order
+    let mut visited2 = HashSet::<&str>::new();
+    let mut components = Vec::new();
+
+    for &node in finish_order.iter().rev() {
+        if visited2.contains(node) {
+            continue;
+        }
+        let mut component = Vec::new();
+        let mut stack = vec![node];
+        while let Some(v) = stack.pop() {
+            if !visited2.insert(v) {
+                continue;
+            }
+            component.push(v.to_owned());
+            // Reversed graph: use predecessors instead of successors
+            if let Some(preds) = digraph.predecessors(v) {
+                for p in preds {
+                    if !visited2.contains(p) {
+                        stack.push(p);
+                    }
+                }
+            }
+        }
+        component.sort_unstable();
+        components.push(component);
+    }
+
+    components
+}
+
+/// Return the attracting components of a directed graph.
+/// An attracting component is an SCC with no outgoing edges.
+/// Matches `networkx.attracting_components(G)`.
+#[must_use]
+pub fn attracting_components(digraph: &DiGraph) -> Vec<Vec<String>> {
+    let sccs = strongly_connected_components(digraph);
+    let mut node_to_scc: HashMap<&str, usize> = HashMap::new();
+    for (i, scc) in sccs.iter().enumerate() {
+        for node in scc {
+            node_to_scc.insert(node.as_str(), i);
+        }
+    }
+
+    let mut has_outgoing = vec![false; sccs.len()];
+    for &node in digraph.nodes_ordered().iter() {
+        let u_scc = node_to_scc[node];
+        if let Some(succs) = digraph.successors(node) {
+            for s in succs {
+                let v_scc = node_to_scc[s];
+                if u_scc != v_scc {
+                    has_outgoing[u_scc] = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    sccs.into_iter()
+        .enumerate()
+        .filter(|(i, _)| !has_outgoing[*i])
+        .map(|(_, scc)| scc)
+        .collect()
+}
+
+/// Return the number of attracting components.
+/// Matches `networkx.number_attracting_components(G)`.
+#[must_use]
+pub fn number_attracting_components(digraph: &DiGraph) -> usize {
+    attracting_components(digraph).len()
+}
+
+/// Return True if the given component is an attracting component.
+/// Matches `networkx.is_attracting_component(G, component)`.
+#[must_use]
+pub fn is_attracting_component(digraph: &DiGraph, component: &[&str]) -> bool {
+    let comp_set: HashSet<&str> = component.iter().copied().collect();
+    for &node in component {
+        if let Some(succs) = digraph.successors(node) {
+            for s in succs {
+                if !comp_set.contains(s) {
+                    return false;
+                }
+            }
+        }
+    }
+    // Also verify it's strongly connected within itself
+    if component.is_empty() {
+        return false;
+    }
+    let start = component[0];
+    // Forward reachability (successors)
+    let mut reachable = HashSet::new();
+    let mut stack = vec![start];
+    while let Some(v) = stack.pop() {
+        if !reachable.insert(v) {
+            continue;
+        }
+        if let Some(succs) = digraph.successors(v) {
+            for s in succs {
+                if comp_set.contains(s) && !reachable.contains(s) {
+                    stack.push(s);
+                }
+            }
+        }
+    }
+    if reachable.len() != comp_set.len() {
+        return false;
+    }
+    // Backward reachability (predecessors)
+    let mut reachable_back = HashSet::new();
+    let mut stack = vec![start];
+    while let Some(v) = stack.pop() {
+        if !reachable_back.insert(v) {
+            continue;
+        }
+        if let Some(preds) = digraph.predecessors(v) {
+            for p in preds {
+                if comp_set.contains(p) && !reachable_back.contains(p) {
+                    stack.push(p);
+                }
+            }
+        }
+    }
+    reachable_back.len() == comp_set.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -11658,6 +12058,10 @@ mod tests {
         is_arborescence, is_branching,
         // Cycle detection
         simple_cycles, find_cycle_directed, find_cycle_undirected,
+        // Component algorithms
+        node_connected_component, is_biconnected, biconnected_components, biconnected_component_edges,
+        is_semiconnected, kosaraju_strongly_connected_components,
+        attracting_components, number_attracting_components, is_attracting_component,
         // Additional shortest path algorithms
         dijkstra_path_length, bellman_ford_path_length,
         single_source_dijkstra_full, single_source_dijkstra_path, single_source_dijkstra_path_length,
@@ -16181,10 +16585,10 @@ mod tests {
     fn all_shortest_paths_diamond() {
         // Diamond: 0-1, 0-2, 1-3, 2-3
         let mut g = Graph::strict();
-        g.add_edge("0", "1").unwrap();
-        g.add_edge("0", "2").unwrap();
-        g.add_edge("1", "3").unwrap();
-        g.add_edge("2", "3").unwrap();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("1", "3");
+        let _ = g.add_edge("2", "3");
         let paths = all_shortest_paths(&g, "0", "3");
         assert_eq!(paths.len(), 2);
         assert!(paths.contains(&vec!["0".to_owned(), "1".to_owned(), "3".to_owned()]));
@@ -16195,8 +16599,8 @@ mod tests {
     fn all_shortest_paths_single() {
         // Path: 0-1-2
         let mut g = Graph::strict();
-        g.add_edge("0", "1").unwrap();
-        g.add_edge("1", "2").unwrap();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("1", "2");
         let paths = all_shortest_paths(&g, "0", "2");
         assert_eq!(paths, vec![vec!["0".to_owned(), "1".to_owned(), "2".to_owned()]]);
     }
@@ -16295,9 +16699,9 @@ mod tests {
     fn complement_triangle() {
         // K3: 0-1, 0-2, 1-2 → complement is empty (no edges)
         let mut g = Graph::strict();
-        g.add_edge("0", "1").unwrap();
-        g.add_edge("0", "2").unwrap();
-        g.add_edge("1", "2").unwrap();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("0", "2");
+        let _ = g.add_edge("1", "2");
         let c = complement(&g);
         assert_eq!(c.node_count(), 3);
         assert_eq!(c.edge_count(), 0);
@@ -16322,8 +16726,8 @@ mod tests {
     fn complement_path() {
         // Path: 0-1-2 → complement: 0-2
         let mut g = Graph::strict();
-        g.add_edge("0", "1").unwrap();
-        g.add_edge("1", "2").unwrap();
+        let _ = g.add_edge("0", "1");
+        let _ = g.add_edge("1", "2");
         let c = complement(&g);
         assert_eq!(c.node_count(), 3);
         assert_eq!(c.edge_count(), 1);
@@ -16336,8 +16740,8 @@ mod tests {
     fn complement_involution() {
         // complement(complement(G)) == G (same edge set)
         let mut g = Graph::strict();
-        g.add_edge("a", "b").unwrap();
-        g.add_edge("b", "c").unwrap();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
         g.add_node("d");
         let c2 = complement(&complement(&g));
         assert_eq!(c2.edge_count(), g.edge_count());
@@ -18749,5 +19153,323 @@ mod tests {
         let preds = std::collections::HashMap::new();
         let path = reconstruct_path("a", "z", &preds);
         assert!(path.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // node_connected_component
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_node_connected_component_triangle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert_eq!(node_connected_component(&g, "a"), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_node_connected_component_disconnected() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        g.add_node("c");
+        assert_eq!(node_connected_component(&g, "a"), vec!["a", "b"]);
+        assert_eq!(node_connected_component(&g, "c"), vec!["c"]);
+    }
+
+    #[test]
+    fn test_node_connected_component_missing_node() {
+        let g = Graph::strict();
+        assert!(node_connected_component(&g, "z").is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // is_biconnected
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_biconnected_triangle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!(is_biconnected(&g));
+    }
+
+    #[test]
+    fn test_is_biconnected_path_not() {
+        // a-b-c has articulation point b
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        assert!(!is_biconnected(&g));
+    }
+
+    #[test]
+    fn test_is_biconnected_single_node() {
+        let mut g = Graph::strict();
+        g.add_node("a");
+        assert!(!is_biconnected(&g));
+    }
+
+    #[test]
+    fn test_is_biconnected_disconnected() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("c", "d");
+        assert!(!is_biconnected(&g));
+    }
+
+    // -----------------------------------------------------------------------
+    // biconnected_components
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_biconnected_components_triangle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        let comps = biconnected_components(&g);
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0], vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_biconnected_components_bridge() {
+        // Two triangles connected by a bridge: a-b-c-a, c-d bridge, d-e-f-d
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        let _ = g.add_edge("c", "d");
+        let _ = g.add_edge("d", "e");
+        let _ = g.add_edge("e", "f");
+        let _ = g.add_edge("f", "d");
+        let comps = biconnected_components(&g);
+        assert_eq!(comps.len(), 3); // triangle {a,b,c}, bridge {c,d}, triangle {d,e,f}
+    }
+
+    #[test]
+    fn test_biconnected_components_empty() {
+        let g = Graph::strict();
+        assert!(biconnected_components(&g).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // biconnected_component_edges
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_biconnected_component_edges_triangle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        let comps = biconnected_component_edges(&g);
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].len(), 3);
+    }
+
+    #[test]
+    fn test_biconnected_component_edges_path() {
+        // a-b-c: two bridge components, each with 1 edge
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let comps = biconnected_component_edges(&g);
+        assert_eq!(comps.len(), 2);
+        assert_eq!(comps[0].len(), 1);
+        assert_eq!(comps[1].len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // is_semiconnected
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_semiconnected_chain() {
+        // a->b->c: semiconnected (path from a to c)
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        assert!(is_semiconnected(&dg));
+    }
+
+    #[test]
+    fn test_is_semiconnected_fork_not() {
+        // a->b, a->c: NOT semiconnected (no path b->c or c->b)
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("a", "c").unwrap();
+        assert!(!is_semiconnected(&dg));
+    }
+
+    #[test]
+    fn test_is_semiconnected_cycle() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        dg.add_edge("c", "a").unwrap();
+        assert!(is_semiconnected(&dg));
+    }
+
+    #[test]
+    fn test_is_semiconnected_empty() {
+        let dg = DiGraph::strict();
+        assert!(is_semiconnected(&dg));
+    }
+
+    // -----------------------------------------------------------------------
+    // kosaraju_strongly_connected_components
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_kosaraju_simple_cycle() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        dg.add_edge("c", "a").unwrap();
+        let sccs = kosaraju_strongly_connected_components(&dg);
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0], vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_kosaraju_two_components() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        dg.add_edge("a", "c").unwrap();
+        dg.add_edge("c", "d").unwrap();
+        dg.add_edge("d", "c").unwrap();
+        let sccs = kosaraju_strongly_connected_components(&dg);
+        assert_eq!(sccs.len(), 2);
+        // Check that all expected nodes are present
+        let all_nodes: HashSet<&str> = sccs.iter().flat_map(|c| c.iter().map(|s| s.as_str())).collect();
+        assert!(all_nodes.contains("a"));
+        assert!(all_nodes.contains("b"));
+        assert!(all_nodes.contains("c"));
+        assert!(all_nodes.contains("d"));
+    }
+
+    #[test]
+    fn test_kosaraju_singletons() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        let sccs = kosaraju_strongly_connected_components(&dg);
+        assert_eq!(sccs.len(), 3);
+    }
+
+    #[test]
+    fn test_kosaraju_matches_tarjan() {
+        // Both algorithms should produce the same SCCs
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        dg.add_edge("c", "a").unwrap();
+        dg.add_edge("c", "d").unwrap();
+        dg.add_edge("d", "e").unwrap();
+        dg.add_edge("e", "d").unwrap();
+        let tarjan = strongly_connected_components(&dg);
+        let kosaraju = kosaraju_strongly_connected_components(&dg);
+        // Same number of components
+        assert_eq!(tarjan.len(), kosaraju.len());
+        // Same sets of nodes
+        let mut tarjan_sets: Vec<Vec<String>> = tarjan.into_iter().map(|mut c| { c.sort_unstable(); c }).collect();
+        let mut kosaraju_sets: Vec<Vec<String>> = kosaraju.into_iter().map(|mut c| { c.sort_unstable(); c }).collect();
+        tarjan_sets.sort();
+        kosaraju_sets.sort();
+        assert_eq!(tarjan_sets, kosaraju_sets);
+    }
+
+    #[test]
+    fn test_kosaraju_empty() {
+        let dg = DiGraph::strict();
+        assert!(kosaraju_strongly_connected_components(&dg).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // attracting_components
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_attracting_components_single_scc() {
+        // a->b->c->a: one SCC, it's attracting (no outgoing edges)
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        dg.add_edge("c", "a").unwrap();
+        let att = attracting_components(&dg);
+        assert_eq!(att.len(), 1);
+        assert_eq!(att[0], vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_attracting_components_chain() {
+        // a->b->c: three singletons, only c is attracting (no outgoing)
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        let att = attracting_components(&dg);
+        assert_eq!(att.len(), 1);
+        assert_eq!(att[0], vec!["c"]);
+    }
+
+    #[test]
+    fn test_attracting_components_two_sinks() {
+        // a->b, a->c: b and c are both attracting singletons
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("a", "c").unwrap();
+        let att = attracting_components(&dg);
+        assert_eq!(att.len(), 2);
+    }
+
+    #[test]
+    fn test_number_attracting_components() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("a", "c").unwrap();
+        assert_eq!(number_attracting_components(&dg), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // is_attracting_component
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_attracting_component_yes() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "c").unwrap();
+        dg.add_edge("c", "b").unwrap();
+        // {b,c} is an SCC with no outgoing edges (a->b is incoming)
+        assert!(is_attracting_component(&dg, &["b", "c"]));
+    }
+
+    #[test]
+    fn test_is_attracting_component_no_outgoing() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        dg.add_edge("b", "a").unwrap();
+        dg.add_edge("a", "c").unwrap();
+        // {a,b} has outgoing edge a->c
+        assert!(!is_attracting_component(&dg, &["a", "b"]));
+    }
+
+    #[test]
+    fn test_is_attracting_component_not_strongly_connected() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("a", "b").unwrap();
+        // {a,b} is not strongly connected (no b->a edge)
+        assert!(!is_attracting_component(&dg, &["a", "b"]));
+    }
+
+    #[test]
+    fn test_is_attracting_component_empty() {
+        let dg = DiGraph::strict();
+        assert!(!is_attracting_component(&dg, &[]));
     }
 }

@@ -4335,6 +4335,192 @@ fn path_weight(
 }
 
 // ===========================================================================
+// Component algorithms
+// ===========================================================================
+
+/// Return the connected component containing the given node.
+#[pyfunction]
+pub fn node_connected_component(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    n: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "node_connected_component")?;
+    let inner = gr.undirected();
+    let node = node_key_to_string(py, n)?;
+    validate_node(&gr, &node, n)?;
+    let result = py.allow_threads(|| fnx_algorithms::node_connected_component(inner, &node));
+    Ok(result.iter().map(|s| gr.py_node_key(py, s)).collect())
+}
+
+/// Return True if the graph is biconnected.
+#[pyfunction]
+pub fn is_biconnected(
+    _py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_biconnected")?;
+    let inner = gr.undirected();
+    Ok(fnx_algorithms::is_biconnected(inner))
+}
+
+/// Return the biconnected components of the graph.
+#[pyfunction]
+pub fn biconnected_components(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "biconnected_components")?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::biconnected_components(inner));
+    result
+        .iter()
+        .map(|comp| {
+            let py_set: Vec<PyObject> = comp.iter().map(|n| gr.py_node_key(py, n)).collect();
+            py_set.into_pyobject(py).map(|obj| obj.into_any().unbind())
+        })
+        .collect()
+}
+
+/// Return the biconnected component edges.
+#[pyfunction]
+pub fn biconnected_component_edges(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Vec<(PyObject, PyObject)>>> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "biconnected_component_edges")?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::biconnected_component_edges(inner));
+    Ok(result
+        .iter()
+        .map(|comp| {
+            comp.iter()
+                .map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v)))
+                .collect()
+        })
+        .collect())
+}
+
+/// Return True if the directed graph is semiconnected.
+#[pyfunction]
+pub fn is_semiconnected(
+    _py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "is_semiconnected is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        Ok(fnx_algorithms::is_semiconnected(&dg.inner))
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the SCCs using Kosaraju's algorithm.
+#[pyfunction]
+pub fn kosaraju_strongly_connected_components(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "kosaraju_strongly_connected_components is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let result = fnx_algorithms::kosaraju_strongly_connected_components(&dg.inner);
+        result
+            .iter()
+            .map(|comp| {
+                let py_set: Vec<PyObject> = comp.iter().map(|n| gr.py_node_key(py, n)).collect();
+                py_set.into_pyobject(py).map(|obj| obj.into_any().unbind())
+            })
+            .collect()
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the attracting components of a directed graph.
+#[pyfunction]
+pub fn attracting_components(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "attracting_components is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let result = fnx_algorithms::attracting_components(&dg.inner);
+        result
+            .iter()
+            .map(|comp| {
+                let py_set: Vec<PyObject> = comp.iter().map(|n| gr.py_node_key(py, n)).collect();
+                py_set.into_pyobject(py).map(|obj| obj.into_any().unbind())
+            })
+            .collect()
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return the number of attracting components.
+#[pyfunction]
+pub fn number_attracting_components(
+    _py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<usize> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "number_attracting_components is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        Ok(fnx_algorithms::number_attracting_components(&dg.inner))
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return True if the given component is an attracting component.
+#[pyfunction]
+pub fn is_attracting_component(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    component: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "is_attracting_component is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let comp_iter = component.try_iter()?;
+        let comp_strings: Vec<String> = comp_iter
+            .map(|item| node_key_to_string(py, &item?))
+            .collect::<PyResult<Vec<String>>>()?;
+        let comp_refs: Vec<&str> = comp_strings.iter().map(|s| s.as_str()).collect();
+        Ok(fnx_algorithms::is_attracting_component(&dg.inner, &comp_refs))
+    } else {
+        unreachable!()
+    }
+}
+
+// ===========================================================================
 // Registration
 // ===========================================================================
 
@@ -4553,5 +4739,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(negative_edge_cycle, m)?)?;
     m.add_function(wrap_pyfunction!(predecessor_fn, m)?)?;
     m.add_function(wrap_pyfunction!(path_weight, m)?)?;
+    // Component algorithms
+    m.add_function(wrap_pyfunction!(node_connected_component, m)?)?;
+    m.add_function(wrap_pyfunction!(is_biconnected, m)?)?;
+    m.add_function(wrap_pyfunction!(biconnected_components, m)?)?;
+    m.add_function(wrap_pyfunction!(biconnected_component_edges, m)?)?;
+    m.add_function(wrap_pyfunction!(is_semiconnected, m)?)?;
+    m.add_function(wrap_pyfunction!(kosaraju_strongly_connected_components, m)?)?;
+    m.add_function(wrap_pyfunction!(attracting_components, m)?)?;
+    m.add_function(wrap_pyfunction!(number_attracting_components, m)?)?;
+    m.add_function(wrap_pyfunction!(is_attracting_component, m)?)?;
     Ok(())
 }
