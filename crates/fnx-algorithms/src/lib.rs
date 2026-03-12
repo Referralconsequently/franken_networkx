@@ -12632,6 +12632,125 @@ pub fn is_distance_regular(graph: &Graph) -> bool {
 }
 
 // ===========================================================================
+// Matching algorithms — additional
+// ===========================================================================
+
+/// Check if a set of edges is an edge cover (every node is incident to at least one edge).
+#[must_use]
+pub fn is_edge_cover(graph: &Graph, edges: &[(&str, &str)]) -> bool {
+    let nodes = graph.nodes_ordered();
+    if nodes.is_empty() {
+        return true;
+    }
+    let mut covered: HashSet<&str> = HashSet::new();
+    for &(u, v) in edges {
+        // Verify edge exists in graph
+        let exists = graph.neighbors_iter(u).is_some_and(|mut nbrs| nbrs.any(|n| n == v));
+        if !exists {
+            return false;
+        }
+        covered.insert(u);
+        covered.insert(v);
+    }
+    nodes.iter().all(|&n| covered.contains(n))
+}
+
+/// Find the maximum weight clique.
+/// Uses a branch-and-bound approach. Each node's weight comes from the given attribute
+/// (default 1.0 if not present).
+/// Returns (clique_nodes, total_weight).
+#[must_use]
+pub fn max_weight_clique(graph: &Graph, weight_attr: &str) -> (Vec<String>, f64) {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return (vec![], 0.0);
+    }
+
+    let node_to_idx: HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, &nd)| (nd, i)).collect();
+
+    // Build adjacency matrix
+    let mut adj = vec![vec![false; n]; n];
+    for (i, &u) in nodes.iter().enumerate() {
+        if let Some(neighbors) = graph.neighbors_iter(u) {
+            for v in neighbors {
+                let j = node_to_idx[v];
+                adj[i][j] = true;
+            }
+        }
+    }
+
+    // Node weights
+    let weights: Vec<f64> = nodes
+        .iter()
+        .map(|&node| {
+            graph
+                .node_attrs(node)
+                .and_then(|attrs| attrs.get(weight_attr))
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(1.0)
+        })
+        .collect();
+
+    let mut best_clique: Vec<usize> = vec![];
+    let mut best_weight: f64 = 0.0;
+
+    fn branch_and_bound(
+        adj: &[Vec<bool>],
+        weights: &[f64],
+        candidates: &[usize],
+        current: &mut Vec<usize>,
+        current_weight: f64,
+        best_clique: &mut Vec<usize>,
+        best_weight: &mut f64,
+    ) {
+        if current_weight > *best_weight {
+            *best_weight = current_weight;
+            *best_clique = current.clone();
+        }
+        // Upper bound: current weight + sum of all candidate weights
+        let upper_bound: f64 = current_weight + candidates.iter().map(|&i| weights[i]).sum::<f64>();
+        if upper_bound <= *best_weight {
+            return;
+        }
+        for (pos, &v) in candidates.iter().enumerate() {
+            let new_candidates: Vec<usize> = candidates[pos + 1..]
+                .iter()
+                .filter(|&&u| adj[v][u])
+                .copied()
+                .collect();
+            current.push(v);
+            branch_and_bound(
+                adj,
+                weights,
+                &new_candidates,
+                current,
+                current_weight + weights[v],
+                best_clique,
+                best_weight,
+            );
+            current.pop();
+        }
+    }
+
+    let all_nodes: Vec<usize> = (0..n).collect();
+    let mut current = vec![];
+    branch_and_bound(
+        &adj,
+        &weights,
+        &all_nodes,
+        &mut current,
+        0.0,
+        &mut best_clique,
+        &mut best_weight,
+    );
+
+    let clique_names: Vec<String> = best_clique.iter().map(|&i| nodes[i].to_string()).collect();
+    (clique_names, best_weight)
+}
+
+// ===========================================================================
 // DAG algorithms — additional
 // ===========================================================================
 
@@ -12999,6 +13118,9 @@ mod tests {
         is_weighted, is_negatively_weighted, is_path_graph,
         non_edges, is_distance_regular,
         // DAG algorithms — additional
+        // Matching — additional
+        is_edge_cover, max_weight_clique,
+        // DAG — additional
         is_aperiodic, antichains, immediate_dominators, dominance_frontiers,
         // Additional shortest path algorithms
         dijkstra_path_length, bellman_ford_path_length,
@@ -20899,5 +21021,65 @@ mod tests {
         // b's frontier is {d}, c's frontier is {d}
         assert!(df.get("b").is_some_and(|f| f.contains(&"d".to_string())));
         assert!(df.get("c").is_some_and(|f| f.contains(&"d".to_string())));
+    }
+
+    // -----------------------------------------------------------------------
+    // Matching algorithms — additional
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_edge_cover_valid() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        assert!(is_edge_cover(&g, &[("a", "b"), ("b", "c")]));
+    }
+
+    #[test]
+    fn test_is_edge_cover_missing_node() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        assert!(!is_edge_cover(&g, &[("a", "b")])); // c not covered
+    }
+
+    #[test]
+    fn test_is_edge_cover_invalid_edge() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        g.add_node("c");
+        assert!(!is_edge_cover(&g, &[("a", "c")])); // a-c not in graph
+    }
+
+    #[test]
+    fn test_max_weight_clique_triangle() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        let (clique, weight) = max_weight_clique(&g, "weight");
+        assert_eq!(clique.len(), 3);
+        assert!((weight - 3.0).abs() < 1e-9); // Default weight 1.0 each
+    }
+
+    #[test]
+    fn test_max_weight_clique_weighted() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        // Give d a high weight but it's isolated
+        g.add_node_with_attrs("d", [("weight".to_owned(), "100".to_owned())].into());
+        let (_clique, weight) = max_weight_clique(&g, "weight");
+        // d alone (weight 100) vs triangle (weight 3)
+        assert!(weight >= 100.0);
+    }
+
+    #[test]
+    fn test_max_weight_clique_empty() {
+        let g = Graph::strict();
+        let (clique, weight) = max_weight_clique(&g, "weight");
+        assert!(clique.is_empty());
+        assert!((weight - 0.0).abs() < 1e-9);
     }
 }

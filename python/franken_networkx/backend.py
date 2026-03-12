@@ -233,6 +233,9 @@ _SUPPORTED_ALGORITHMS = {
     "is_distance_regular": fnx.is_distance_regular,
     # DAG algorithms — additional
     "is_aperiodic": fnx.is_aperiodic,
+    # Matching algorithms — additional
+    "is_edge_cover": fnx.is_edge_cover,
+    "max_weight_clique": fnx.max_weight_clique,
     "antichains": fnx.antichains,
     "immediate_dominators": fnx.immediate_dominators,
     "dominance_frontiers": fnx.dominance_frontiers,

@@ -401,6 +401,12 @@ from franken_networkx._fnx import (
     is_distance_regular,
 )
 
+# Algorithm functions — matching additional
+from franken_networkx._fnx import (
+    is_edge_cover,
+    max_weight_clique,
+)
+
 # Algorithm functions — DAG additional
 from franken_networkx._fnx import (
     is_aperiodic,
@@ -1270,6 +1276,9 @@ __all__ = [
     "is_negatively_weighted",
     "is_path",
     "is_distance_regular",
+    # Algorithms — matching additional
+    "is_edge_cover",
+    "max_weight_clique",
     # Algorithms — DAG additional
     "is_aperiodic",
     "antichains",

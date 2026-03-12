@@ -4829,6 +4829,52 @@ pub fn is_distance_regular(
 }
 
 // ===========================================================================
+// Matching algorithms — additional
+// ===========================================================================
+
+#[pyfunction]
+#[pyo3(signature = (g, edges))]
+pub fn is_edge_cover(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    edges: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_edge_cover")?;
+    let inner = gr.undirected();
+    let edge_iter = edges.try_iter()?;
+    let mut edge_pairs: Vec<(String, String)> = Vec::new();
+    for item in edge_iter {
+        let item = item?;
+        let tuple = item.downcast::<pyo3::types::PyTuple>()?;
+        let u = node_key_to_string(py, &tuple.get_item(0)?)?;
+        let v = node_key_to_string(py, &tuple.get_item(1)?)?;
+        edge_pairs.push((u, v));
+    }
+    let edge_refs: Vec<(&str, &str)> = edge_pairs
+        .iter()
+        .map(|(u, v)| (u.as_str(), v.as_str()))
+        .collect();
+    Ok(fnx_algorithms::is_edge_cover(inner, &edge_refs))
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, weight = "weight"))]
+pub fn max_weight_clique(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    weight: &str,
+) -> PyResult<(Vec<PyObject>, f64)> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "max_weight_clique")?;
+    let inner = gr.undirected();
+    let w = weight.to_string();
+    let (clique, total_weight) = py.allow_threads(|| fnx_algorithms::max_weight_clique(inner, &w));
+    let py_clique: Vec<PyObject> = clique.iter().map(|n| gr.py_node_key(py, n)).collect();
+    Ok((py_clique, total_weight))
+}
+
+// ===========================================================================
 // DAG algorithms — additional
 // ===========================================================================
 
@@ -5181,6 +5227,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_negatively_weighted, m)?)?;
     m.add_function(wrap_pyfunction!(is_path, m)?)?;
     m.add_function(wrap_pyfunction!(is_distance_regular, m)?)?;
+    // Matching algorithms — additional
+    m.add_function(wrap_pyfunction!(is_edge_cover, m)?)?;
+    m.add_function(wrap_pyfunction!(max_weight_clique, m)?)?;
     // DAG algorithms — additional
     m.add_function(wrap_pyfunction!(is_aperiodic, m)?)?;
     m.add_function(wrap_pyfunction!(antichains, m)?)?;
