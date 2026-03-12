@@ -12334,6 +12334,303 @@ pub fn is_attracting_component(digraph: &DiGraph, component: &[&str]) -> bool {
     reachable_back.len() == comp_set.len()
 }
 
+// ===========================================================================
+// Graph predicates
+// ===========================================================================
+
+/// Check if a degree sequence is graphical (Erdős–Gallai theorem).
+/// A sequence is graphical if it can be the degree sequence of a simple graph.
+#[must_use]
+pub fn is_graphical(sequence: &[usize]) -> bool {
+    if sequence.is_empty() {
+        return true;
+    }
+    let sum: usize = sequence.iter().sum();
+    if !sum.is_multiple_of(2) {
+        return false;
+    }
+    let n = sequence.len();
+    let mut sorted = sequence.to_vec();
+    sorted.sort_unstable_by_key(|d| std::cmp::Reverse(*d));
+    if sorted[0] >= n {
+        return false;
+    }
+    let mut prefix_sum = 0usize;
+    for k in 1..=n {
+        prefix_sum += sorted[k - 1];
+        let rhs_base = k * (k - 1);
+        let rhs_sum: usize = sorted[k..].iter().map(|&d| d.min(k)).sum();
+        if prefix_sum > rhs_base + rhs_sum {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check if a directed degree sequence is digraphical (Fulkerson's conditions).
+/// Each element is (out_degree, in_degree).
+#[must_use]
+pub fn is_digraphical(sequence: &[(usize, usize)]) -> bool {
+    if sequence.is_empty() {
+        return true;
+    }
+    let out_sum: usize = sequence.iter().map(|(o, _)| o).sum();
+    let in_sum: usize = sequence.iter().map(|(_, i)| i).sum();
+    if out_sum != in_sum {
+        return false;
+    }
+    let n = sequence.len();
+    for &(o, i) in sequence {
+        if o >= n || i >= n {
+            return false;
+        }
+    }
+    let mut pairs = sequence.to_vec();
+    pairs.sort_unstable_by_key(|p| std::cmp::Reverse(p.0));
+    for k in 1..=n {
+        let lhs: usize = pairs[..k].iter().map(|(o, _)| o).sum();
+        let rhs: usize = pairs[..k].iter().map(|p| p.1.min(k - 1)).sum::<usize>()
+            + pairs[k..].iter().map(|p| p.1.min(k)).sum::<usize>();
+        if lhs > rhs {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check if a sequence is multigraphical (can be degree sequence of a multigraph).
+/// A sequence is multigraphical iff its sum is even and max degree <= sum of remaining.
+#[must_use]
+pub fn is_multigraphical(sequence: &[usize]) -> bool {
+    if sequence.is_empty() {
+        return true;
+    }
+    let sum: usize = sequence.iter().sum();
+    if !sum.is_multiple_of(2) {
+        return false;
+    }
+    let max_deg = *sequence.iter().max().unwrap();
+    max_deg <= sum - max_deg
+}
+
+/// Check if a sequence is pseudographical (can be degree sequence of a pseudograph).
+/// A pseudograph allows self-loops. A sequence is pseudographical iff its sum is even.
+#[must_use]
+pub fn is_pseudographical(sequence: &[usize]) -> bool {
+    sequence.iter().sum::<usize>().is_multiple_of(2)
+}
+
+/// Check if an undirected graph is regular (all nodes have the same degree).
+#[must_use]
+pub fn is_regular(graph: &Graph) -> bool {
+    let nodes = graph.nodes_ordered();
+    if nodes.len() <= 1 {
+        return true;
+    }
+    let first_deg = node_degree(graph, nodes[0]);
+    nodes[1..].iter().all(|&node| node_degree(graph, node) == first_deg)
+}
+
+/// Check if an undirected graph is k-regular (all nodes have degree k).
+#[must_use]
+pub fn is_k_regular(graph: &Graph, k: usize) -> bool {
+    graph.nodes_ordered().iter().all(|&node| node_degree(graph, node) == k)
+}
+
+fn node_degree(graph: &Graph, node: &str) -> usize {
+    graph.neighbors_iter(node).map_or(0, Iterator::count)
+}
+
+/// Check if a directed graph is a tournament (complete oriented graph).
+/// Every pair of distinct vertices has exactly one directed edge.
+#[must_use]
+pub fn is_tournament(digraph: &DiGraph) -> bool {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    let expected_edges = n * n.wrapping_sub(1) / 2;
+    let edge_count: usize = nodes
+        .iter()
+        .map(|&node| digraph.successors(node).map_or(0, |s| s.len()))
+        .sum();
+    if edge_count != expected_edges {
+        return false;
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let has_ij = digraph.successors(nodes[i]).is_some_and(|s| s.contains(&nodes[j]));
+            let has_ji = digraph.successors(nodes[j]).is_some_and(|s| s.contains(&nodes[i]));
+            if has_ij == has_ji {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Check if an undirected graph has weighted edges.
+#[must_use]
+pub fn is_weighted(graph: &Graph, weight_attr: &str) -> bool {
+    let nodes = graph.nodes_ordered();
+    let mut has_edges = false;
+    for &u in &nodes {
+        if let Some(neighbors) = graph.neighbors_iter(u) {
+            for v in neighbors {
+                has_edges = true;
+                if graph.edge_attrs(u, v).and_then(|attrs| attrs.get(weight_attr)).is_none() {
+                    return false;
+                }
+            }
+        }
+    }
+    has_edges
+}
+
+/// Check if an undirected graph has negatively weighted edges.
+#[must_use]
+pub fn is_negatively_weighted(graph: &Graph, weight_attr: &str) -> bool {
+    let nodes = graph.nodes_ordered();
+    for &u in &nodes {
+        if let Some(neighbors) = graph.neighbors_iter(u) {
+            for v in neighbors {
+                if graph
+                    .edge_attrs(u, v)
+                    .and_then(|attrs| attrs.get(weight_attr))
+                    .and_then(|val| val.parse::<f64>().ok())
+                    .is_some_and(|w| w < 0.0)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if a graph is a path graph (connected, every node has degree <= 2,
+/// exactly 2 nodes have degree 1 unless single node).
+#[must_use]
+pub fn is_path_graph(graph: &Graph) -> bool {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return false;
+    }
+    if n == 1 {
+        return true;
+    }
+    let mut degree_one_count = 0usize;
+    for &node in &nodes {
+        let deg = node_degree(graph, node);
+        match deg {
+            0 => return false,
+            1 => degree_one_count += 1,
+            2 => {}
+            _ => return false,
+        }
+    }
+    degree_one_count == 2 && is_connected(graph).is_connected
+}
+
+/// Return all non-edges of the graph (pairs of nodes not connected by an edge).
+#[must_use]
+pub fn non_edges(graph: &Graph) -> Vec<(String, String)> {
+    let nodes = graph.nodes_ordered();
+    let mut result = Vec::new();
+    for i in 0..nodes.len() {
+        for j in (i + 1)..nodes.len() {
+            let u = nodes[i];
+            let v = nodes[j];
+            let has_edge = graph.neighbors_iter(u).is_some_and(|mut nbrs| nbrs.any(|nb| nb == v));
+            if !has_edge {
+                result.push((u.to_string(), v.to_string()));
+            }
+        }
+    }
+    result
+}
+
+/// Check if a graph is distance-regular.
+/// A connected graph is distance-regular if for any two vertices u, v at distance d,
+/// the numbers of neighbors of v at distances d-1, d, d+1 from u depend only on d.
+#[must_use]
+pub fn is_distance_regular(graph: &Graph) -> bool {
+    if !is_connected(graph).is_connected {
+        return false;
+    }
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return true;
+    }
+
+    let node_to_idx: HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(idx, &nd)| (nd, idx)).collect();
+    let mut dist_matrix = vec![vec![usize::MAX; n]; n];
+    for (src_idx, _src) in nodes.iter().enumerate() {
+        dist_matrix[src_idx][src_idx] = 0;
+        let mut queue = VecDeque::new();
+        queue.push_back(src_idx);
+        while let Some(u) = queue.pop_front() {
+            if let Some(neighbors) = graph.neighbors_iter(nodes[u]) {
+                for v_str in neighbors {
+                    let v = node_to_idx[v_str];
+                    if dist_matrix[src_idx][v] == usize::MAX {
+                        dist_matrix[src_idx][v] = dist_matrix[src_idx][u] + 1;
+                        queue.push_back(v);
+                    }
+                }
+            }
+        }
+    }
+
+    let diameter = dist_matrix
+        .iter()
+        .flat_map(|row| row.iter())
+        .filter(|&&d| d != usize::MAX)
+        .copied()
+        .max()
+        .unwrap_or(0);
+
+    for d in 0..=diameter {
+        let mut b_vals: Option<usize> = None;
+        let mut c_vals: Option<usize> = None;
+
+        for (row_idx, row) in dist_matrix.iter().enumerate() {
+            for (col_idx, &dist_val) in row.iter().enumerate() {
+                if dist_val != d {
+                    continue;
+                }
+                let mut b_count = 0;
+                let mut c_count = 0;
+                if let Some(neighbors) = graph.neighbors_iter(nodes[col_idx]) {
+                    for w_str in neighbors {
+                        let w = node_to_idx[w_str];
+                        if dist_matrix[row_idx][w] == d + 1 {
+                            b_count += 1;
+                        }
+                        if d > 0 && dist_matrix[row_idx][w] == d - 1 {
+                            c_count += 1;
+                        }
+                    }
+                }
+                match b_vals {
+                    Some(prev_b) if prev_b != b_count => return false,
+                    None => b_vals = Some(b_count),
+                    _ => {}
+                }
+                if d > 0 {
+                    match c_vals {
+                        Some(prev_c) if prev_c != c_count => return false,
+                        None => c_vals = Some(c_count),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -12412,6 +12709,11 @@ mod tests {
         node_connected_component, is_biconnected, biconnected_components, biconnected_component_edges,
         is_semiconnected, kosaraju_strongly_connected_components,
         attracting_components, number_attracting_components, is_attracting_component,
+        // Graph predicates
+        is_graphical, is_digraphical, is_multigraphical, is_pseudographical,
+        is_regular, is_k_regular, is_tournament,
+        is_weighted, is_negatively_weighted, is_path_graph,
+        non_edges, is_distance_regular,
         // Additional shortest path algorithms
         dijkstra_path_length, bellman_ford_path_length,
         single_source_dijkstra_full, single_source_dijkstra_path, single_source_dijkstra_path_length,
@@ -20053,5 +20355,164 @@ mod tests {
         // Cycle should start and end with the same node
         assert_eq!(cycle.first(), cycle.last());
         assert!(cycle.len() >= 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Graph predicates
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_is_graphical_valid() {
+        assert!(is_graphical(&[2, 2, 2])); // triangle
+        assert!(is_graphical(&[1, 1])); // single edge
+        assert!(is_graphical(&[0])); // isolated node
+        assert!(is_graphical(&[])); // empty
+    }
+
+    #[test]
+    fn test_is_graphical_invalid() {
+        assert!(!is_graphical(&[3, 1, 1])); // can't make it
+        assert!(!is_graphical(&[1])); // odd sum
+        assert!(!is_graphical(&[5, 1, 1])); // degree > n-1
+    }
+
+    #[test]
+    fn test_is_digraphical_valid() {
+        assert!(is_digraphical(&[(1, 1), (1, 1)])); // a->b, b->a
+        assert!(is_digraphical(&[(1, 0), (0, 1)])); // a->b
+        assert!(is_digraphical(&[]));
+    }
+
+    #[test]
+    fn test_is_digraphical_invalid() {
+        assert!(!is_digraphical(&[(2, 0), (0, 1)])); // out-sum != in-sum
+    }
+
+    #[test]
+    fn test_is_multigraphical() {
+        assert!(is_multigraphical(&[2, 2, 2]));
+        assert!(is_multigraphical(&[4, 2, 2]));
+        assert!(!is_multigraphical(&[1])); // odd sum
+    }
+
+    #[test]
+    fn test_is_pseudographical() {
+        assert!(is_pseudographical(&[2, 2, 2]));
+        assert!(is_pseudographical(&[4, 2, 2]));
+        assert!(is_pseudographical(&[2])); // self-loop
+        assert!(!is_pseudographical(&[1])); // odd sum
+    }
+
+    #[test]
+    fn test_is_regular() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!(is_regular(&g));
+    }
+
+    #[test]
+    fn test_is_regular_not() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        assert!(!is_regular(&g));
+    }
+
+    #[test]
+    fn test_is_k_regular() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!(is_k_regular(&g, 2));
+        assert!(!is_k_regular(&g, 1));
+    }
+
+    #[test]
+    fn test_is_tournament() {
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "c");
+        assert!(is_tournament(&g));
+    }
+
+    #[test]
+    fn test_is_tournament_not() {
+        let mut g = DiGraph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        // missing a->c or c->a
+        assert!(!is_tournament(&g));
+    }
+
+    #[test]
+    fn test_is_weighted() {
+        let mut g = Graph::strict();
+        g.add_edge_with_attrs("a", "b", [("weight".to_owned(), "1.0".to_owned())].into()).unwrap();
+        assert!(is_weighted(&g, "weight"));
+        assert!(!is_weighted(&g, "cost"));
+    }
+
+    #[test]
+    fn test_is_negatively_weighted() {
+        let mut g = Graph::strict();
+        g.add_edge_with_attrs("a", "b", [("weight".to_owned(), "-1.0".to_owned())].into()).unwrap();
+        assert!(is_negatively_weighted(&g, "weight"));
+
+        let mut g2 = Graph::strict();
+        g2.add_edge_with_attrs("a", "b", [("weight".to_owned(), "1.0".to_owned())].into()).unwrap();
+        assert!(!is_negatively_weighted(&g2, "weight"));
+    }
+
+    #[test]
+    fn test_is_path_graph() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        assert!(is_path_graph(&g));
+    }
+
+    #[test]
+    fn test_is_path_graph_not() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!(!is_path_graph(&g));
+    }
+
+    #[test]
+    fn test_non_edges() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        g.add_node("c");
+        let ne = non_edges(&g);
+        // Should have (a,c) and (b,c) in some order
+        assert_eq!(ne.len(), 2);
+    }
+
+    #[test]
+    fn test_is_distance_regular_cycle() {
+        // C5 is distance-regular
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        let _ = g.add_edge("d", "e");
+        let _ = g.add_edge("e", "a");
+        assert!(is_distance_regular(&g));
+    }
+
+    #[test]
+    fn test_is_distance_regular_path_not() {
+        // Path is not distance-regular
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        assert!(!is_distance_regular(&g));
     }
 }

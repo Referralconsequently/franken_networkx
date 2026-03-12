@@ -219,6 +219,18 @@ _SUPPORTED_ALGORITHMS = {
     "find_cycle": fnx.find_cycle,
     "girth": fnx.girth,
     "find_negative_cycle": fnx.find_negative_cycle,
+    # Graph predicates
+    "is_graphical": fnx.is_graphical,
+    "is_digraphical": fnx.is_digraphical,
+    "is_multigraphical": fnx.is_multigraphical,
+    "is_pseudographical": fnx.is_pseudographical,
+    "is_regular": fnx.is_regular,
+    "is_k_regular": fnx.is_k_regular,
+    "is_tournament": fnx.is_tournament,
+    "is_weighted": fnx.is_weighted,
+    "is_negatively_weighted": fnx.is_negatively_weighted,
+    "is_path": fnx.is_path,
+    "is_distance_regular": fnx.is_distance_regular,
     # Additional shortest path algorithms
     "dijkstra_path_length": fnx.dijkstra_path_length,
     "bellman_ford_path_length": fnx.bellman_ford_path_length,

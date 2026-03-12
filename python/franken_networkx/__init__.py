@@ -386,6 +386,21 @@ from franken_networkx._fnx import (
     find_negative_cycle,
 )
 
+# Algorithm functions — graph predicates
+from franken_networkx._fnx import (
+    is_graphical,
+    is_digraphical,
+    is_multigraphical,
+    is_pseudographical,
+    is_regular,
+    is_k_regular,
+    is_tournament,
+    is_weighted,
+    is_negatively_weighted,
+    is_path,
+    is_distance_regular,
+)
+
 # Algorithm functions — additional shortest path
 from franken_networkx._fnx import (
     dijkstra_path_length,
@@ -1235,6 +1250,18 @@ __all__ = [
     "find_cycle",
     "girth",
     "find_negative_cycle",
+    # Algorithms — graph predicates
+    "is_graphical",
+    "is_digraphical",
+    "is_multigraphical",
+    "is_pseudographical",
+    "is_regular",
+    "is_k_regular",
+    "is_tournament",
+    "is_weighted",
+    "is_negatively_weighted",
+    "is_path",
+    "is_distance_regular",
     # Exception
     "NetworkXNoCycle",
     # Algorithms — additional shortest path

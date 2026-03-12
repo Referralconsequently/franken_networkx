@@ -4706,6 +4706,129 @@ pub fn find_negative_cycle(
 }
 
 // ===========================================================================
+// Graph predicates
+// ===========================================================================
+
+#[pyfunction]
+#[pyo3(signature = (sequence,))]
+pub fn is_graphical(sequence: Vec<usize>) -> bool {
+    fnx_algorithms::is_graphical(&sequence)
+}
+
+#[pyfunction]
+#[pyo3(signature = (sequence,))]
+pub fn is_digraphical(sequence: Vec<(usize, usize)>) -> bool {
+    fnx_algorithms::is_digraphical(&sequence)
+}
+
+#[pyfunction]
+#[pyo3(signature = (sequence,))]
+pub fn is_multigraphical(sequence: Vec<usize>) -> bool {
+    fnx_algorithms::is_multigraphical(&sequence)
+}
+
+#[pyfunction]
+#[pyo3(signature = (sequence,))]
+pub fn is_pseudographical(sequence: Vec<usize>) -> bool {
+    fnx_algorithms::is_pseudographical(&sequence)
+}
+
+#[pyfunction]
+#[pyo3(signature = (g,))]
+pub fn is_regular(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_regular")?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::is_regular(inner)))
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, k))]
+pub fn is_k_regular(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    k: usize,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_k_regular")?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::is_k_regular(inner, k)))
+}
+
+#[pyfunction]
+#[pyo3(signature = (g,))]
+pub fn is_tournament(
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "is_tournament is not defined for undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        Ok(fnx_algorithms::is_tournament(&dg.inner))
+    } else {
+        unreachable!()
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, weight = "weight"))]
+pub fn is_weighted(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    weight: &str,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_weighted")?;
+    let inner = gr.undirected();
+    let w = weight.to_string();
+    Ok(py.allow_threads(|| fnx_algorithms::is_weighted(inner, &w)))
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, weight = "weight"))]
+pub fn is_negatively_weighted(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    weight: &str,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_negatively_weighted")?;
+    let inner = gr.undirected();
+    let w = weight.to_string();
+    Ok(py.allow_threads(|| fnx_algorithms::is_negatively_weighted(inner, &w)))
+}
+
+#[pyfunction]
+#[pyo3(signature = (g,))]
+pub fn is_path(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_path")?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::is_path_graph(inner)))
+}
+
+#[pyfunction]
+#[pyo3(signature = (g,))]
+pub fn is_distance_regular(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    require_undirected(&gr, "is_distance_regular")?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::is_distance_regular(inner)))
+}
+
+// ===========================================================================
 // Registration
 // ===========================================================================
 
@@ -4945,5 +5068,17 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Cycle algorithms — additional
     m.add_function(wrap_pyfunction!(girth, m)?)?;
     m.add_function(wrap_pyfunction!(find_negative_cycle, m)?)?;
+    // Graph predicates
+    m.add_function(wrap_pyfunction!(is_graphical, m)?)?;
+    m.add_function(wrap_pyfunction!(is_digraphical, m)?)?;
+    m.add_function(wrap_pyfunction!(is_multigraphical, m)?)?;
+    m.add_function(wrap_pyfunction!(is_pseudographical, m)?)?;
+    m.add_function(wrap_pyfunction!(is_regular, m)?)?;
+    m.add_function(wrap_pyfunction!(is_k_regular, m)?)?;
+    m.add_function(wrap_pyfunction!(is_tournament, m)?)?;
+    m.add_function(wrap_pyfunction!(is_weighted, m)?)?;
+    m.add_function(wrap_pyfunction!(is_negatively_weighted, m)?)?;
+    m.add_function(wrap_pyfunction!(is_path, m)?)?;
+    m.add_function(wrap_pyfunction!(is_distance_regular, m)?)?;
     Ok(())
 }
