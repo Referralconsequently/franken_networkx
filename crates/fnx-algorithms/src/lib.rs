@@ -7560,6 +7560,187 @@ pub fn s_metric(graph: &Graph) -> f64 {
 }
 
 // ===========================================================================
+// Strongly Connected Components (DiGraph)
+// ===========================================================================
+
+/// Return the strongly connected components of a directed graph using
+/// Tarjan's algorithm.
+///
+/// Each component is a sorted `Vec<String>`. Components are returned sorted
+/// lexicographically by their smallest element (matches NetworkX ordering).
+#[must_use]
+pub fn strongly_connected_components(digraph: &DiGraph) -> Vec<Vec<String>> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    let mut index_counter: usize = 0;
+    let mut stack: Vec<&str> = Vec::new();
+    let mut on_stack: HashSet<&str> = HashSet::new();
+    let mut indices: HashMap<&str, usize> = HashMap::with_capacity(n);
+    let mut lowlinks: HashMap<&str, usize> = HashMap::with_capacity(n);
+    let mut components: Vec<Vec<String>> = Vec::new();
+
+    // Iterative Tarjan's to avoid stack overflow on large graphs
+    for &start in &nodes {
+        if indices.contains_key(start) {
+            continue;
+        }
+        // Work stack: (node, successor_index, is_root_call)
+        let mut work: Vec<(&str, usize, bool)> = Vec::new();
+        indices.insert(start, index_counter);
+        lowlinks.insert(start, index_counter);
+        index_counter += 1;
+        stack.push(start);
+        on_stack.insert(start);
+        work.push((start, 0, true));
+
+        while let Some((v, si, _is_root)) = work.last_mut() {
+            let succs: Vec<&str> = digraph
+                .successors_iter(v)
+                .map(|it| it.collect())
+                .unwrap_or_default();
+            if *si < succs.len() {
+                let w = succs[*si];
+                *si += 1;
+                if !indices.contains_key(w) {
+                    // Tree edge — recurse
+                    indices.insert(w, index_counter);
+                    lowlinks.insert(w, index_counter);
+                    index_counter += 1;
+                    stack.push(w);
+                    on_stack.insert(w);
+                    work.push((w, 0, false));
+                } else if on_stack.contains(w) {
+                    let w_idx = indices[w];
+                    let v_low = lowlinks.get_mut(v).unwrap();
+                    if w_idx < *v_low {
+                        *v_low = w_idx;
+                    }
+                }
+            } else {
+                // All successors processed
+                let v_str = *v;
+                let v_low = lowlinks[v_str];
+                let v_idx = indices[v_str];
+                let popped = work.pop().unwrap();
+
+                if v_low == v_idx {
+                    // Root of an SCC — pop everything up to v
+                    let mut component = Vec::new();
+                    loop {
+                        let w = stack.pop().unwrap();
+                        on_stack.remove(w);
+                        component.push(w.to_owned());
+                        if w == popped.0 {
+                            break;
+                        }
+                    }
+                    component.sort_unstable();
+                    components.push(component);
+                }
+
+                // Propagate lowlink to parent
+                if let Some((parent, _, _)) = work.last() {
+                    let parent_low = lowlinks.get_mut(parent).unwrap();
+                    if v_low < *parent_low {
+                        *parent_low = v_low;
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort components by smallest element for deterministic output
+    components.sort_unstable();
+    components
+}
+
+/// Return the number of strongly connected components.
+#[must_use]
+pub fn number_strongly_connected_components(digraph: &DiGraph) -> usize {
+    strongly_connected_components(digraph).len()
+}
+
+/// Return whether the directed graph is strongly connected.
+#[must_use]
+pub fn is_strongly_connected(digraph: &DiGraph) -> bool {
+    if digraph.node_count() == 0 {
+        // NetworkX raises an exception for empty graphs, but we return false
+        // to match the spirit of "not connected"
+        return false;
+    }
+    number_strongly_connected_components(digraph) == 1
+}
+
+// ===========================================================================
+// Weakly Connected Components (DiGraph)
+// ===========================================================================
+
+/// Return the weakly connected components of a directed graph.
+///
+/// Two nodes are weakly connected if there is a path between them when edge
+/// direction is ignored. Each component is sorted, and components are sorted
+/// by smallest element.
+#[must_use]
+pub fn weakly_connected_components(digraph: &DiGraph) -> Vec<Vec<String>> {
+    let nodes = digraph.nodes_ordered();
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut components: Vec<Vec<String>> = Vec::new();
+
+    for &start in &nodes {
+        if visited.contains(start) {
+            continue;
+        }
+
+        // BFS ignoring direction
+        let mut queue: VecDeque<&str> = VecDeque::new();
+        let mut component: Vec<&str> = Vec::new();
+        queue.push_back(start);
+        visited.insert(start);
+
+        while let Some(current) = queue.pop_front() {
+            component.push(current);
+            // Follow both successors and predecessors (undirected traversal)
+            if let Some(succs) = digraph.successors_iter(current) {
+                for s in succs {
+                    if visited.insert(s) {
+                        queue.push_back(s);
+                    }
+                }
+            }
+            if let Some(preds) = digraph.predecessors_iter(current) {
+                for p in preds {
+                    if visited.insert(p) {
+                        queue.push_back(p);
+                    }
+                }
+            }
+        }
+
+        let mut comp: Vec<String> = component.into_iter().map(str::to_owned).collect();
+        comp.sort_unstable();
+        components.push(comp);
+    }
+
+    components.sort_unstable();
+    components
+}
+
+/// Return the number of weakly connected components.
+#[must_use]
+pub fn number_weakly_connected_components(digraph: &DiGraph) -> usize {
+    weakly_connected_components(digraph).len()
+}
+
+/// Return whether the directed graph is weakly connected.
+#[must_use]
+pub fn is_weakly_connected(digraph: &DiGraph) -> bool {
+    if digraph.node_count() == 0 {
+        return false;
+    }
+    number_weakly_connected_components(digraph) == 1
+}
+
+// ===========================================================================
 // Link Prediction
 // ===========================================================================
 
@@ -7730,10 +7911,15 @@ mod tests {
         local_efficiency, max_flow_edmonds_karp, max_weight_matching, maximal_matching,
         min_edge_cover, min_weight_matching, minimum_cut_edmonds_karp,
         minimum_st_edge_cut_edmonds_karp, multi_source_dijkstra, number_connected_components,
+        number_strongly_connected_components, number_weakly_connected_components,
         overall_reciprocity, pagerank, preferential_attachment, reciprocity,
         resource_allocation_index, rich_club_coefficient, s_metric,
-        shortest_path_unweighted, shortest_path_weighted, topological_generations,
-        topological_sort, wiener_index,
+        shortest_path_unweighted, shortest_path_weighted,
+        strongly_connected_components,
+        topological_generations,
+        topological_sort, weakly_connected_components,
+        is_strongly_connected, is_weakly_connected,
+        wiener_index,
     };
     use fnx_classes::Graph;
     use fnx_classes::digraph::DiGraph;
@@ -12860,5 +13046,161 @@ mod tests {
     fn s_metric_empty() {
         let g = Graph::strict();
         assert!((s_metric(&g) - 0.0).abs() < 1e-10);
+    }
+
+    // -----------------------------------------------------------------------
+    // Strongly Connected Components
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scc_simple_cycle() {
+        // a -> b -> c -> a forms one SCC
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("b", "c");
+        dg.add_edge("c", "a");
+        let sccs = strongly_connected_components(&dg);
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0], vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn scc_two_components() {
+        // a -> b -> a (SCC1), c -> d -> c (SCC2), a -> c (bridge, not SCC)
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("b", "a");
+        dg.add_edge("a", "c");
+        dg.add_edge("c", "d");
+        dg.add_edge("d", "c");
+        let sccs = strongly_connected_components(&dg);
+        assert_eq!(sccs.len(), 2);
+        assert_eq!(sccs[0], vec!["a", "b"]);
+        assert_eq!(sccs[1], vec!["c", "d"]);
+    }
+
+    #[test]
+    fn scc_all_singletons() {
+        // a -> b -> c (no back edges, every node is its own SCC)
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("b", "c");
+        let sccs = strongly_connected_components(&dg);
+        assert_eq!(sccs.len(), 3);
+        assert_eq!(sccs[0], vec!["a"]);
+        assert_eq!(sccs[1], vec!["b"]);
+        assert_eq!(sccs[2], vec!["c"]);
+    }
+
+    #[test]
+    fn scc_empty_graph() {
+        let dg = DiGraph::new();
+        let sccs = strongly_connected_components(&dg);
+        assert!(sccs.is_empty());
+    }
+
+    #[test]
+    fn scc_single_node() {
+        let mut dg = DiGraph::new();
+        dg.add_node("x");
+        let sccs = strongly_connected_components(&dg);
+        assert_eq!(sccs.len(), 1);
+        assert_eq!(sccs[0], vec!["x"]);
+    }
+
+    #[test]
+    fn number_scc() {
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("b", "a");
+        dg.add_edge("c", "d");
+        dg.add_edge("d", "c");
+        assert_eq!(number_strongly_connected_components(&dg), 2);
+    }
+
+    #[test]
+    fn is_strongly_connected_yes() {
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("b", "c");
+        dg.add_edge("c", "a");
+        assert!(is_strongly_connected(&dg));
+    }
+
+    #[test]
+    fn is_strongly_connected_no() {
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("b", "c");
+        assert!(!is_strongly_connected(&dg));
+    }
+
+    #[test]
+    fn is_strongly_connected_empty() {
+        let dg = DiGraph::new();
+        assert!(!is_strongly_connected(&dg));
+    }
+
+    // -----------------------------------------------------------------------
+    // Weakly Connected Components
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn wcc_single_component() {
+        // a -> b, c -> b — all weakly connected
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("c", "b");
+        let wccs = weakly_connected_components(&dg);
+        assert_eq!(wccs.len(), 1);
+        assert_eq!(wccs[0], vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn wcc_two_components() {
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("c", "d");
+        let wccs = weakly_connected_components(&dg);
+        assert_eq!(wccs.len(), 2);
+        assert_eq!(wccs[0], vec!["a", "b"]);
+        assert_eq!(wccs[1], vec!["c", "d"]);
+    }
+
+    #[test]
+    fn wcc_empty() {
+        let dg = DiGraph::new();
+        assert!(weakly_connected_components(&dg).is_empty());
+    }
+
+    #[test]
+    fn number_wcc() {
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("c", "d");
+        dg.add_edge("e", "f");
+        assert_eq!(number_weakly_connected_components(&dg), 3);
+    }
+
+    #[test]
+    fn is_weakly_connected_yes() {
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("b", "c");
+        assert!(is_weakly_connected(&dg));
+    }
+
+    #[test]
+    fn is_weakly_connected_no() {
+        let mut dg = DiGraph::new();
+        dg.add_edge("a", "b");
+        dg.add_edge("c", "d");
+        assert!(!is_weakly_connected(&dg));
+    }
+
+    #[test]
+    fn is_weakly_connected_empty() {
+        let dg = DiGraph::new();
+        assert!(!is_weakly_connected(&dg));
     }
 }
