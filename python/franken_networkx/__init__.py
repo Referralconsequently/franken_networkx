@@ -170,14 +170,48 @@ from franken_networkx._fnx import (
 
 # Algorithm functions — paths and cycles
 from franken_networkx._fnx import (
+    all_shortest_paths,
     all_simple_paths,
     cycle_basis,
+)
+
+# Algorithm functions — graph operators
+from franken_networkx._fnx import (
+    complement,
 )
 
 # Algorithm functions — efficiency
 from franken_networkx._fnx import (
     global_efficiency,
     local_efficiency,
+)
+
+# Algorithm functions — traversal (BFS)
+from franken_networkx._fnx import (
+    bfs_edges,
+    bfs_layers,
+    bfs_predecessors,
+    bfs_successors,
+    bfs_tree,
+    descendants_at_distance,
+)
+
+# Algorithm functions — traversal (DFS)
+from franken_networkx._fnx import (
+    dfs_edges,
+    dfs_postorder_nodes,
+    dfs_predecessors,
+    dfs_preorder_nodes,
+    dfs_successors,
+    dfs_tree,
+)
+
+# Algorithm functions — DAG
+from franken_networkx._fnx import (
+    ancestors,
+    descendants,
+    is_directed_acyclic_graph,
+    topological_sort,
 )
 
 # Graph generators — classic
@@ -855,8 +889,11 @@ __all__ = [
     "is_eulerian",
     "is_semieulerian",
     # Algorithms — paths and cycles
+    "all_shortest_paths",
     "all_simple_paths",
     "cycle_basis",
+    # Algorithms — graph operators
+    "complement",
     # Algorithms — efficiency
     "global_efficiency",
     "local_efficiency",

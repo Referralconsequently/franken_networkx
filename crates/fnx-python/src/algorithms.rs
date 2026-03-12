@@ -1398,6 +1398,826 @@ pub fn local_efficiency(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
 }
 
 // ===========================================================================
+// BFS Traversal
+// ===========================================================================
+
+/// Iterate over edges in a breadth-first search starting at source.
+#[pyfunction]
+#[pyo3(signature = (g, source, reverse=false, depth_limit=None, sort_neighbors=None))]
+pub fn bfs_edges(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    reverse: bool,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let _ = (reverse, sort_neighbors); // accepted for API compat, not used
+    let gr = extract_graph(g)?;
+    let source_key = node_key_to_string(py, source)?;
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "The node {} is not in the graph.",
+            source.repr()?
+        )));
+    }
+
+    let edges = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::bfs_edges_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::bfs_edges(inner, &source_key, depth_limit))
+    };
+
+    Ok(edges
+        .into_iter()
+        .map(|(u, v)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v)))
+        .collect())
+}
+
+/// Return an oriented tree constructed from a breadth-first search from source.
+#[pyfunction]
+#[pyo3(signature = (g, source, reverse=false, depth_limit=None, sort_neighbors=None))]
+pub fn bfs_tree(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    reverse: bool,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<crate::digraph::PyDiGraph> {
+    let _ = (reverse, sort_neighbors);
+    let gr = extract_graph(g)?;
+    let source_key = node_key_to_string(py, source)?;
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "The node {} is not in the graph.",
+            source.repr()?
+        )));
+    }
+
+    let edges = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::bfs_edges_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::bfs_edges(inner, &source_key, depth_limit))
+    };
+
+    let mut tree = crate::digraph::PyDiGraph::new_empty(py)?;
+    let source_py = source.clone().unbind();
+    let source_s = source_key.clone();
+    tree.inner.add_node(&source_s);
+    tree.node_key_map.insert(source_s.clone(), source_py);
+    tree.node_py_attrs
+        .insert(source_s, pyo3::types::PyDict::new(py).unbind());
+
+    for (u, v) in &edges {
+        if !tree.inner.has_node(v) {
+            tree.inner.add_node(v);
+            tree.node_key_map
+                .insert(v.clone(), gr.py_node_key(py, v));
+            tree.node_py_attrs
+                .insert(v.clone(), pyo3::types::PyDict::new(py).unbind());
+        }
+        let _ = tree.inner.add_edge(u, v);
+        tree.edge_py_attrs
+            .insert((u.clone(), v.clone()), pyo3::types::PyDict::new(py).unbind());
+    }
+
+    Ok(tree)
+}
+
+/// Return an iterator of predecessors in breadth-first search from source.
+#[pyfunction]
+#[pyo3(signature = (g, source, depth_limit=None, sort_neighbors=None))]
+pub fn bfs_predecessors(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let _ = sort_neighbors;
+    let gr = extract_graph(g)?;
+    let source_key = node_key_to_string(py, source)?;
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "The node {} is not in the graph.",
+            source.repr()?
+        )));
+    }
+
+    let preds = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::bfs_predecessors_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::bfs_predecessors(inner, &source_key, depth_limit))
+    };
+
+    Ok(preds
+        .into_iter()
+        .map(|(child, parent)| (gr.py_node_key(py, &child), gr.py_node_key(py, &parent)))
+        .collect())
+}
+
+/// Return an iterator of successors in breadth-first search from source.
+#[pyfunction]
+#[pyo3(signature = (g, source, depth_limit=None, sort_neighbors=None))]
+pub fn bfs_successors(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, Vec<PyObject>)>> {
+    let _ = sort_neighbors;
+    let gr = extract_graph(g)?;
+    let source_key = node_key_to_string(py, source)?;
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "The node {} is not in the graph.",
+            source.repr()?
+        )));
+    }
+
+    let succs = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::bfs_successors_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::bfs_successors(inner, &source_key, depth_limit))
+    };
+
+    Ok(succs
+        .into_iter()
+        .map(|(parent, children)| {
+            let py_parent = gr.py_node_key(py, &parent);
+            let py_children: Vec<PyObject> = children.iter().map(|c| gr.py_node_key(py, c)).collect();
+            (py_parent, py_children)
+        })
+        .collect())
+}
+
+/// Return an iterator of all the layers in breadth-first search from sources.
+#[pyfunction]
+#[pyo3(signature = (g, sources))]
+pub fn bfs_layers(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    sources: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Vec<PyObject>>> {
+    let gr = extract_graph(g)?;
+    // sources can be a single node or iterable of nodes
+    let source_key = node_key_to_string(py, sources)?;
+    if gr.has_node(&source_key) {
+        // Single source
+        let layers = if gr.is_directed() {
+            if let GraphRef::Directed { dg, .. } = &gr {
+                fnx_algorithms::bfs_layers_directed(&dg.inner, &source_key)
+            } else {
+                unreachable!()
+            }
+        } else {
+            let inner = gr.undirected();
+            py.allow_threads(|| fnx_algorithms::bfs_layers(inner, &source_key))
+        };
+        return Ok(layers
+            .into_iter()
+            .map(|layer| layer.iter().map(|n| gr.py_node_key(py, n)).collect())
+            .collect());
+    }
+
+    // If it's iterable, try extracting nodes from it
+    // For now we support single source only (most common usage)
+    Err(NodeNotFound::new_err(format!(
+        "The node {} is not in the graph.",
+        sources.repr()?
+    )))
+}
+
+/// Return all nodes at a fixed distance from source in G.
+#[pyfunction]
+pub fn descendants_at_distance(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    distance: usize,
+) -> PyResult<pyo3::Py<pyo3::types::PyFrozenSet>> {
+    let gr = extract_graph(g)?;
+    let source_key = node_key_to_string(py, source)?;
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "The node {} is not in the graph.",
+            source.repr()?
+        )));
+    }
+
+    let nodes = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::descendants_at_distance_directed(&dg.inner, &source_key, distance)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::descendants_at_distance(inner, &source_key, distance))
+    };
+
+    let py_nodes: Vec<PyObject> = nodes.iter().map(|n| gr.py_node_key(py, n)).collect();
+    pyo3::types::PyFrozenSet::new(py, &py_nodes).map(|s| s.unbind())
+}
+
+// ===========================================================================
+// DFS Traversal
+// ===========================================================================
+
+/// Iterate over edges in a depth-first search starting at source.
+#[pyfunction]
+#[pyo3(signature = (g, source=None, depth_limit=None, sort_neighbors=None))]
+pub fn dfs_edges(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: Option<&Bound<'_, PyAny>>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let _ = sort_neighbors;
+    let gr = extract_graph(g)?;
+
+    let source_key = match source {
+        Some(s) => {
+            let k = node_key_to_string(py, s)?;
+            if !gr.has_node(&k) {
+                return Err(NodeNotFound::new_err(format!(
+                    "The node {} is not in the graph.",
+                    s.repr()?
+                )));
+            }
+            k
+        }
+        None => {
+            // Use first node as source (NetworkX iterates all components)
+            let nodes = gr.undirected().nodes_ordered();
+            if nodes.is_empty() {
+                return Ok(Vec::new());
+            }
+            nodes[0].to_owned()
+        }
+    };
+
+    let edges = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::dfs_edges_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::dfs_edges(inner, &source_key, depth_limit))
+    };
+
+    Ok(edges
+        .into_iter()
+        .map(|(u, v)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v)))
+        .collect())
+}
+
+/// Return an oriented tree constructed from a depth-first search from source.
+#[pyfunction]
+#[pyo3(signature = (g, source=None, depth_limit=None, sort_neighbors=None))]
+pub fn dfs_tree(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: Option<&Bound<'_, PyAny>>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<crate::digraph::PyDiGraph> {
+    let _ = sort_neighbors;
+    let edge_list = dfs_edges(py, g, source, depth_limit, None)?;
+
+    let gr = extract_graph(g)?;
+    let mut tree = crate::digraph::PyDiGraph::new_empty(py)?;
+
+    if let Some(s) = source {
+        let sk = node_key_to_string(py, s)?;
+        tree.inner.add_node(&sk);
+        tree.node_key_map.insert(sk.clone(), s.clone().unbind());
+        tree.node_py_attrs
+            .insert(sk, pyo3::types::PyDict::new(py).unbind());
+    } else {
+        for node in gr.undirected().nodes_ordered() {
+            tree.inner.add_node(node);
+            tree.node_key_map
+                .insert(node.to_owned(), gr.py_node_key(py, node));
+            tree.node_py_attrs
+                .insert(node.to_owned(), pyo3::types::PyDict::new(py).unbind());
+        }
+    }
+
+    for (u_py, v_py) in &edge_list {
+        let u_key = node_key_to_string(py, u_py.bind(py))?;
+        let v_key = node_key_to_string(py, v_py.bind(py))?;
+        if !tree.inner.has_node(&v_key) {
+            tree.inner.add_node(&v_key);
+            tree.node_key_map.insert(v_key.clone(), v_py.clone_ref(py));
+            tree.node_py_attrs
+                .insert(v_key.clone(), pyo3::types::PyDict::new(py).unbind());
+        }
+        let _ = tree.inner.add_edge(&u_key, &v_key);
+        tree.edge_py_attrs
+            .insert((u_key, v_key), pyo3::types::PyDict::new(py).unbind());
+    }
+
+    Ok(tree)
+}
+
+/// Return dict of predecessors in depth-first search from source.
+#[pyfunction]
+#[pyo3(signature = (g, source=None, depth_limit=None, sort_neighbors=None))]
+pub fn dfs_predecessors(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: Option<&Bound<'_, PyAny>>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Py<PyDict>> {
+    let _ = sort_neighbors;
+    let gr = extract_graph(g)?;
+
+    let source_key = match source {
+        Some(s) => {
+            let k = node_key_to_string(py, s)?;
+            if !gr.has_node(&k) {
+                return Err(NodeNotFound::new_err(format!(
+                    "The node {} is not in the graph.",
+                    s.repr()?
+                )));
+            }
+            k
+        }
+        None => {
+            let nodes = gr.undirected().nodes_ordered();
+            if nodes.is_empty() {
+                return Ok(PyDict::new(py).unbind());
+            }
+            nodes[0].to_owned()
+        }
+    };
+
+    let preds = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::dfs_predecessors_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::dfs_predecessors(inner, &source_key, depth_limit))
+    };
+
+    let dict = PyDict::new(py);
+    for (child, parent) in &preds {
+        dict.set_item(gr.py_node_key(py, child), gr.py_node_key(py, parent))?;
+    }
+    Ok(dict.unbind())
+}
+
+/// Return dict of successors in depth-first search from source.
+#[pyfunction]
+#[pyo3(signature = (g, source=None, depth_limit=None, sort_neighbors=None))]
+pub fn dfs_successors(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: Option<&Bound<'_, PyAny>>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Py<PyDict>> {
+    let _ = sort_neighbors;
+    let gr = extract_graph(g)?;
+
+    let source_key = match source {
+        Some(s) => {
+            let k = node_key_to_string(py, s)?;
+            if !gr.has_node(&k) {
+                return Err(NodeNotFound::new_err(format!(
+                    "The node {} is not in the graph.",
+                    s.repr()?
+                )));
+            }
+            k
+        }
+        None => {
+            let nodes = gr.undirected().nodes_ordered();
+            if nodes.is_empty() {
+                return Ok(PyDict::new(py).unbind());
+            }
+            nodes[0].to_owned()
+        }
+    };
+
+    let succs = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::dfs_successors_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::dfs_successors(inner, &source_key, depth_limit))
+    };
+
+    let dict = PyDict::new(py);
+    for (parent, children) in &succs {
+        let py_children: Vec<PyObject> = children.iter().map(|c| gr.py_node_key(py, c)).collect();
+        dict.set_item(gr.py_node_key(py, parent), py_children)?;
+    }
+    Ok(dict.unbind())
+}
+
+/// Generate nodes in a depth-first-search pre-ordering starting at source.
+#[pyfunction]
+#[pyo3(signature = (g, source=None, depth_limit=None, sort_neighbors=None))]
+pub fn dfs_preorder_nodes(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: Option<&Bound<'_, PyAny>>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<PyObject>> {
+    let _ = sort_neighbors;
+    let gr = extract_graph(g)?;
+
+    let source_key = match source {
+        Some(s) => {
+            let k = node_key_to_string(py, s)?;
+            if !gr.has_node(&k) {
+                return Err(NodeNotFound::new_err(format!(
+                    "The node {} is not in the graph.",
+                    s.repr()?
+                )));
+            }
+            k
+        }
+        None => {
+            let nodes = gr.undirected().nodes_ordered();
+            if nodes.is_empty() {
+                return Ok(Vec::new());
+            }
+            nodes[0].to_owned()
+        }
+    };
+
+    let nodes = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::dfs_preorder_nodes_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::dfs_preorder_nodes(inner, &source_key, depth_limit))
+    };
+
+    Ok(nodes.iter().map(|n| gr.py_node_key(py, n)).collect())
+}
+
+/// Generate nodes in a depth-first-search post-ordering starting at source.
+#[pyfunction]
+#[pyo3(signature = (g, source=None, depth_limit=None, sort_neighbors=None))]
+pub fn dfs_postorder_nodes(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: Option<&Bound<'_, PyAny>>,
+    depth_limit: Option<usize>,
+    sort_neighbors: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<PyObject>> {
+    let _ = sort_neighbors;
+    let gr = extract_graph(g)?;
+
+    let source_key = match source {
+        Some(s) => {
+            let k = node_key_to_string(py, s)?;
+            if !gr.has_node(&k) {
+                return Err(NodeNotFound::new_err(format!(
+                    "The node {} is not in the graph.",
+                    s.repr()?
+                )));
+            }
+            k
+        }
+        None => {
+            let nodes = gr.undirected().nodes_ordered();
+            if nodes.is_empty() {
+                return Ok(Vec::new());
+            }
+            nodes[0].to_owned()
+        }
+    };
+
+    let nodes = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::dfs_postorder_nodes_directed(&dg.inner, &source_key, depth_limit)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::dfs_postorder_nodes(inner, &source_key, depth_limit))
+    };
+
+    Ok(nodes.iter().map(|n| gr.py_node_key(py, n)).collect())
+}
+
+// ===========================================================================
+// DAG Algorithms
+// ===========================================================================
+
+/// Return a topological sort of the nodes in a directed graph.
+///
+/// Raises ``NetworkXError`` if the graph is undirected.
+/// Raises ``HasACycle`` if the graph contains a cycle.
+#[pyfunction]
+pub fn topological_sort(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(NetworkXError::new_err(
+            "Topological sort not defined on undirected graphs.",
+        ));
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        match fnx_algorithms::topological_sort(&dg.inner) {
+            Some(result) => Ok(result
+                .order
+                .iter()
+                .map(|n| gr.py_node_key(py, n))
+                .collect()),
+            None => Err(crate::HasACycle::new_err(
+                "Graph contains a cycle, topological sort is not possible.",
+            )),
+        }
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return True if the directed graph G is a directed acyclic graph (DAG).
+#[pyfunction]
+pub fn is_directed_acyclic_graph(
+    _py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Ok(false);
+    }
+    if let GraphRef::Directed { dg, .. } = &gr {
+        Ok(fnx_algorithms::is_directed_acyclic_graph(&dg.inner))
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return all ancestors of node in the directed graph.
+#[pyfunction]
+pub fn ancestors(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+) -> PyResult<pyo3::Py<pyo3::types::PyFrozenSet>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(NetworkXError::new_err(
+            "ancestors() is not defined for undirected graphs.",
+        ));
+    }
+    let source_key = node_key_to_string(py, source)?;
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "The node {} is not in the graph.",
+            source.repr()?
+        )));
+    }
+
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let result = fnx_algorithms::ancestors(&dg.inner, &source_key);
+        let py_nodes: Vec<PyObject> = result.iter().map(|n| gr.py_node_key(py, n)).collect();
+        pyo3::types::PyFrozenSet::new(py, &py_nodes).map(|s| s.unbind())
+    } else {
+        unreachable!()
+    }
+}
+
+/// Return all descendants of node in the directed graph.
+#[pyfunction]
+pub fn descendants(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+) -> PyResult<pyo3::Py<pyo3::types::PyFrozenSet>> {
+    let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(NetworkXError::new_err(
+            "descendants() is not defined for undirected graphs.",
+        ));
+    }
+    let source_key = node_key_to_string(py, source)?;
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "The node {} is not in the graph.",
+            source.repr()?
+        )));
+    }
+
+    if let GraphRef::Directed { dg, .. } = &gr {
+        let result = fnx_algorithms::descendants(&dg.inner, &source_key);
+        let py_nodes: Vec<PyObject> = result.iter().map(|n| gr.py_node_key(py, n)).collect();
+        pyo3::types::PyFrozenSet::new(py, &py_nodes).map(|s| s.unbind())
+    } else {
+        unreachable!()
+    }
+}
+
+// ===========================================================================
+// All shortest paths
+// ===========================================================================
+
+/// Return all shortest paths between source and target.
+///
+/// Matches `networkx.all_shortest_paths(G, source, target, weight=None, method='dijkstra')`.
+#[pyfunction]
+#[pyo3(signature = (g, source, target, weight=None, method=None))]
+pub fn all_shortest_paths(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    target: &Bound<'_, PyAny>,
+    weight: Option<&str>,
+    method: Option<&str>,
+) -> PyResult<Vec<Vec<PyObject>>> {
+    let _ = method; // method selection not yet differentiated (both use same impl)
+    let gr = extract_graph(g)?;
+    let source_key = node_key_to_string(py, source)?;
+    let target_key = node_key_to_string(py, target)?;
+
+    if !gr.has_node(&source_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "Source node {} is not in G",
+            source.repr()?
+        )));
+    }
+    if !gr.has_node(&target_key) {
+        return Err(NodeNotFound::new_err(format!(
+            "Target node {} is not in G",
+            target.repr()?
+        )));
+    }
+
+    let paths = if gr.is_directed() {
+        if let GraphRef::Directed { dg, .. } = &gr {
+            fnx_algorithms::all_shortest_paths_directed(&dg.inner, &source_key, &target_key)
+        } else {
+            unreachable!()
+        }
+    } else {
+        let inner = gr.undirected();
+        match weight {
+            Some(w) => {
+                py.allow_threads(|| {
+                    fnx_algorithms::all_shortest_paths_weighted(inner, &source_key, &target_key, w)
+                })
+            }
+            None => {
+                py.allow_threads(|| {
+                    fnx_algorithms::all_shortest_paths(inner, &source_key, &target_key)
+                })
+            }
+        }
+    };
+
+    if paths.is_empty() {
+        return Err(NetworkXNoPath::new_err(format!(
+            "No path between {} and {}.",
+            source.repr()?,
+            target.repr()?
+        )));
+    }
+
+    Ok(paths
+        .iter()
+        .map(|path| path.iter().map(|n| gr.py_node_key(py, n)).collect())
+        .collect())
+}
+
+// ===========================================================================
+// Complement
+// ===========================================================================
+
+/// Return the graph complement of G.
+///
+/// The complement contains the same nodes but has edges where G does not.
+/// Matches `networkx.complement(G)`.
+#[pyfunction]
+pub fn complement(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    if let Ok(pg) = g.extract::<PyRef<'_, PyGraph>>() {
+        let result = fnx_algorithms::complement(&pg.inner);
+
+        let mut py_graph = PyGraph::new_empty(py)?;
+        // Add nodes
+        for node in result.nodes_ordered() {
+            let py_key = pg.py_node_key(py, node);
+            py_graph.node_key_map.insert(node.to_owned(), py_key);
+            py_graph.node_py_attrs.insert(
+                node.to_owned(),
+                pyo3::types::PyDict::new(py).unbind(),
+            );
+            py_graph.inner.add_node(node);
+        }
+        // Add edges
+        for (u, v) in complement_edges(&result) {
+            let _ = py_graph.inner.add_edge(&u, &v);
+            let ek = PyGraph::edge_key(&u, &v);
+            py_graph
+                .edge_py_attrs
+                .insert(ek, pyo3::types::PyDict::new(py).unbind());
+        }
+
+        Ok(py_graph.into_pyobject(py)?.into_any().unbind())
+    } else if let Ok(dg) = g.extract::<PyRef<'_, PyDiGraph>>() {
+        let result = fnx_algorithms::complement_directed(&dg.inner);
+
+        let mut py_dg = PyDiGraph::new_empty(py)?;
+        for node in result.nodes_ordered() {
+            let py_key = dg.py_node_key(py, node);
+            py_dg.node_key_map.insert(node.to_owned(), py_key);
+            py_dg.node_py_attrs.insert(
+                node.to_owned(),
+                pyo3::types::PyDict::new(py).unbind(),
+            );
+            py_dg.inner.add_node(node);
+        }
+        for (u, v) in complement_directed_edges(&result) {
+            let _ = py_dg.inner.add_edge(&u, &v);
+            py_dg.edge_py_attrs.insert(
+                (u, v),
+                pyo3::types::PyDict::new(py).unbind(),
+            );
+        }
+
+        Ok(py_dg.into_pyobject(py)?.into_any().unbind())
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "expected Graph or DiGraph",
+        ))
+    }
+}
+
+/// Extract edges from an undirected complement graph as (String, String) pairs.
+fn complement_edges(graph: &fnx_classes::Graph) -> Vec<(String, String)> {
+    let nodes = graph.nodes_ordered();
+    let mut edges = Vec::new();
+    for (i, u) in nodes.iter().enumerate() {
+        for v in &nodes[i + 1..] {
+            if graph.has_edge(u, v) {
+                edges.push((u.to_string(), v.to_string()));
+            }
+        }
+    }
+    edges
+}
+
+/// Extract edges from a directed complement graph as (String, String) pairs.
+fn complement_directed_edges(graph: &fnx_classes::digraph::DiGraph) -> Vec<(String, String)> {
+    let nodes = graph.nodes_ordered();
+    let mut edges = Vec::new();
+    for u in &nodes {
+        if let Some(succs) = graph.successors(u) {
+            for v in succs {
+                edges.push((u.to_string(), v.to_string()));
+            }
+        }
+    }
+    edges
+}
+
+// ===========================================================================
 // Registration
 // ===========================================================================
 
@@ -1476,5 +2296,28 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Efficiency
     m.add_function(wrap_pyfunction!(global_efficiency, m)?)?;
     m.add_function(wrap_pyfunction!(local_efficiency, m)?)?;
+    // BFS traversal
+    m.add_function(wrap_pyfunction!(bfs_edges, m)?)?;
+    m.add_function(wrap_pyfunction!(bfs_tree, m)?)?;
+    m.add_function(wrap_pyfunction!(bfs_predecessors, m)?)?;
+    m.add_function(wrap_pyfunction!(bfs_successors, m)?)?;
+    m.add_function(wrap_pyfunction!(bfs_layers, m)?)?;
+    m.add_function(wrap_pyfunction!(descendants_at_distance, m)?)?;
+    // DFS traversal
+    m.add_function(wrap_pyfunction!(dfs_edges, m)?)?;
+    m.add_function(wrap_pyfunction!(dfs_tree, m)?)?;
+    m.add_function(wrap_pyfunction!(dfs_predecessors, m)?)?;
+    m.add_function(wrap_pyfunction!(dfs_successors, m)?)?;
+    m.add_function(wrap_pyfunction!(dfs_preorder_nodes, m)?)?;
+    m.add_function(wrap_pyfunction!(dfs_postorder_nodes, m)?)?;
+    // DAG algorithms
+    m.add_function(wrap_pyfunction!(topological_sort, m)?)?;
+    m.add_function(wrap_pyfunction!(is_directed_acyclic_graph, m)?)?;
+    m.add_function(wrap_pyfunction!(ancestors, m)?)?;
+    m.add_function(wrap_pyfunction!(descendants, m)?)?;
+    // All shortest paths
+    m.add_function(wrap_pyfunction!(all_shortest_paths, m)?)?;
+    // Complement
+    m.add_function(wrap_pyfunction!(complement, m)?)?;
     Ok(())
 }

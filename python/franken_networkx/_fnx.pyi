@@ -366,12 +366,25 @@ def eulerian_path(
 # Algorithm functions — paths and cycles
 # ---------------------------------------------------------------------------
 
+def all_shortest_paths(
+    g: Graph | DiGraph,
+    source: Any,
+    target: Any,
+    weight: Optional[str] = None,
+    method: Optional[str] = None,
+) -> list[list[Any]]: ...
 def all_simple_paths(
     g: Graph, source: Any, target: Any, cutoff: Optional[int] = None
 ) -> list[list[Any]]: ...
 def cycle_basis(
     g: Graph, root: Any = None
 ) -> list[list[Any]]: ...
+
+# ---------------------------------------------------------------------------
+# Algorithm functions — graph operators
+# ---------------------------------------------------------------------------
+
+def complement(g: Graph | DiGraph) -> Graph | DiGraph: ...
 
 # ---------------------------------------------------------------------------
 # Algorithm functions — efficiency
@@ -397,6 +410,108 @@ def complete_graph(n: int) -> Graph: ...
 def gnp_random_graph(n: int, p: float, seed: int) -> Graph: ...
 def watts_strogatz_graph(n: int, k: int, p: float, seed: int) -> Graph: ...
 def barabasi_albert_graph(n: int, m: int, seed: int) -> Graph: ...
+
+# ---------------------------------------------------------------------------
+# Traversal — BFS
+# ---------------------------------------------------------------------------
+
+def bfs_edges(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    reverse: bool = False,
+    depth_limit: Optional[int] = None,
+    sort_neighbors: Optional[Any] = None,
+) -> list[tuple[Any, Any]]: ...
+def bfs_tree(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    reverse: bool = False,
+    depth_limit: Optional[int] = None,
+    sort_neighbors: Optional[Any] = None,
+) -> DiGraph: ...
+def bfs_predecessors(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    depth_limit: Optional[int] = None,
+    sort_neighbors: Optional[Any] = None,
+) -> list[tuple[Any, Any]]: ...
+def bfs_successors(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    depth_limit: Optional[int] = None,
+    sort_neighbors: Optional[Any] = None,
+) -> list[tuple[Any, list[Any]]]: ...
+def bfs_layers(
+    g: Union[Graph, DiGraph],
+    sources: Any,
+) -> list[list[Any]]: ...
+def descendants_at_distance(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    distance: int,
+) -> set[Any]: ...
+
+# ---------------------------------------------------------------------------
+# Traversal — DFS
+# ---------------------------------------------------------------------------
+
+def dfs_edges(
+    g: Union[Graph, DiGraph],
+    source: Optional[Any] = None,
+    depth_limit: Optional[int] = None,
+) -> list[tuple[Any, Any]]: ...
+def dfs_tree(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    depth_limit: Optional[int] = None,
+) -> DiGraph: ...
+def dfs_predecessors(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    depth_limit: Optional[int] = None,
+) -> dict[Any, Any]: ...
+def dfs_successors(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    depth_limit: Optional[int] = None,
+) -> dict[Any, list[Any]]: ...
+def dfs_preorder_nodes(
+    g: Union[Graph, DiGraph],
+    source: Optional[Any] = None,
+    depth_limit: Optional[int] = None,
+) -> list[Any]: ...
+def dfs_postorder_nodes(
+    g: Union[Graph, DiGraph],
+    source: Optional[Any] = None,
+    depth_limit: Optional[int] = None,
+) -> list[Any]: ...
+
+# ---------------------------------------------------------------------------
+# DAG algorithms
+# ---------------------------------------------------------------------------
+
+def topological_sort(g: DiGraph) -> list[Any]: ...
+def is_directed_acyclic_graph(g: Union[Graph, DiGraph]) -> bool: ...
+def ancestors(g: DiGraph, source: Any) -> frozenset[Any]: ...
+def descendants(g: DiGraph, source: Any) -> frozenset[Any]: ...
+
+# ---------------------------------------------------------------------------
+# All shortest paths
+# ---------------------------------------------------------------------------
+
+def all_shortest_paths(
+    g: Union[Graph, DiGraph],
+    source: Any,
+    target: Any,
+    weight: Optional[str] = None,
+    method: Optional[str] = None,
+) -> list[list[Any]]: ...
+
+# ---------------------------------------------------------------------------
+# Complement
+# ---------------------------------------------------------------------------
+
+def complement(g: Union[Graph, DiGraph]) -> Union[Graph, DiGraph]: ...
 
 # ---------------------------------------------------------------------------
 # Read/write — graph I/O

@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use fnx_classes::Graph;
+use fnx_classes::digraph::DiGraph;
 use mwmatching::{Matching as BlossomMatching, SENTINEL as BLOSSOM_SENTINEL};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -6110,23 +6111,1096 @@ fn hierholzer_traverse(graph: &Graph, start: &str) -> Vec<(String, String)> {
     edges
 }
 
+// ---------------------------------------------------------------------------
+// DAG Algorithms (DiGraph)
+// ---------------------------------------------------------------------------
+
+/// Result of topological sort.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopologicalSortResult {
+    pub order: Vec<String>,
+    pub witness: ComplexityWitness,
+}
+
+/// Result of topological generations.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopologicalGenerationsResult {
+    pub generations: Vec<Vec<String>>,
+    pub witness: ComplexityWitness,
+}
+
+/// Check whether a directed graph is acyclic (a DAG).
+///
+/// Returns `true` if the graph has no directed cycles. An empty graph is a DAG.
+/// Matches `networkx.is_directed_acyclic_graph`.
+#[must_use]
+pub fn is_directed_acyclic_graph(digraph: &DiGraph) -> bool {
+    // Use Kahn's algorithm: compute in-degrees, BFS from zero-in-degree nodes.
+    // If all nodes are consumed, the graph is acyclic.
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return true;
+    }
+
+    let mut in_degree: HashMap<&str, usize> = HashMap::with_capacity(n);
+    for node in &nodes {
+        in_degree.insert(node, digraph.in_degree(node));
+    }
+
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    for (&node, &deg) in &in_degree {
+        if deg == 0 {
+            queue.push_back(node);
+        }
+    }
+
+    let mut count = 0usize;
+    while let Some(node) = queue.pop_front() {
+        count += 1;
+        if let Some(succs) = digraph.successors(node) {
+            for succ in succs {
+                if let Some(deg) = in_degree.get_mut(succ) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push_back(succ);
+                    }
+                }
+            }
+        }
+    }
+
+    count == n
+}
+
+/// Topological sort of a directed acyclic graph.
+///
+/// Uses DFS-based reverse-postorder to match NetworkX's `topological_sort` behavior.
+/// Returns `None` if the graph contains a cycle.
+#[must_use]
+pub fn topological_sort(digraph: &DiGraph) -> Option<TopologicalSortResult> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    // DFS-based topological sort (reverse postorder)
+    #[derive(PartialEq, Eq)]
+    enum Color {
+        White,
+        Gray,
+        Black,
+    }
+
+    let mut color: HashMap<&str, Color> = HashMap::with_capacity(n);
+    for &node in &nodes {
+        color.insert(node, Color::White);
+    }
+
+    let mut order: Vec<String> = Vec::with_capacity(n);
+    let mut nodes_touched = 0usize;
+    let mut edges_scanned = 0usize;
+
+    // Iterative DFS using an explicit stack to avoid stack overflow on large graphs.
+    // Stack items: (node, is_backtrack). When is_backtrack is true, we're returning
+    // from this node and should add it to the postorder.
+    for &start in &nodes {
+        if color[start] != Color::White {
+            continue;
+        }
+
+        let mut stack: Vec<(&str, bool)> = vec![(start, false)];
+
+        while let Some((node, backtrack)) = stack.pop() {
+            if backtrack {
+                color.insert(node, Color::Black);
+                order.push(node.to_owned());
+                continue;
+            }
+
+            match color.get(node) {
+                Some(Color::Gray) => return None, // cycle detected
+                Some(Color::Black) => continue,
+                _ => {}
+            }
+
+            color.insert(node, Color::Gray);
+            nodes_touched += 1;
+
+            // Push backtrack marker
+            stack.push((node, true));
+
+            // Push successors in reverse order for deterministic iteration
+            if let Some(succs) = digraph.successors(node) {
+                for succ in succs.into_iter().rev() {
+                    edges_scanned += 1;
+                    match color.get(succ) {
+                        Some(Color::Gray) => return None, // cycle detected
+                        Some(Color::Black) => continue,
+                        _ => {
+                            stack.push((succ, false));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    order.reverse();
+
+    Some(TopologicalSortResult {
+        order,
+        witness: ComplexityWitness {
+            algorithm: "dfs_topological_sort".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched,
+            edges_scanned,
+            queue_peak: 0,
+        },
+    })
+}
+
+/// Topological generations of a DAG (Kahn's algorithm).
+///
+/// Returns nodes grouped by generation: generation 0 has no predecessors,
+/// generation 1 only depends on generation 0, etc.
+/// Returns `None` if the graph contains a cycle.
+/// Matches `networkx.topological_generations`.
+#[must_use]
+pub fn topological_generations(digraph: &DiGraph) -> Option<TopologicalGenerationsResult> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    let mut in_degree: HashMap<&str, usize> = HashMap::with_capacity(n);
+    for &node in &nodes {
+        in_degree.insert(node, digraph.in_degree(node));
+    }
+
+    // Collect zero-in-degree nodes as generation 0 (sorted for determinism)
+    let mut current_gen: Vec<&str> = in_degree
+        .iter()
+        .filter(|(_, deg)| **deg == 0)
+        .map(|(node, _)| *node)
+        .collect();
+    current_gen.sort_unstable();
+
+    let mut generations: Vec<Vec<String>> = Vec::new();
+    let mut total_processed = 0usize;
+    let mut edges_scanned = 0usize;
+
+    while !current_gen.is_empty() {
+        let mut next_gen: Vec<&str> = Vec::new();
+        for &node in &current_gen {
+            total_processed += 1;
+            if let Some(succs) = digraph.successors(node) {
+                for succ in succs {
+                    edges_scanned += 1;
+                    if let Some(deg) = in_degree.get_mut(succ) {
+                        *deg -= 1;
+                        if *deg == 0 {
+                            next_gen.push(succ);
+                        }
+                    }
+                }
+            }
+        }
+
+        generations.push(current_gen.iter().map(|&s| s.to_owned()).collect());
+
+        next_gen.sort_unstable();
+        current_gen = next_gen;
+    }
+
+    if total_processed != n {
+        return None; // cycle detected
+    }
+
+    Some(TopologicalGenerationsResult {
+        generations,
+        witness: ComplexityWitness {
+            algorithm: "kahn_topological_generations".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched: total_processed,
+            edges_scanned,
+            queue_peak: 0,
+        },
+    })
+}
+
+// ---------------------------------------------------------------------------
+// DFS Traversal (undirected Graph)
+// ---------------------------------------------------------------------------
+
+/// Edges in DFS order from `source` on an undirected graph.
+///
+/// If `depth_limit` is `Some(d)`, the search does not descend deeper than `d`.
+/// Matches `networkx.dfs_edges`.
+#[must_use]
+pub fn dfs_edges(graph: &Graph, source: &str, depth_limit: Option<usize>) -> Vec<(String, String)> {
+    let max_depth = depth_limit.unwrap_or(usize::MAX);
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut edges: Vec<(String, String)> = Vec::new();
+
+    if !graph.has_node(source) {
+        return edges;
+    }
+
+    // Stack items: (parent, node, depth)
+    // We use (Option<&str>, &str, usize)
+    let mut stack: Vec<(Option<&str>, &str, usize)> = Vec::new();
+
+    visited.insert(source);
+    // Push children of source in reverse order for deterministic DFS
+    if let Some(neighbors) = graph.neighbors(source) {
+        for neighbor in neighbors.into_iter().rev() {
+            if !visited.contains(neighbor) {
+                stack.push((Some(source), neighbor, 1));
+            }
+        }
+    }
+
+    while let Some((parent, node, depth)) = stack.pop() {
+        if visited.contains(node) {
+            continue;
+        }
+        visited.insert(node);
+        if let Some(p) = parent {
+            edges.push((p.to_owned(), node.to_owned()));
+        }
+        if depth < max_depth
+            && let Some(neighbors) = graph.neighbors(node)
+        {
+            for neighbor in neighbors.into_iter().rev() {
+                if !visited.contains(neighbor) {
+                    stack.push((Some(node), neighbor, depth + 1));
+                }
+            }
+        }
+    }
+
+    edges
+}
+
+/// Edges in DFS order from `source` on a directed graph.
+///
+/// Follows successors (outgoing edges). Matches `networkx.dfs_edges` on DiGraph.
+#[must_use]
+pub fn dfs_edges_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> Vec<(String, String)> {
+    let max_depth = depth_limit.unwrap_or(usize::MAX);
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut edges: Vec<(String, String)> = Vec::new();
+
+    if !digraph.has_node(source) {
+        return edges;
+    }
+
+    visited.insert(source);
+    let mut stack: Vec<(Option<&str>, &str, usize)> = Vec::new();
+
+    if let Some(succs) = digraph.successors(source) {
+        for succ in succs.into_iter().rev() {
+            if !visited.contains(succ) {
+                stack.push((Some(source), succ, 1));
+            }
+        }
+    }
+
+    while let Some((parent, node, depth)) = stack.pop() {
+        if visited.contains(node) {
+            continue;
+        }
+        visited.insert(node);
+        if let Some(p) = parent {
+            edges.push((p.to_owned(), node.to_owned()));
+        }
+        if depth < max_depth
+            && let Some(succs) = digraph.successors(node)
+        {
+            for succ in succs.into_iter().rev() {
+                if !visited.contains(succ) {
+                    stack.push((Some(node), succ, depth + 1));
+                }
+            }
+        }
+    }
+
+    edges
+}
+
+/// DFS predecessors map on an undirected graph.
+///
+/// Returns a map from node → its DFS parent. The source has no entry.
+/// Matches `networkx.dfs_predecessors`.
+#[must_use]
+pub fn dfs_predecessors(graph: &Graph, source: &str, depth_limit: Option<usize>) -> HashMap<String, String> {
+    dfs_edges(graph, source, depth_limit)
+        .into_iter()
+        .map(|(parent, child)| (child, parent))
+        .collect()
+}
+
+/// DFS predecessors map on a directed graph.
+#[must_use]
+pub fn dfs_predecessors_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> HashMap<String, String> {
+    dfs_edges_directed(digraph, source, depth_limit)
+        .into_iter()
+        .map(|(parent, child)| (child, parent))
+        .collect()
+}
+
+/// DFS successors map on an undirected graph.
+///
+/// Returns a map from node → list of its DFS children.
+/// Matches `networkx.dfs_successors`.
+#[must_use]
+pub fn dfs_successors(graph: &Graph, source: &str, depth_limit: Option<usize>) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for (parent, child) in dfs_edges(graph, source, depth_limit) {
+        result.entry(parent).or_default().push(child);
+    }
+    result
+}
+
+/// DFS successors map on a directed graph.
+#[must_use]
+pub fn dfs_successors_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for (parent, child) in dfs_edges_directed(digraph, source, depth_limit) {
+        result.entry(parent).or_default().push(child);
+    }
+    result
+}
+
+/// DFS preorder nodes from `source` on an undirected graph.
+///
+/// Matches `networkx.dfs_preorder_nodes`.
+#[must_use]
+pub fn dfs_preorder_nodes(graph: &Graph, source: &str, depth_limit: Option<usize>) -> Vec<String> {
+    let edges = dfs_edges(graph, source, depth_limit);
+    let mut result = vec![source.to_owned()];
+    for (_, child) in edges {
+        result.push(child);
+    }
+    result
+}
+
+/// DFS preorder nodes from `source` on a directed graph.
+#[must_use]
+pub fn dfs_preorder_nodes_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> Vec<String> {
+    let edges = dfs_edges_directed(digraph, source, depth_limit);
+    let mut result = vec![source.to_owned()];
+    for (_, child) in edges {
+        result.push(child);
+    }
+    result
+}
+
+/// DFS postorder nodes from `source` on an undirected graph.
+///
+/// Matches `networkx.dfs_postorder_nodes`.
+#[must_use]
+pub fn dfs_postorder_nodes(graph: &Graph, source: &str, depth_limit: Option<usize>) -> Vec<String> {
+    let max_depth = depth_limit.unwrap_or(usize::MAX);
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut postorder: Vec<String> = Vec::new();
+
+    if !graph.has_node(source) {
+        return postorder;
+    }
+
+    // Iterative DFS with backtrack markers for postorder.
+    let mut stack: Vec<(&str, bool, usize)> = vec![(source, false, 0)];
+
+    while let Some((node, backtrack, depth)) = stack.pop() {
+        if backtrack {
+            postorder.push(node.to_owned());
+            continue;
+        }
+        if visited.contains(node) {
+            continue;
+        }
+        visited.insert(node);
+        stack.push((node, true, depth));
+
+        if depth < max_depth
+            && let Some(neighbors) = graph.neighbors(node)
+        {
+            for neighbor in neighbors.into_iter().rev() {
+                if !visited.contains(neighbor) {
+                    stack.push((neighbor, false, depth + 1));
+                }
+            }
+        }
+    }
+
+    postorder
+}
+
+/// DFS postorder nodes from `source` on a directed graph.
+#[must_use]
+pub fn dfs_postorder_nodes_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> Vec<String> {
+    let max_depth = depth_limit.unwrap_or(usize::MAX);
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut postorder: Vec<String> = Vec::new();
+
+    if !digraph.has_node(source) {
+        return postorder;
+    }
+
+    let mut stack: Vec<(&str, bool, usize)> = vec![(source, false, 0)];
+
+    while let Some((node, backtrack, depth)) = stack.pop() {
+        if backtrack {
+            postorder.push(node.to_owned());
+            continue;
+        }
+        if visited.contains(node) {
+            continue;
+        }
+        visited.insert(node);
+        stack.push((node, true, depth));
+
+        if depth < max_depth
+            && let Some(succs) = digraph.successors(node)
+        {
+            for succ in succs.into_iter().rev() {
+                if !visited.contains(succ) {
+                    stack.push((succ, false, depth + 1));
+                }
+            }
+        }
+    }
+
+    postorder
+}
+
+// ---------------------------------------------------------------------------
+// BFS Traversal
+// ---------------------------------------------------------------------------
+
+/// Edges in BFS order from `source` on an undirected graph.
+///
+/// If `depth_limit` is `Some(d)`, the search does not descend deeper than `d`.
+/// Matches `networkx.bfs_edges`.
+#[must_use]
+pub fn bfs_edges(graph: &Graph, source: &str, depth_limit: Option<usize>) -> Vec<(String, String)> {
+    let max_depth = depth_limit.unwrap_or(usize::MAX);
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut edges: Vec<(String, String)> = Vec::new();
+
+    if !graph.has_node(source) {
+        return edges;
+    }
+
+    visited.insert(source);
+    let mut queue: VecDeque<(&str, usize)> = VecDeque::new();
+    queue.push_back((source, 0));
+
+    while let Some((node, depth)) = queue.pop_front() {
+        if depth >= max_depth {
+            continue;
+        }
+        if let Some(neighbors) = graph.neighbors(node) {
+            for neighbor in neighbors {
+                if visited.insert(neighbor) {
+                    edges.push((node.to_owned(), neighbor.to_owned()));
+                    queue.push_back((neighbor, depth + 1));
+                }
+            }
+        }
+    }
+
+    edges
+}
+
+/// Edges in BFS order from `source` on a directed graph.
+///
+/// Follows successors (outgoing edges). Matches `networkx.bfs_edges` on DiGraph.
+#[must_use]
+pub fn bfs_edges_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> Vec<(String, String)> {
+    let max_depth = depth_limit.unwrap_or(usize::MAX);
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut edges: Vec<(String, String)> = Vec::new();
+
+    if !digraph.has_node(source) {
+        return edges;
+    }
+
+    visited.insert(source);
+    let mut queue: VecDeque<(&str, usize)> = VecDeque::new();
+    queue.push_back((source, 0));
+
+    while let Some((node, depth)) = queue.pop_front() {
+        if depth >= max_depth {
+            continue;
+        }
+        if let Some(succs) = digraph.successors(node) {
+            for succ in succs {
+                if visited.insert(succ) {
+                    edges.push((node.to_owned(), succ.to_owned()));
+                    queue.push_back((succ, depth + 1));
+                }
+            }
+        }
+    }
+
+    edges
+}
+
+/// BFS predecessors map on an undirected graph.
+///
+/// Returns a map from node → its BFS parent. The source has no entry.
+/// Matches `networkx.bfs_predecessors`.
+#[must_use]
+pub fn bfs_predecessors(graph: &Graph, source: &str, depth_limit: Option<usize>) -> HashMap<String, String> {
+    bfs_edges(graph, source, depth_limit)
+        .into_iter()
+        .map(|(parent, child)| (child, parent))
+        .collect()
+}
+
+/// BFS predecessors map on a directed graph.
+#[must_use]
+pub fn bfs_predecessors_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> HashMap<String, String> {
+    bfs_edges_directed(digraph, source, depth_limit)
+        .into_iter()
+        .map(|(parent, child)| (child, parent))
+        .collect()
+}
+
+/// BFS successors map on an undirected graph.
+///
+/// Returns a map from node → list of its BFS children.
+/// Matches `networkx.bfs_successors`.
+#[must_use]
+pub fn bfs_successors(graph: &Graph, source: &str, depth_limit: Option<usize>) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for (parent, child) in bfs_edges(graph, source, depth_limit) {
+        result.entry(parent).or_default().push(child);
+    }
+    result
+}
+
+/// BFS successors map on a directed graph.
+#[must_use]
+pub fn bfs_successors_directed(digraph: &DiGraph, source: &str, depth_limit: Option<usize>) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for (parent, child) in bfs_edges_directed(digraph, source, depth_limit) {
+        result.entry(parent).or_default().push(child);
+    }
+    result
+}
+
+/// BFS layers from `source` on an undirected graph.
+///
+/// Returns nodes grouped by their BFS distance from source.
+/// Layer 0 = [source], Layer 1 = neighbors of source, etc.
+/// Matches `networkx.bfs_layers`.
+#[must_use]
+pub fn bfs_layers(graph: &Graph, source: &str) -> Vec<Vec<String>> {
+    let mut layers: Vec<Vec<String>> = Vec::new();
+    let mut visited: HashSet<&str> = HashSet::new();
+
+    if !graph.has_node(source) {
+        return layers;
+    }
+
+    visited.insert(source);
+    let mut current_layer = vec![source];
+
+    while !current_layer.is_empty() {
+        layers.push(current_layer.iter().map(|&s| s.to_owned()).collect());
+        let mut next_layer: Vec<&str> = Vec::new();
+        for &node in &current_layer {
+            if let Some(neighbors) = graph.neighbors(node) {
+                for neighbor in neighbors {
+                    if visited.insert(neighbor) {
+                        next_layer.push(neighbor);
+                    }
+                }
+            }
+        }
+        current_layer = next_layer;
+    }
+
+    layers
+}
+
+/// BFS layers from `source` on a directed graph.
+#[must_use]
+pub fn bfs_layers_directed(digraph: &DiGraph, source: &str) -> Vec<Vec<String>> {
+    let mut layers: Vec<Vec<String>> = Vec::new();
+    let mut visited: HashSet<&str> = HashSet::new();
+
+    if !digraph.has_node(source) {
+        return layers;
+    }
+
+    visited.insert(source);
+    let mut current_layer = vec![source];
+
+    while !current_layer.is_empty() {
+        layers.push(current_layer.iter().map(|&s| s.to_owned()).collect());
+        let mut next_layer: Vec<&str> = Vec::new();
+        for &node in &current_layer {
+            if let Some(succs) = digraph.successors(node) {
+                for succ in succs {
+                    if visited.insert(succ) {
+                        next_layer.push(succ);
+                    }
+                }
+            }
+        }
+        current_layer = next_layer;
+    }
+
+    layers
+}
+
+/// Nodes at exactly `distance` hops from `source` on an undirected graph.
+///
+/// Matches `networkx.descendants_at_distance`.
+#[must_use]
+pub fn descendants_at_distance(graph: &Graph, source: &str, distance: usize) -> Vec<String> {
+    let layers = bfs_layers(graph, source);
+    layers.into_iter().nth(distance).unwrap_or_default()
+}
+
+/// Nodes at exactly `distance` hops from `source` on a directed graph.
+#[must_use]
+pub fn descendants_at_distance_directed(digraph: &DiGraph, source: &str, distance: usize) -> Vec<String> {
+    let layers = bfs_layers_directed(digraph, source);
+    layers.into_iter().nth(distance).unwrap_or_default()
+}
+
+/// Ancestors of `node` in a directed graph (all nodes with a path to `node`).
+///
+/// Matches `networkx.ancestors`.
+#[must_use]
+pub fn ancestors(digraph: &DiGraph, node: &str) -> HashSet<String> {
+    let mut result: HashSet<String> = HashSet::new();
+    if !digraph.has_node(node) {
+        return result;
+    }
+    // BFS backwards via predecessors
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    let mut visited: HashSet<&str> = HashSet::new();
+    visited.insert(node);
+    if let Some(preds) = digraph.predecessors(node) {
+        for pred in preds {
+            if visited.insert(pred) {
+                queue.push_back(pred);
+            }
+        }
+    }
+    while let Some(current) = queue.pop_front() {
+        result.insert(current.to_owned());
+        if let Some(preds) = digraph.predecessors(current) {
+            for pred in preds {
+                if visited.insert(pred) {
+                    queue.push_back(pred);
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Descendants of `node` in a directed graph (all nodes reachable from `node`).
+///
+/// Matches `networkx.descendants`.
+#[must_use]
+pub fn descendants(digraph: &DiGraph, node: &str) -> HashSet<String> {
+    let mut result: HashSet<String> = HashSet::new();
+    if !digraph.has_node(node) {
+        return result;
+    }
+    // BFS forwards via successors
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    let mut visited: HashSet<&str> = HashSet::new();
+    visited.insert(node);
+    if let Some(succs) = digraph.successors(node) {
+        for succ in succs {
+            if visited.insert(succ) {
+                queue.push_back(succ);
+            }
+        }
+    }
+    while let Some(current) = queue.pop_front() {
+        result.insert(current.to_owned());
+        if let Some(succs) = digraph.successors(current) {
+            for succ in succs {
+                if visited.insert(succ) {
+                    queue.push_back(succ);
+                }
+            }
+        }
+    }
+    result
+}
+
+// ===========================================================================
+// All shortest paths (unweighted BFS)
+// ===========================================================================
+
+/// Return all shortest paths between source and target in an unweighted graph.
+///
+/// Uses BFS to build a DAG of predecessors at shortest-path distance, then
+/// enumerates all paths by backtracking from target to source.
+/// Matches `networkx.all_shortest_paths(G, source, target)`.
+#[must_use]
+pub fn all_shortest_paths(
+    graph: &Graph,
+    source: &str,
+    target: &str,
+) -> Vec<Vec<String>> {
+    if !graph.has_node(source) || !graph.has_node(target) {
+        return Vec::new();
+    }
+    if source == target {
+        return vec![vec![source.to_owned()]];
+    }
+
+    // BFS to find shortest-path predecessors for each node
+    let mut dist: HashMap<&str, usize> = HashMap::new();
+    let mut preds: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+
+    dist.insert(source, 0);
+    queue.push_back(source);
+
+    let mut target_dist: Option<usize> = None;
+
+    while let Some(current) = queue.pop_front() {
+        let d = dist[current];
+        // If we've already found target at a shorter distance, stop
+        if let Some(td) = target_dist
+            && d >= td
+        {
+            break;
+        }
+        if let Some(neighbors) = graph.neighbors_iter(current) {
+            for nbr in neighbors {
+                let nd = d + 1;
+                match dist.get(nbr) {
+                    None => {
+                        dist.insert(nbr, nd);
+                        preds.insert(nbr, vec![current]);
+                        queue.push_back(nbr);
+                        if nbr == target {
+                            target_dist = Some(nd);
+                        }
+                    }
+                    Some(&existing) if existing == nd => {
+                        preds.get_mut(nbr).unwrap().push(current);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if !dist.contains_key(target) {
+        return Vec::new();
+    }
+
+    // Backtrack from target to source to enumerate all shortest paths
+    let mut paths: Vec<Vec<String>> = Vec::new();
+    let mut stack: Vec<Vec<&str>> = vec![vec![target]];
+
+    while let Some(partial) = stack.pop() {
+        let last = *partial.last().unwrap();
+        if last == source {
+            let path: Vec<String> = partial.iter().rev().map(|s| (*s).to_owned()).collect();
+            paths.push(path);
+        } else if let Some(pred_list) = preds.get(last) {
+            for &p in pred_list {
+                let mut extended = partial.clone();
+                extended.push(p);
+                stack.push(extended);
+            }
+        }
+    }
+
+    // Sort paths for deterministic output (canonical ordering)
+    paths.sort();
+    paths
+}
+
+/// Return all shortest paths between source and target in a directed graph.
+#[must_use]
+pub fn all_shortest_paths_directed(
+    digraph: &DiGraph,
+    source: &str,
+    target: &str,
+) -> Vec<Vec<String>> {
+    if !digraph.has_node(source) || !digraph.has_node(target) {
+        return Vec::new();
+    }
+    if source == target {
+        return vec![vec![source.to_owned()]];
+    }
+
+    let mut dist: HashMap<&str, usize> = HashMap::new();
+    let mut preds: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+
+    dist.insert(source, 0);
+    queue.push_back(source);
+
+    let mut target_dist: Option<usize> = None;
+
+    while let Some(current) = queue.pop_front() {
+        let d = dist[current];
+        if let Some(td) = target_dist
+            && d >= td
+        {
+            break;
+        }
+        if let Some(succs) = digraph.successors(current) {
+            for nbr in succs {
+                let nd = d + 1;
+                match dist.get(nbr) {
+                    None => {
+                        dist.insert(nbr, nd);
+                        preds.insert(nbr, vec![current]);
+                        queue.push_back(nbr);
+                        if nbr == target {
+                            target_dist = Some(nd);
+                        }
+                    }
+                    Some(&existing) if existing == nd => {
+                        preds.get_mut(nbr).unwrap().push(current);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    if !dist.contains_key(target) {
+        return Vec::new();
+    }
+
+    let mut paths: Vec<Vec<String>> = Vec::new();
+    let mut stack: Vec<Vec<&str>> = vec![vec![target]];
+
+    while let Some(partial) = stack.pop() {
+        let last = *partial.last().unwrap();
+        if last == source {
+            let path: Vec<String> = partial.iter().rev().map(|s| (*s).to_owned()).collect();
+            paths.push(path);
+        } else if let Some(pred_list) = preds.get(last) {
+            for &p in pred_list {
+                let mut extended = partial.clone();
+                extended.push(p);
+                stack.push(extended);
+            }
+        }
+    }
+
+    paths.sort();
+    paths
+}
+
+// ===========================================================================
+// All shortest paths (weighted Dijkstra variant)
+// ===========================================================================
+
+/// Return all shortest paths from source to target in a weighted graph.
+///
+/// Uses modified Dijkstra with multi-predecessor tracking.
+/// Matches `networkx.all_shortest_paths(G, source, target, weight=...)`.
+#[must_use]
+pub fn all_shortest_paths_weighted(
+    graph: &Graph,
+    source: &str,
+    target: &str,
+    weight_attr: &str,
+) -> Vec<Vec<String>> {
+    if !graph.has_node(source) || !graph.has_node(target) {
+        return Vec::new();
+    }
+
+    if source == target {
+        return vec![vec![source.to_owned()]];
+    }
+
+    let nodes = graph.nodes_ordered();
+    let mut settled: HashSet<&str> = HashSet::new();
+    let mut dist: HashMap<&str, f64> = HashMap::new();
+    let mut preds: HashMap<&str, Vec<&str>> = HashMap::new();
+
+    dist.insert(source, 0.0);
+
+    loop {
+        // Find the unsettled node with smallest distance
+        let mut current: Option<(&str, f64)> = None;
+        for &node in &nodes {
+            if settled.contains(node) {
+                continue;
+            }
+            let Some(&d) = dist.get(node) else {
+                continue;
+            };
+            match current {
+                None => current = Some((node, d)),
+                Some((_, best_d)) if d < best_d => current = Some((node, d)),
+                _ => {}
+            }
+        }
+
+        let Some((current_node, current_dist)) = current else {
+            break;
+        };
+
+        // If we've settled the target, no need to continue
+        if current_node == target {
+            break;
+        }
+
+        settled.insert(current_node);
+
+        let Some(neighbors) = graph.neighbors_iter(current_node) else {
+            continue;
+        };
+
+        for neighbor in neighbors {
+            if settled.contains(neighbor) {
+                continue;
+            }
+            let w = edge_weight_or_default(graph, current_node, neighbor, weight_attr);
+            let new_dist = current_dist + w;
+
+            match dist.get(neighbor) {
+                None => {
+                    dist.insert(neighbor, new_dist);
+                    preds.insert(neighbor, vec![current_node]);
+                }
+                Some(&existing) => {
+                    if new_dist + DISTANCE_COMPARISON_EPSILON < existing {
+                        // Strictly shorter path
+                        dist.insert(neighbor, new_dist);
+                        preds.insert(neighbor, vec![current_node]);
+                    } else if (new_dist - existing).abs() < DISTANCE_COMPARISON_EPSILON {
+                        // Equal-distance path: add predecessor
+                        preds.get_mut(neighbor).unwrap().push(current_node);
+                    }
+                }
+            }
+        }
+    }
+
+    if !dist.contains_key(target) {
+        return Vec::new();
+    }
+
+    build_all_paths_from_preds(&preds, source, target)
+}
+
+/// Reconstruct all paths from a multi-predecessor map by DFS backtracking.
+fn build_all_paths_from_preds(
+    preds: &HashMap<&str, Vec<&str>>,
+    source: &str,
+    target: &str,
+) -> Vec<Vec<String>> {
+    let mut result = Vec::new();
+    let mut stack: Vec<(Vec<String>, &str)> = vec![(vec![target.to_owned()], target)];
+
+    while let Some((path, current)) = stack.pop() {
+        if current == source {
+            let mut full_path = path;
+            full_path.reverse();
+            result.push(full_path);
+            continue;
+        }
+        if let Some(pred_list) = preds.get(current) {
+            for &pred in pred_list {
+                let mut new_path = path.clone();
+                new_path.push(pred.to_owned());
+                stack.push((new_path, pred));
+            }
+        }
+    }
+
+    result.sort();
+    result
+}
+
+// ===========================================================================
+// Complement graph
+// ===========================================================================
+
+/// Return the complement of a graph.
+///
+/// The complement G' has the same nodes as G but has edges where G does not
+/// (and vice versa). Self-loops are not included.
+/// Matches `networkx.complement(G)`.
+#[must_use]
+pub fn complement(graph: &Graph) -> Graph {
+    let nodes: Vec<&str> = graph.nodes_ordered().into_iter().collect();
+    let mut result = Graph::new(graph.mode());
+
+    for &node in &nodes {
+        result.add_node(node);
+    }
+
+    for (i, &u) in nodes.iter().enumerate() {
+        for &v in &nodes[i + 1..] {
+            if !graph.has_edge(u, v) {
+                let _ = result.add_edge(u, v);
+            }
+        }
+    }
+
+    result
+}
+
+/// Return the complement of a directed graph.
+#[must_use]
+pub fn complement_directed(digraph: &DiGraph) -> DiGraph {
+    let nodes: Vec<&str> = digraph.nodes_ordered().into_iter().collect();
+    let mut result = DiGraph::strict();
+
+    for &node in &nodes {
+        result.add_node(node);
+    }
+
+    for &u in &nodes {
+        for &v in &nodes {
+            if u != v && !digraph.has_edge(u, v) {
+                let _ = result.add_edge(u, v);
+            }
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CGSE_WITNESS_LEDGER_PATH, CGSE_WITNESS_POLICY_SPEC_PATH, CentralityScore,
-        ComplexityWitness, all_simple_paths, articulation_points, bellman_ford_shortest_paths,
-        betweenness_centrality, bridges, cgse_witness_schema_version, closeness_centrality,
-        clustering_coefficient, connected_components, cycle_basis, degree_centrality,
-        edge_betweenness_centrality, edge_connectivity_edmonds_karp, eigenvector_centrality,
-        eulerian_circuit, eulerian_path, global_edge_connectivity_edmonds_karp, global_efficiency,
+        ComplexityWitness, all_shortest_paths, all_shortest_paths_directed,
+        all_shortest_paths_weighted, all_simple_paths,
+        ancestors, articulation_points, bellman_ford_shortest_paths, betweenness_centrality,
+        bfs_edges, bfs_edges_directed, bfs_layers, bfs_layers_directed, bfs_predecessors,
+        bfs_successors, bridges, cgse_witness_schema_version, closeness_centrality,
+        clustering_coefficient, complement, complement_directed, connected_components, cycle_basis,
+        degree_centrality, descendants, descendants_at_distance, dfs_edges, dfs_edges_directed,
+        dfs_postorder_nodes, dfs_postorder_nodes_directed, dfs_predecessors, dfs_preorder_nodes,
+        dfs_successors, edge_betweenness_centrality, edge_connectivity_edmonds_karp,
+        eigenvector_centrality, eulerian_circuit, eulerian_path,
+        global_edge_connectivity_edmonds_karp, global_efficiency,
         global_minimum_edge_cut_edmonds_karp, harmonic_centrality, has_eulerian_path,
-        hits_centrality, is_eulerian, is_matching, is_maximal_matching, is_perfect_matching,
-        is_semieulerian, katz_centrality, local_efficiency, max_flow_edmonds_karp,
-        max_weight_matching, maximal_matching, min_edge_cover, min_weight_matching,
-        minimum_cut_edmonds_karp, minimum_st_edge_cut_edmonds_karp, multi_source_dijkstra,
-        number_connected_components, pagerank, shortest_path_unweighted, shortest_path_weighted,
+        hits_centrality, is_directed_acyclic_graph, is_eulerian, is_matching,
+        is_maximal_matching, is_perfect_matching, is_semieulerian, katz_centrality,
+        local_efficiency, max_flow_edmonds_karp, max_weight_matching, maximal_matching,
+        min_edge_cover, min_weight_matching, minimum_cut_edmonds_karp,
+        minimum_st_edge_cut_edmonds_karp, multi_source_dijkstra, number_connected_components,
+        pagerank, shortest_path_unweighted, shortest_path_weighted, topological_generations,
+        topological_sort,
     };
     use fnx_classes::Graph;
+    use fnx_classes::digraph::DiGraph;
     use fnx_runtime::{
         CompatibilityMode, ForensicsBundleIndex, StructuredTestLog, TestKind, TestStatus,
         canonical_environment_fingerprint, structured_test_log_schema_version,
@@ -10275,5 +11349,548 @@ mod tests {
         graph.add_node("z");
         let result = is_eulerian(&graph);
         assert!(result.is_eulerian);
+    }
+
+    // -----------------------------------------------------------------------
+    // DAG algorithm tests
+    // -----------------------------------------------------------------------
+
+    fn make_dag() -> DiGraph {
+        // A simple DAG: a→b, a→c, b→d, c→d
+        let mut g = DiGraph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("a", "c").expect("edge");
+        g.add_edge("b", "d").expect("edge");
+        g.add_edge("c", "d").expect("edge");
+        g
+    }
+
+    #[test]
+    fn is_dag_simple() {
+        let g = make_dag();
+        assert!(is_directed_acyclic_graph(&g));
+    }
+
+    #[test]
+    fn is_dag_empty() {
+        let g = DiGraph::strict();
+        assert!(is_directed_acyclic_graph(&g));
+    }
+
+    #[test]
+    fn is_dag_single_node() {
+        let mut g = DiGraph::strict();
+        g.add_node("x");
+        assert!(is_directed_acyclic_graph(&g));
+    }
+
+    #[test]
+    fn is_dag_with_cycle() {
+        let mut g = DiGraph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        g.add_edge("c", "a").expect("edge"); // cycle
+        assert!(!is_directed_acyclic_graph(&g));
+    }
+
+    #[test]
+    fn is_dag_self_loop() {
+        let mut g = DiGraph::strict();
+        g.add_edge("a", "a").expect("edge"); // self-loop = cycle
+        assert!(!is_directed_acyclic_graph(&g));
+    }
+
+    #[test]
+    fn topological_sort_simple() {
+        let g = make_dag();
+        let result = topological_sort(&g).expect("DAG should succeed");
+        // a must come before b and c; b and c must come before d
+        let pos: std::collections::HashMap<&str, usize> = result
+            .order
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i))
+            .collect();
+        assert!(pos["a"] < pos["b"]);
+        assert!(pos["a"] < pos["c"]);
+        assert!(pos["b"] < pos["d"]);
+        assert!(pos["c"] < pos["d"]);
+    }
+
+    #[test]
+    fn topological_sort_empty() {
+        let g = DiGraph::strict();
+        let result = topological_sort(&g).expect("empty DAG");
+        assert!(result.order.is_empty());
+    }
+
+    #[test]
+    fn topological_sort_cycle() {
+        let mut g = DiGraph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        g.add_edge("c", "a").expect("edge");
+        assert!(topological_sort(&g).is_none());
+    }
+
+    #[test]
+    fn topological_sort_linear() {
+        let mut g = DiGraph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        g.add_edge("c", "d").expect("edge");
+        let result = topological_sort(&g).expect("linear DAG");
+        assert_eq!(result.order, vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn topological_generations_simple() {
+        let g = make_dag();
+        let result = topological_generations(&g).expect("DAG");
+        assert_eq!(result.generations.len(), 3);
+        assert_eq!(result.generations[0], vec!["a"]);
+        // b and c in generation 1 (sorted)
+        let mut gen1 = result.generations[1].clone();
+        gen1.sort();
+        assert_eq!(gen1, vec!["b", "c"]);
+        assert_eq!(result.generations[2], vec!["d"]);
+    }
+
+    #[test]
+    fn topological_generations_cycle() {
+        let mut g = DiGraph::strict();
+        g.add_edge("x", "y").expect("edge");
+        g.add_edge("y", "x").expect("edge");
+        assert!(topological_generations(&g).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // DFS traversal tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dfs_edges_path_graph() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        g.add_edge("c", "d").expect("edge");
+        let edges = dfs_edges(&g, "a", None);
+        assert_eq!(edges.len(), 3);
+        assert_eq!(edges[0], ("a".to_owned(), "b".to_owned()));
+    }
+
+    #[test]
+    fn dfs_edges_with_depth_limit() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        g.add_edge("c", "d").expect("edge");
+        let edges = dfs_edges(&g, "a", Some(2));
+        // Should reach b and c but not d (depth limit 2)
+        assert_eq!(edges.len(), 2);
+    }
+
+    #[test]
+    fn dfs_edges_nonexistent_source() {
+        let g = Graph::strict();
+        let edges = dfs_edges(&g, "missing", None);
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn dfs_edges_directed_dag() {
+        let g = make_dag();
+        let edges = dfs_edges_directed(&g, "a", None);
+        // From a, should visit b→d and c (or c→d and b, depending on order)
+        assert_eq!(edges.len(), 3); // a→b, b→d, a→c (or similar)
+        // All 3 non-source nodes should be reached
+        let targets: HashSet<String> = edges.iter().map(|(_, t)| t.clone()).collect();
+        assert!(targets.contains("b"));
+        assert!(targets.contains("c"));
+        assert!(targets.contains("d"));
+    }
+
+    #[test]
+    fn dfs_predecessors_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        let preds = dfs_predecessors(&g, "a", None);
+        assert_eq!(preds.get("b").unwrap(), "a");
+        assert_eq!(preds.get("c").unwrap(), "b");
+        assert!(!preds.contains_key("a")); // source has no predecessor
+    }
+
+    #[test]
+    fn dfs_successors_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        let succs = dfs_successors(&g, "a", None);
+        assert!(succs.get("a").unwrap().contains(&"b".to_owned()));
+        assert!(succs.get("b").unwrap().contains(&"c".to_owned()));
+    }
+
+    #[test]
+    fn dfs_preorder_nodes_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        let nodes = dfs_preorder_nodes(&g, "a", None);
+        assert_eq!(nodes[0], "a");
+        assert_eq!(nodes.len(), 3);
+    }
+
+    #[test]
+    fn dfs_postorder_nodes_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        let nodes = dfs_postorder_nodes(&g, "a", None);
+        // Postorder: c first, then b, then a
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0], "c");
+        assert_eq!(nodes[2], "a");
+    }
+
+    #[test]
+    fn dfs_postorder_directed() {
+        let g = make_dag();
+        let nodes = dfs_postorder_nodes_directed(&g, "a", None);
+        assert_eq!(nodes.len(), 4);
+        // d should come before b and c in postorder; a should be last
+        let pos: std::collections::HashMap<&str, usize> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (s.as_str(), i))
+            .collect();
+        assert!(pos["d"] < pos["b"] || pos["d"] < pos["c"]);
+        assert_eq!(*pos.get("a").unwrap(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // BFS traversal tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bfs_edges_path_graph() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        g.add_edge("c", "d").expect("edge");
+        let edges = bfs_edges(&g, "a", None);
+        assert_eq!(edges.len(), 3);
+        assert_eq!(edges[0], ("a".to_owned(), "b".to_owned()));
+    }
+
+    #[test]
+    fn bfs_edges_with_depth_limit() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("b", "c").expect("edge");
+        g.add_edge("c", "d").expect("edge");
+        let edges = bfs_edges(&g, "a", Some(1));
+        // Only depth 1 → only a→b
+        assert_eq!(edges.len(), 1);
+    }
+
+    #[test]
+    fn bfs_edges_directed_dag() {
+        let g = make_dag();
+        let edges = bfs_edges_directed(&g, "a", None);
+        assert_eq!(edges.len(), 3); // a→b, a→c, then b→d or c→d
+    }
+
+    #[test]
+    fn bfs_predecessors_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("a", "c").expect("edge");
+        g.add_edge("b", "d").expect("edge");
+        let preds = bfs_predecessors(&g, "a", None);
+        assert_eq!(preds.get("b").unwrap(), "a");
+        assert_eq!(preds.get("c").unwrap(), "a");
+    }
+
+    #[test]
+    fn bfs_successors_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("a", "c").expect("edge");
+        let succs = bfs_successors(&g, "a", None);
+        let a_succs = succs.get("a").unwrap();
+        assert!(a_succs.contains(&"b".to_owned()));
+        assert!(a_succs.contains(&"c".to_owned()));
+    }
+
+    #[test]
+    fn bfs_layers_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("a", "c").expect("edge");
+        g.add_edge("b", "d").expect("edge");
+        g.add_edge("c", "d").expect("edge");
+        let layers = bfs_layers(&g, "a");
+        assert_eq!(layers.len(), 3);
+        assert_eq!(layers[0], vec!["a"]);
+        let mut layer1 = layers[1].clone();
+        layer1.sort();
+        assert_eq!(layer1, vec!["b", "c"]);
+        assert_eq!(layers[2], vec!["d"]);
+    }
+
+    #[test]
+    fn bfs_layers_directed_dag() {
+        let g = make_dag();
+        let layers = bfs_layers_directed(&g, "a");
+        assert_eq!(layers.len(), 3);
+        assert_eq!(layers[0], vec!["a"]);
+    }
+
+    #[test]
+    fn descendants_at_distance_test() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        g.add_edge("a", "c").expect("edge");
+        g.add_edge("b", "d").expect("edge");
+        let result = descendants_at_distance(&g, "a", 1);
+        assert!(result.contains(&"b".to_owned()));
+        assert!(result.contains(&"c".to_owned()));
+        assert!(!result.contains(&"d".to_owned()));
+    }
+
+    #[test]
+    fn descendants_at_distance_zero() {
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").expect("edge");
+        let result = descendants_at_distance(&g, "a", 0);
+        assert_eq!(result, vec!["a"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Ancestors/Descendants tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ancestors_test() {
+        let g = make_dag();
+        let anc = ancestors(&g, "d");
+        assert!(anc.contains("a"));
+        assert!(anc.contains("b"));
+        assert!(anc.contains("c"));
+        assert!(!anc.contains("d")); // not an ancestor of itself
+    }
+
+    #[test]
+    fn ancestors_root() {
+        let g = make_dag();
+        let anc = ancestors(&g, "a");
+        assert!(anc.is_empty()); // a has no ancestors
+    }
+
+    #[test]
+    fn descendants_test() {
+        let g = make_dag();
+        let desc = descendants(&g, "a");
+        assert!(desc.contains("b"));
+        assert!(desc.contains("c"));
+        assert!(desc.contains("d"));
+        assert!(!desc.contains("a")); // not a descendant of itself
+    }
+
+    #[test]
+    fn descendants_leaf() {
+        let g = make_dag();
+        let desc = descendants(&g, "d");
+        assert!(desc.is_empty()); // d has no descendants
+    }
+
+    // ===== all_shortest_paths tests =====
+
+    #[test]
+    fn all_shortest_paths_diamond() {
+        // Diamond: 0-1, 0-2, 1-3, 2-3
+        let mut g = Graph::strict();
+        g.add_edge("0", "1").unwrap();
+        g.add_edge("0", "2").unwrap();
+        g.add_edge("1", "3").unwrap();
+        g.add_edge("2", "3").unwrap();
+        let paths = all_shortest_paths(&g, "0", "3");
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&vec!["0".to_owned(), "1".to_owned(), "3".to_owned()]));
+        assert!(paths.contains(&vec!["0".to_owned(), "2".to_owned(), "3".to_owned()]));
+    }
+
+    #[test]
+    fn all_shortest_paths_single() {
+        // Path: 0-1-2
+        let mut g = Graph::strict();
+        g.add_edge("0", "1").unwrap();
+        g.add_edge("1", "2").unwrap();
+        let paths = all_shortest_paths(&g, "0", "2");
+        assert_eq!(paths, vec![vec!["0".to_owned(), "1".to_owned(), "2".to_owned()]]);
+    }
+
+    #[test]
+    fn all_shortest_paths_same_node() {
+        let mut g = Graph::strict();
+        g.add_node("0");
+        let paths = all_shortest_paths(&g, "0", "0");
+        assert_eq!(paths, vec![vec!["0".to_owned()]]);
+    }
+
+    #[test]
+    fn all_shortest_paths_no_path() {
+        let mut g = Graph::strict();
+        g.add_node("0");
+        g.add_node("1");
+        let paths = all_shortest_paths(&g, "0", "1");
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn all_shortest_paths_missing_node() {
+        let g = Graph::strict();
+        let paths = all_shortest_paths(&g, "0", "1");
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn all_shortest_paths_directed_diamond() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("0", "1").unwrap();
+        dg.add_edge("0", "2").unwrap();
+        dg.add_edge("1", "3").unwrap();
+        dg.add_edge("2", "3").unwrap();
+        let paths = all_shortest_paths_directed(&dg, "0", "3");
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&vec!["0".to_owned(), "1".to_owned(), "3".to_owned()]));
+        assert!(paths.contains(&vec!["0".to_owned(), "2".to_owned(), "3".to_owned()]));
+    }
+
+    #[test]
+    fn all_shortest_paths_directed_no_path() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("0", "1").unwrap();
+        // No path from 1 to 0 in directed graph
+        let paths = all_shortest_paths_directed(&dg, "1", "0");
+        assert!(paths.is_empty());
+    }
+
+    // ===== all_shortest_paths_weighted tests =====
+
+    #[test]
+    fn all_shortest_paths_weighted_diamond() {
+        // Diamond with equal weights: 0-1(w=1), 0-2(w=1), 1-3(w=1), 2-3(w=1)
+        let mut g = Graph::strict();
+        let mut attrs = BTreeMap::new();
+        attrs.insert("weight".to_owned(), "1.0".to_owned());
+        g.add_edge_with_attrs("0", "1", attrs.clone()).unwrap();
+        g.add_edge_with_attrs("0", "2", attrs.clone()).unwrap();
+        g.add_edge_with_attrs("1", "3", attrs.clone()).unwrap();
+        g.add_edge_with_attrs("2", "3", attrs.clone()).unwrap();
+        let paths = all_shortest_paths_weighted(&g, "0", "3", "weight");
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&vec!["0".to_owned(), "1".to_owned(), "3".to_owned()]));
+        assert!(paths.contains(&vec!["0".to_owned(), "2".to_owned(), "3".to_owned()]));
+    }
+
+    #[test]
+    fn all_shortest_paths_weighted_unique() {
+        // 0-1(w=1), 1-2(w=1), 0-2(w=10) — only one shortest path
+        let mut g = Graph::strict();
+        let mut w1 = BTreeMap::new();
+        w1.insert("weight".to_owned(), "1.0".to_owned());
+        let mut w10 = BTreeMap::new();
+        w10.insert("weight".to_owned(), "10.0".to_owned());
+        g.add_edge_with_attrs("0", "1", w1.clone()).unwrap();
+        g.add_edge_with_attrs("1", "2", w1.clone()).unwrap();
+        g.add_edge_with_attrs("0", "2", w10).unwrap();
+        let paths = all_shortest_paths_weighted(&g, "0", "2", "weight");
+        assert_eq!(paths, vec![vec!["0".to_owned(), "1".to_owned(), "2".to_owned()]]);
+    }
+
+    #[test]
+    fn all_shortest_paths_weighted_no_path() {
+        let mut g = Graph::strict();
+        g.add_node("0");
+        g.add_node("1");
+        let paths = all_shortest_paths_weighted(&g, "0", "1", "weight");
+        assert!(paths.is_empty());
+    }
+
+    // ===== complement tests =====
+
+    #[test]
+    fn complement_triangle() {
+        // K3: 0-1, 0-2, 1-2 → complement is empty (no edges)
+        let mut g = Graph::strict();
+        g.add_edge("0", "1").unwrap();
+        g.add_edge("0", "2").unwrap();
+        g.add_edge("1", "2").unwrap();
+        let c = complement(&g);
+        assert_eq!(c.node_count(), 3);
+        assert_eq!(c.edge_count(), 0);
+    }
+
+    #[test]
+    fn complement_empty() {
+        // 3 isolated nodes → complement is K3
+        let mut g = Graph::strict();
+        g.add_node("0");
+        g.add_node("1");
+        g.add_node("2");
+        let c = complement(&g);
+        assert_eq!(c.node_count(), 3);
+        assert_eq!(c.edge_count(), 3);
+        assert!(c.has_edge("0", "1"));
+        assert!(c.has_edge("0", "2"));
+        assert!(c.has_edge("1", "2"));
+    }
+
+    #[test]
+    fn complement_path() {
+        // Path: 0-1-2 → complement: 0-2
+        let mut g = Graph::strict();
+        g.add_edge("0", "1").unwrap();
+        g.add_edge("1", "2").unwrap();
+        let c = complement(&g);
+        assert_eq!(c.node_count(), 3);
+        assert_eq!(c.edge_count(), 1);
+        assert!(c.has_edge("0", "2"));
+        assert!(!c.has_edge("0", "1"));
+        assert!(!c.has_edge("1", "2"));
+    }
+
+    #[test]
+    fn complement_involution() {
+        // complement(complement(G)) == G (same edge set)
+        let mut g = Graph::strict();
+        g.add_edge("a", "b").unwrap();
+        g.add_edge("b", "c").unwrap();
+        g.add_node("d");
+        let c2 = complement(&complement(&g));
+        assert_eq!(c2.edge_count(), g.edge_count());
+        assert!(c2.has_edge("a", "b"));
+        assert!(c2.has_edge("b", "c"));
+        assert!(!c2.has_edge("a", "c"));
+        assert!(!c2.has_edge("a", "d"));
+    }
+
+    #[test]
+    fn complement_directed_test() {
+        let mut dg = DiGraph::strict();
+        dg.add_edge("0", "1").unwrap();
+        dg.add_edge("1", "2").unwrap();
+        let c = complement_directed(&dg);
+        assert_eq!(c.node_count(), 3);
+        // Total possible directed edges: 3*2=6, existing: 2, complement: 4
+        assert_eq!(c.edge_count(), 4);
+        assert!(!c.has_edge("0", "1"));
+        assert!(!c.has_edge("1", "2"));
+        assert!(c.has_edge("1", "0"));
+        assert!(c.has_edge("0", "2"));
+        assert!(c.has_edge("2", "0"));
+        assert!(c.has_edge("2", "1"));
     }
 }
