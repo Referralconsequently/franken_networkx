@@ -812,6 +812,12 @@ def number_of_isolates(g: Union[Graph, DiGraph]) -> int: ...
 # Boundary
 # ---------------------------------------------------------------------------
 
+def cut_size(
+    g: Union[Graph, DiGraph],
+    nbunch1: list[Any],
+    nbunch2: Optional[list[Any]] = None,
+    weight: Optional[str] = None,
+) -> float: ...
 def edge_boundary(
     g: Union[Graph, DiGraph],
     nbunch1: list[Any],
@@ -822,6 +828,12 @@ def node_boundary(
     nbunch1: list[Any],
     nbunch2: Optional[list[Any]] = None,
 ) -> list[Any]: ...
+def normalized_cut_size(
+    g: Union[Graph, DiGraph],
+    nbunch1: list[Any],
+    nbunch2: Optional[list[Any]] = None,
+    weight: Optional[str] = None,
+) -> float: ...
 
 # ---------------------------------------------------------------------------
 # Path validation

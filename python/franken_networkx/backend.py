@@ -258,8 +258,10 @@ _SUPPORTED_ALGORITHMS = {
     "isolates": fnx.isolates,
     "number_of_isolates": fnx.number_of_isolates,
     # Boundary
+    "cut_size": fnx.cut_size,
     "edge_boundary": fnx.edge_boundary,
     "node_boundary": fnx.node_boundary,
+    "normalized_cut_size": fnx.normalized_cut_size,
     # Path validation
     "is_simple_path": fnx.is_simple_path,
     # Matching validators

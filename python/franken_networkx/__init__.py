@@ -419,8 +419,10 @@ from franken_networkx._fnx import (
 
 # Algorithm functions — boundary
 from franken_networkx._fnx import (
+    cut_size,
     edge_boundary,
     node_boundary,
+    normalized_cut_size,
 )
 
 # Algorithm functions — path validation
@@ -1364,8 +1366,10 @@ __all__ = [
     "isolates",
     "number_of_isolates",
     # Algorithms — boundary
+    "cut_size",
     "edge_boundary",
     "node_boundary",
+    "normalized_cut_size",
     # Algorithms — path validation
     "is_simple_path",
     # Algorithms — matching validators

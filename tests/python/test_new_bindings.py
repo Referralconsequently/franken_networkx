@@ -1,5 +1,5 @@
 """Tests for newly-added Python bindings: tree recognition, isolates,
-boundary, is_simple_path, matching validators, simple_cycles, find_cycle."""
+boundary and cuts, is_simple_path, matching validators, simple_cycles, find_cycle."""
 
 import pytest
 
@@ -188,6 +188,28 @@ class TestBoundary:
     def test_node_boundary_empty(self, triangle):
         nodes = fnx.node_boundary(triangle, [0, 1, 2])
         assert len(nodes) == 0
+
+    def test_cut_size_uses_complement(self, path4):
+        assert fnx.cut_size(path4, [0, 1]) == 1.0
+
+    def test_cut_size_directed_weighted_counts_both_directions(self):
+        D = fnx.DiGraph()
+        D.add_edge("a", "b", weight=-2)
+        D.add_edge("b", "a", weight=5)
+        assert abs(fnx.cut_size(D, ["a"], ["b"], weight="weight") - 3.0) < 1e-9
+
+    def test_normalized_cut_size(self, path4):
+        assert abs(fnx.normalized_cut_size(path4, [0, 1]) - (2.0 / 3.0)) < 1e-9
+
+    def test_normalized_cut_size_directed_weighted(self):
+        D = fnx.DiGraph()
+        D.add_edge("a", "b", weight=-2)
+        D.add_edge("b", "a", weight=5)
+        assert abs(fnx.normalized_cut_size(D, ["a"], ["b"], weight="weight") + 0.9) < 1e-9
+
+    def test_normalized_cut_size_zero_volume_raises(self, triangle):
+        with pytest.raises(ZeroDivisionError):
+            fnx.normalized_cut_size(triangle, [])
 
 
 # ---------------------------------------------------------------------------
