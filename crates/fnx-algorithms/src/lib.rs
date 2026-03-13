@@ -13800,6 +13800,219 @@ pub fn chordal_cycle_graph(n: usize) -> Graph {
 }
 
 // ===========================================================================
+// Connectivity and cuts — additional
+// ===========================================================================
+
+/// Return the volume of a set of nodes (sum of degrees of nodes in the set).
+#[must_use]
+pub fn volume(graph: &Graph, nodes: &[&str]) -> usize {
+    let node_set: HashSet<&str> = nodes.iter().copied().collect();
+    let mut vol = 0;
+    for &nd in &node_set {
+        if let Some(nbrs) = graph.neighbors_iter(nd) {
+            vol += nbrs.count();
+        }
+    }
+    vol
+}
+
+/// Return True if the graph is k-edge-connected.
+#[must_use]
+pub fn is_k_edge_connected(graph: &Graph, k: usize) -> bool {
+    if k == 0 { return true; }
+    if !is_connected(graph).is_connected { return false; }
+    // Edge connectivity must be >= k
+    let ec = global_edge_connectivity_edmonds_karp(graph, "weight");
+    ec.value as usize >= k
+}
+
+/// Return the average node connectivity of a graph.
+/// Average of local node connectivity over all pairs of non-adjacent nodes.
+#[must_use]
+pub fn average_node_connectivity(graph: &Graph) -> f64 {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 { return 0.0; }
+    let mut total = 0.0;
+    let mut count = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            // Local node connectivity: min number of nodes to remove to disconnect i from j
+            // This is equivalent to max-flow on an auxiliary node-split graph
+            // For simplicity, use BFS-based approach: find min node cut
+            let nc = local_node_connectivity_bfs(graph, nodes[i], nodes[j]);
+            total += nc as f64;
+            count += 1;
+        }
+    }
+    if count == 0 { 0.0 } else { total / count as f64 }
+}
+
+/// Compute local node connectivity between s and t using iterative max-flow.
+fn local_node_connectivity_bfs(graph: &Graph, s: &str, t: &str) -> usize {
+    // Iteratively find node-disjoint paths from s to t using BFS
+    let nodes = graph.nodes_ordered();
+    let node_set: HashSet<&str> = nodes.iter().copied().collect();
+    if !node_set.contains(s) || !node_set.contains(t) { return 0; }
+
+    let mut flow = 0;
+    let mut excluded: HashSet<&str> = HashSet::new();
+
+    loop {
+        // BFS from s to t avoiding excluded nodes (except s and t)
+        let mut visited = HashSet::new();
+        visited.insert(s);
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+        let mut parent: HashMap<&str, &str> = HashMap::new();
+        let mut found = false;
+
+        while let Some(curr) = queue.pop_front() {
+            if curr == t {
+                found = true;
+                break;
+            }
+            if let Some(nbrs) = graph.neighbors_iter(curr) {
+                for nbr in nbrs {
+                    if !visited.contains(nbr) && (nbr == t || !excluded.contains(nbr)) {
+                        visited.insert(nbr);
+                        parent.insert(nbr, curr);
+                        queue.push_back(nbr);
+                    }
+                }
+            }
+        }
+
+        if !found { break; }
+
+        // Trace path and exclude internal nodes
+        let mut node = t;
+        while let Some(&p) = parent.get(node) {
+            if node != s && node != t {
+                excluded.insert(node);
+            }
+            node = p;
+        }
+        flow += 1;
+    }
+    flow
+}
+
+/// Return the boundary expansion of a set S in graph G.
+/// boundary_expansion(G, S) = |edge_boundary(S)| / |S|
+#[must_use]
+pub fn boundary_expansion(graph: &Graph, nodes: &[&str]) -> f64 {
+    if nodes.is_empty() { return 0.0; }
+    let node_set: HashSet<&str> = nodes.iter().copied().collect();
+    let mut boundary_edges = 0;
+    for &nd in &node_set {
+        if let Some(nbrs) = graph.neighbors_iter(nd) {
+            for nbr in nbrs {
+                if !node_set.contains(nbr) {
+                    boundary_edges += 1;
+                }
+            }
+        }
+    }
+    boundary_edges as f64 / nodes.len() as f64
+}
+
+/// Return the conductance of a set S.
+/// conductance(G, S) = |edge_boundary(S)| / min(vol(S), vol(V-S))
+#[must_use]
+pub fn conductance(graph: &Graph, nodes: &[&str]) -> f64 {
+    let node_set: HashSet<&str> = nodes.iter().copied().collect();
+    let all_nodes = graph.nodes_ordered();
+    let complement: Vec<&str> = all_nodes.iter().filter(|&&n| !node_set.contains(n)).copied().collect();
+
+    let mut boundary_edges = 0;
+    for &nd in &node_set {
+        if let Some(nbrs) = graph.neighbors_iter(nd) {
+            for nbr in nbrs {
+                if !node_set.contains(nbr) {
+                    boundary_edges += 1;
+                }
+            }
+        }
+    }
+
+    let vol_s = volume(graph, nodes);
+    let vol_comp = volume(graph, &complement);
+    let min_vol = vol_s.min(vol_comp);
+    if min_vol == 0 { return 0.0; }
+    boundary_edges as f64 / min_vol as f64
+}
+
+/// Return the edge expansion of a set S.
+/// edge_expansion(G, S) = |edge_boundary(S)| / min(|S|, |V-S|)
+#[must_use]
+pub fn edge_expansion(graph: &Graph, nodes: &[&str]) -> f64 {
+    let node_set: HashSet<&str> = nodes.iter().copied().collect();
+    let n = graph.nodes_ordered().len();
+    let s = node_set.len();
+    let complement_size = n - s;
+    let min_size = s.min(complement_size);
+    if min_size == 0 { return 0.0; }
+
+    let mut boundary_edges = 0;
+    for &nd in &node_set {
+        if let Some(nbrs) = graph.neighbors_iter(nd) {
+            for nbr in nbrs {
+                if !node_set.contains(nbr) {
+                    boundary_edges += 1;
+                }
+            }
+        }
+    }
+
+    boundary_edges as f64 / min_size as f64
+}
+
+/// Return the node expansion of a set S.
+/// node_expansion(G, S) = |node_boundary(S)| / |S|
+#[must_use]
+pub fn node_expansion(graph: &Graph, nodes: &[&str]) -> f64 {
+    if nodes.is_empty() { return 0.0; }
+    let node_set: HashSet<&str> = nodes.iter().copied().collect();
+    let mut node_boundary: HashSet<&str> = HashSet::new();
+    for &nd in &node_set {
+        if let Some(nbrs) = graph.neighbors_iter(nd) {
+            for nbr in nbrs {
+                if !node_set.contains(nbr) {
+                    node_boundary.insert(nbr);
+                }
+            }
+        }
+    }
+    node_boundary.len() as f64 / nodes.len() as f64
+}
+
+/// Return the mixing expansion of a set S.
+/// mixing_expansion(G, S) = |edge_boundary(S)| / (|S| * |V-S|)
+#[must_use]
+pub fn mixing_expansion(graph: &Graph, nodes: &[&str]) -> f64 {
+    let node_set: HashSet<&str> = nodes.iter().copied().collect();
+    let n = graph.nodes_ordered().len();
+    let s = node_set.len();
+    let complement_size = n - s;
+    let denom = s * complement_size;
+    if denom == 0 { return 0.0; }
+
+    let mut boundary_edges = 0;
+    for &nd in &node_set {
+        if let Some(nbrs) = graph.neighbors_iter(nd) {
+            for nbr in nbrs {
+                if !node_set.contains(nbr) {
+                    boundary_edges += 1;
+                }
+            }
+        }
+    }
+
+    boundary_edges as f64 / denom as f64
+}
+
+// ===========================================================================
 // Traversal algorithms — additional
 // ===========================================================================
 
@@ -14431,6 +14644,9 @@ mod tests {
         complete_bipartite_graph, complete_multipartite_graph, grid_2d_graph,
         null_graph, trivial_graph, binomial_tree, full_rary_tree,
         circulant_graph, kneser_graph, paley_graph, chordal_cycle_graph,
+        // Connectivity and cuts — additional
+        volume, is_k_edge_connected, average_node_connectivity,
+        boundary_expansion, conductance, edge_expansion, node_expansion, mixing_expansion,
         // Traversal — additional
         edge_bfs, edge_bfs_directed, edge_dfs, edge_dfs_directed,
         // Matching — additional
@@ -22918,5 +23134,95 @@ mod tests {
         assert_eq!(g.node_count(), 6);
         // 6 cycle edges + 6 chord edges = 12
         assert_eq!(g.edge_count(), 12);
+    }
+
+    // ---- Connectivity and cuts ----
+
+    #[test]
+    fn test_volume() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        // Volume of {a,b} = degree(a) + degree(b) = 2 + 2 = 4
+        assert_eq!(volume(&g, &["a", "b"]), 4);
+    }
+
+    #[test]
+    fn test_is_k_edge_connected() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        assert!(is_k_edge_connected(&g, 2));
+        assert!(!is_k_edge_connected(&g, 3));
+    }
+
+    #[test]
+    fn test_average_node_connectivity() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "a");
+        let anc = average_node_connectivity(&g);
+        // Triangle: each pair has node connectivity 2
+        assert!((anc - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_boundary_expansion() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        // boundary_expansion({a,b}) = edges from {a,b} to outside / |{a,b}|
+        // = 1 (b-c) / 2 = 0.5
+        let be = boundary_expansion(&g, &["a", "b"]);
+        assert!((be - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_edge_expansion() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        // edge_expansion({a,b}) = 1 / min(2,2) = 0.5
+        let ee = edge_expansion(&g, &["a", "b"]);
+        assert!((ee - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_node_expansion() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        // node_expansion({a,b}) = |{c}| / |{a,b}| = 0.5
+        let ne = node_expansion(&g, &["a", "b"]);
+        assert!((ne - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_conductance() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        // vol({a,b}) = 1+2 = 3, vol({c,d}) = 2+1 = 3
+        // conductance({a,b}) = 1 / min(3,3) = 1/3
+        let c = conductance(&g, &["a", "b"]);
+        assert!((c - 1.0/3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_mixing_expansion() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("c", "d");
+        // mixing_expansion({a,b}) = 1 / (2*2) = 0.25
+        let me = mixing_expansion(&g, &["a", "b"]);
+        assert!((me - 0.25).abs() < 1e-6);
     }
 }
