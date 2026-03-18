@@ -1,0 +1,243 @@
+{
+  "suite": "centrality_v1",
+  "mode": "strict",
+  "operations": [
+    {
+      "op": "add_node",
+      "node": "0",
+      "attrs": {}
+    },
+    {
+      "op": "add_node",
+      "node": "1",
+      "attrs": {}
+    },
+    {
+      "op": "add_node",
+      "node": "2",
+      "attrs": {}
+    },
+    {
+      "op": "add_node",
+      "node": "3",
+      "attrs": {}
+    },
+    {
+      "op": "add_node",
+      "node": "4",
+      "attrs": {}
+    },
+    {
+      "op": "add_node",
+      "node": "5",
+      "attrs": {}
+    },
+    {
+      "op": "add_node",
+      "node": "6",
+      "attrs": {}
+    },
+    {
+      "op": "add_node",
+      "node": "7",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "0",
+      "right": "1",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "0",
+      "right": "4",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "1",
+      "right": "2",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "1",
+      "right": "5",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "2",
+      "right": "3",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "2",
+      "right": "6",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "3",
+      "right": "7",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "4",
+      "right": "5",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "5",
+      "right": "6",
+      "attrs": {}
+    },
+    {
+      "op": "add_edge",
+      "left": "6",
+      "right": "7",
+      "attrs": {}
+    },
+    {
+      "op": "hits_centrality_query"
+    }
+  ],
+  "expected": {
+    "graph": {
+      "nodes": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7"
+      ],
+      "edges": [
+        {
+          "left": "0",
+          "right": "1",
+          "attrs": {}
+        },
+        {
+          "left": "0",
+          "right": "4",
+          "attrs": {}
+        },
+        {
+          "left": "1",
+          "right": "2",
+          "attrs": {}
+        },
+        {
+          "left": "1",
+          "right": "5",
+          "attrs": {}
+        },
+        {
+          "left": "2",
+          "right": "3",
+          "attrs": {}
+        },
+        {
+          "left": "2",
+          "right": "6",
+          "attrs": {}
+        },
+        {
+          "left": "3",
+          "right": "7",
+          "attrs": {}
+        },
+        {
+          "left": "4",
+          "right": "5",
+          "attrs": {}
+        },
+        {
+          "left": "5",
+          "right": "6",
+          "attrs": {}
+        },
+        {
+          "left": "6",
+          "right": "7",
+          "attrs": {}
+        }
+      ]
+    },
+    "hits_hubs": [
+      {
+        "node": "0",
+        "score": 0.24966241254974775
+      },
+      {
+        "node": "1",
+        "score": -0.09494527484384274
+      },
+      {
+        "node": "2",
+        "score": 0.4039622692187902
+      },
+      {
+        "node": "3",
+        "score": -0.05867940692469516
+      },
+      {
+        "node": "4",
+        "score": -0.05867940692469519
+      },
+      {
+        "node": "5",
+        "score": 0.4039622692187902
+      },
+      {
+        "node": "6",
+        "score": -0.09494527484384271
+      },
+      {
+        "node": "7",
+        "score": 0.24966241254974775
+      }
+    ],
+    "hits_authorities": [
+      {
+        "node": "0",
+        "score": -0.05867940692469525
+      },
+      {
+        "node": "1",
+        "score": 0.40396226921879025
+      },
+      {
+        "node": "2",
+        "score": -0.09494527484384271
+      },
+      {
+        "node": "3",
+        "score": 0.24966241254974772
+      },
+      {
+        "node": "4",
+        "score": 0.24966241254974772
+      },
+      {
+        "node": "5",
+        "score": -0.09494527484384271
+      },
+      {
+        "node": "6",
+        "score": 0.40396226921879025
+      },
+      {
+        "node": "7",
+        "score": -0.058679406924695164
+      }
+    ]
+  }
+}
