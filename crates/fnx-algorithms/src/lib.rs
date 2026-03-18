@@ -16694,6 +16694,7 @@ fn local_node_connectivity_bfs(graph: &Graph, s: &str, t: &str) -> usize {
 
     let mut flow = 0;
     let mut excluded: HashSet<&str> = HashSet::new();
+    let mut direct_edge_used = false;
 
     loop {
         // BFS from s to t avoiding excluded nodes (except s and t)
@@ -16711,6 +16712,10 @@ fn local_node_connectivity_bfs(graph: &Graph, s: &str, t: &str) -> usize {
             }
             if let Some(nbrs) = graph.neighbors_iter(curr) {
                 for nbr in nbrs {
+                    // Skip the direct s->t edge if already used
+                    if curr == s && nbr == t && direct_edge_used {
+                        continue;
+                    }
                     if !visited.contains(nbr) && (nbr == t || !excluded.contains(nbr)) {
                         visited.insert(nbr);
                         parent.insert(nbr, curr);
@@ -16725,14 +16730,22 @@ fn local_node_connectivity_bfs(graph: &Graph, s: &str, t: &str) -> usize {
         }
 
         // Trace path and exclude internal nodes
+        let mut path_len = 0usize;
         let mut node = t;
         while let Some(&p) = parent.get(node) {
             if node != s && node != t {
                 excluded.insert(node);
             }
+            path_len += 1;
             node = p;
         }
         flow += 1;
+
+        // If this was a direct edge (path length 1), mark it used so
+        // we don't re-discover the same direct edge and loop forever.
+        if path_len == 1 {
+            direct_edge_used = true;
+        }
     }
     flow
 }

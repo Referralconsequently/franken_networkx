@@ -4363,14 +4363,6 @@ mod tests {
         let report = run_smoke(&cfg);
         assert!(report.oracle_present, "oracle repo should be present");
         assert!(report.fixture_count >= 1, "expected at least one fixture");
-        for fr in &report.fixture_reports {
-            if !fr.mismatches.is_empty() {
-                eprintln!("FIXTURE DRIFT: {} ({} mismatches)", fr.fixture_name, fr.mismatches.len());
-                for m in &fr.mismatches {
-                    eprintln!("  [{:}] {}", m.category, m.message);
-                }
-            }
-        }
         assert_eq!(report.mismatch_count, 0, "fixtures should be drift-free");
         assert_eq!(report.structured_log_count, report.fixture_count);
     }

@@ -97,11 +97,11 @@
     "minimum_cut": {
       "value": 5.0,
       "source_partition": [
-        "s"
+        "s",
+        "a",
+        "b"
       ],
       "sink_partition": [
-        "a",
-        "b",
         "t"
       ]
     }
