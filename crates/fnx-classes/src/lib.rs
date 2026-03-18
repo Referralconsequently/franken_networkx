@@ -3,8 +3,7 @@
 pub mod digraph;
 
 use fnx_runtime::{
-    CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm,
-    unix_time_ms,
+    CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm, unix_time_ms,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -546,19 +545,16 @@ impl MultiGraph {
 
     #[must_use]
     pub fn neighbors(&self, node: &str) -> Option<Vec<&str>> {
-        self.adjacency.get(node).map(|neighbors| {
-            neighbors
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<&str>>()
-        })
+        self.adjacency
+            .get(node)
+            .map(|neighbors| neighbors.keys().map(String::as_str).collect::<Vec<&str>>())
     }
 
     #[must_use]
     pub fn edge_keys(&self, left: &str, right: &str) -> Option<Vec<usize>> {
-        self.edges.get(&EdgeKey::new(left, right)).map(|edge_bucket| {
-            edge_bucket.keys().copied().collect::<Vec<usize>>()
-        })
+        self.edges
+            .get(&EdgeKey::new(left, right))
+            .map(|edge_bucket| edge_bucket.keys().copied().collect::<Vec<usize>>())
     }
 
     #[must_use]
@@ -638,13 +634,33 @@ impl MultiGraph {
         left: impl Into<String>,
         right: impl Into<String>,
     ) -> Result<usize, GraphError> {
-        self.add_edge_with_attrs(left, right, AttrMap::new())
+        self.add_edge_impl(left, right, None, AttrMap::new())
     }
 
     pub fn add_edge_with_attrs(
         &mut self,
         left: impl Into<String>,
         right: impl Into<String>,
+        attrs: AttrMap,
+    ) -> Result<usize, GraphError> {
+        self.add_edge_impl(left, right, None, attrs)
+    }
+
+    pub fn add_edge_with_key_and_attrs(
+        &mut self,
+        left: impl Into<String>,
+        right: impl Into<String>,
+        key: usize,
+        attrs: AttrMap,
+    ) -> Result<usize, GraphError> {
+        self.add_edge_impl(left, right, Some(key), attrs)
+    }
+
+    fn add_edge_impl(
+        &mut self,
+        left: impl Into<String>,
+        right: impl Into<String>,
+        explicit_key: Option<usize>,
         attrs: AttrMap,
     ) -> Result<usize, GraphError> {
         let left = left.into();
@@ -693,15 +709,31 @@ impl MultiGraph {
         }
 
         let edge_key = EdgeKey::new(&left, &right);
-        let key = *self.next_edge_key.entry(edge_key.clone()).or_insert(0);
-        self.next_edge_key
-            .entry(edge_key.clone())
-            .and_modify(|next| *next = next.saturating_add(1));
+        let key =
+            explicit_key.unwrap_or_else(|| self.next_edge_key.get(&edge_key).copied().unwrap_or(0));
+        let mut changed = false;
         let edge_attr_count = {
             let edge_bucket = self.edges.entry(edge_key).or_default();
-            edge_bucket.insert(key, attrs);
+            changed = !edge_bucket.contains_key(&key);
+            let attrs_for_change_check = attrs.clone();
+            let edge_attrs = edge_bucket.entry(key).or_default();
+            if !attrs_for_change_check.is_empty()
+                && attrs_for_change_check
+                    .iter()
+                    .any(|(attr_key, value)| edge_attrs.get(attr_key) != Some(value))
+            {
+                changed = true;
+            }
+            edge_attrs.extend(attrs);
             edge_bucket.len()
         };
+        if explicit_key.is_none() {
+            let next_key = key.saturating_add(1);
+            self.next_edge_key
+                .entry(EdgeKey::new(&left, &right))
+                .and_modify(|next| *next = (*next).max(next_key))
+                .or_insert(next_key);
+        }
 
         self.adjacency
             .entry(left.clone())
@@ -715,7 +747,9 @@ impl MultiGraph {
             .entry(left.clone())
             .or_default()
             .insert(key);
-        self.revision = self.revision.saturating_add(1);
+        if changed {
+            self.revision = self.revision.saturating_add(1);
+        }
 
         self.record_decision(
             "add_edge",
@@ -768,10 +802,7 @@ impl MultiGraph {
             return false;
         }
 
-        let should_drop_bucket = self
-            .edges
-            .get(&edge_key)
-            .is_some_and(IndexMap::is_empty);
+        let should_drop_bucket = self.edges.get(&edge_key).is_some_and(IndexMap::is_empty);
         if should_drop_bucket {
             self.edges.shift_remove(&edge_key);
             self.next_edge_key.shift_remove(&edge_key);
@@ -792,7 +823,10 @@ impl MultiGraph {
             neighbors
                 .iter()
                 .map(|(neighbor, keys)| {
-                    (neighbor.clone(), keys.iter().copied().collect::<Vec<usize>>())
+                    (
+                        neighbor.clone(),
+                        keys.iter().copied().collect::<Vec<usize>>(),
+                    )
                 })
                 .collect::<Vec<(String, Vec<usize>)>>()
         });
@@ -872,9 +906,7 @@ impl MultiGraph {
             keys.shift_remove(&key);
             drop_neighbor = keys.is_empty();
         }
-        if drop_neighbor
-            && let Some(neighbors) = self.adjacency.get_mut(source)
-        {
+        if drop_neighbor && let Some(neighbors) = self.adjacency.get_mut(source) {
             neighbors.shift_remove(target);
         }
     }
@@ -1223,6 +1255,56 @@ mod tests {
         assert_eq!(graph.neighbors("a"), Some(vec![]));
         assert_eq!(graph.neighbors("c"), Some(vec![]));
         assert_multigraph_core_invariants(&graph);
+    }
+
+    #[test]
+    fn multigraph_roundtrips_sparse_snapshot_keys() {
+        let mut graph = MultiGraph::strict();
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            0
+        );
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            1
+        );
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            2
+        );
+        assert!(graph.remove_edge("a", "b", Some(1)));
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            3
+        );
+
+        let snapshot = graph.snapshot();
+        assert_eq!(
+            snapshot
+                .edges
+                .iter()
+                .map(|edge| edge.key)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 3]
+        );
+
+        let mut replayed = MultiGraph::new(snapshot.mode);
+        for node in &snapshot.nodes {
+            let _ = replayed.add_node(node.clone());
+        }
+        for edge in &snapshot.edges {
+            replayed
+                .add_edge_with_key_and_attrs(
+                    edge.left.clone(),
+                    edge.right.clone(),
+                    edge.key,
+                    edge.attrs.clone(),
+                )
+                .expect("snapshot replay should preserve explicit keys");
+        }
+
+        assert_eq!(replayed.snapshot(), snapshot);
+        assert_multigraph_core_invariants(&replayed);
     }
 
     proptest! {

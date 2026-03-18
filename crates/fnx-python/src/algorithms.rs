@@ -1518,6 +1518,11 @@ pub fn eccentricity(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>
 pub fn diameter(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "G has no nodes.",
+        ));
+    }
     let (connected, result) = py.allow_threads(|| {
         let c = fnx_algorithms::is_connected(inner);
         let r = fnx_algorithms::distance_measures(inner);
@@ -1536,6 +1541,11 @@ pub fn diameter(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
 pub fn radius(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "G has no nodes.",
+        ));
+    }
     let (connected, result) = py.allow_threads(|| {
         let c = fnx_algorithms::is_connected(inner);
         let r = fnx_algorithms::distance_measures(inner);
@@ -1554,6 +1564,11 @@ pub fn radius(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
 pub fn center(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "G has no nodes.",
+        ));
+    }
     let (connected, result) = py.allow_threads(|| {
         let c = fnx_algorithms::is_connected(inner);
         let r = fnx_algorithms::distance_measures(inner);
@@ -1576,6 +1591,11 @@ pub fn center(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
 pub fn periphery(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "G has no nodes.",
+        ));
+    }
     let (connected, result) = py.allow_threads(|| {
         let c = fnx_algorithms::is_connected(inner);
         let r = fnx_algorithms::distance_measures(inner);
@@ -1602,6 +1622,11 @@ pub fn periphery(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>
 pub fn is_tree(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "G has no nodes.",
+        ));
+    }
     Ok(py.allow_threads(|| fnx_algorithms::is_tree(inner).is_tree))
 }
 
@@ -1610,6 +1635,11 @@ pub fn is_tree(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
 pub fn is_forest(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "G has no nodes.",
+        ));
+    }
     Ok(py.allow_threads(|| fnx_algorithms::is_forest(inner).is_forest))
 }
 

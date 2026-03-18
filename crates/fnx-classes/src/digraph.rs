@@ -7,8 +7,7 @@
 
 use crate::{AttrMap, EdgeSnapshot, GraphError};
 use fnx_runtime::{
-    CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm,
-    unix_time_ms,
+    CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm, unix_time_ms,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -662,22 +661,16 @@ impl MultiDiGraph {
 
     #[must_use]
     pub fn successors(&self, node: &str) -> Option<Vec<&str>> {
-        self.successors.get(node).map(|neighbors| {
-            neighbors
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<&str>>()
-        })
+        self.successors
+            .get(node)
+            .map(|neighbors| neighbors.keys().map(String::as_str).collect::<Vec<&str>>())
     }
 
     #[must_use]
     pub fn predecessors(&self, node: &str) -> Option<Vec<&str>> {
-        self.predecessors.get(node).map(|neighbors| {
-            neighbors
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<&str>>()
-        })
+        self.predecessors
+            .get(node)
+            .map(|neighbors| neighbors.keys().map(String::as_str).collect::<Vec<&str>>())
     }
 
     #[must_use]
@@ -770,13 +763,33 @@ impl MultiDiGraph {
         source: impl Into<String>,
         target: impl Into<String>,
     ) -> Result<usize, GraphError> {
-        self.add_edge_with_attrs(source, target, AttrMap::new())
+        self.add_edge_impl(source, target, None, AttrMap::new())
     }
 
     pub fn add_edge_with_attrs(
         &mut self,
         source: impl Into<String>,
         target: impl Into<String>,
+        attrs: AttrMap,
+    ) -> Result<usize, GraphError> {
+        self.add_edge_impl(source, target, None, attrs)
+    }
+
+    pub fn add_edge_with_key_and_attrs(
+        &mut self,
+        source: impl Into<String>,
+        target: impl Into<String>,
+        key: usize,
+        attrs: AttrMap,
+    ) -> Result<usize, GraphError> {
+        self.add_edge_impl(source, target, Some(key), attrs)
+    }
+
+    fn add_edge_impl(
+        &mut self,
+        source: impl Into<String>,
+        target: impl Into<String>,
+        explicit_key: Option<usize>,
         attrs: AttrMap,
     ) -> Result<usize, GraphError> {
         let source = source.into();
@@ -826,15 +839,31 @@ impl MultiDiGraph {
         }
 
         let edge_key = DirectedEdgeKey::new(&source, &target);
-        let key = *self.next_edge_key.entry(edge_key.clone()).or_insert(0);
-        self.next_edge_key
-            .entry(edge_key.clone())
-            .and_modify(|next| *next = next.saturating_add(1));
+        let key =
+            explicit_key.unwrap_or_else(|| self.next_edge_key.get(&edge_key).copied().unwrap_or(0));
+        let mut changed = false;
         let edge_attr_count = {
             let edge_bucket = self.edges.entry(edge_key).or_default();
-            edge_bucket.insert(key, attrs);
+            changed = !edge_bucket.contains_key(&key);
+            let attrs_for_change_check = attrs.clone();
+            let edge_attrs = edge_bucket.entry(key).or_default();
+            if !attrs_for_change_check.is_empty()
+                && attrs_for_change_check
+                    .iter()
+                    .any(|(attr_key, value)| edge_attrs.get(attr_key) != Some(value))
+            {
+                changed = true;
+            }
+            edge_attrs.extend(attrs);
             edge_bucket.len()
         };
+        if explicit_key.is_none() {
+            let next_key = key.saturating_add(1);
+            self.next_edge_key
+                .entry(DirectedEdgeKey::new(&source, &target))
+                .and_modify(|next| *next = (*next).max(next_key))
+                .or_insert(next_key);
+        }
 
         self.successors
             .entry(source.clone())
@@ -848,7 +877,9 @@ impl MultiDiGraph {
             .entry(source.clone())
             .or_default()
             .insert(key);
-        self.revision = self.revision.saturating_add(1);
+        if changed {
+            self.revision = self.revision.saturating_add(1);
+        }
 
         self.record_decision(
             "add_edge",
@@ -901,10 +932,7 @@ impl MultiDiGraph {
             return false;
         }
 
-        let should_drop_bucket = self
-            .edges
-            .get(&edge_key)
-            .is_some_and(IndexMap::is_empty);
+        let should_drop_bucket = self.edges.get(&edge_key).is_some_and(IndexMap::is_empty);
         if should_drop_bucket {
             self.edges.shift_remove(&edge_key);
             self.next_edge_key.shift_remove(&edge_key);
@@ -921,18 +949,28 @@ impl MultiDiGraph {
             return false;
         }
 
-        let outgoing = self.successors.get(node).map_or_else(Vec::new, |neighbors| {
-            neighbors
-                .iter()
-                .map(|(target, keys)| (target.clone(), keys.iter().copied().collect::<Vec<usize>>()))
-                .collect::<Vec<(String, Vec<usize>)>>()
-        });
-        let incoming = self.predecessors.get(node).map_or_else(Vec::new, |neighbors| {
-            neighbors
-                .iter()
-                .map(|(source, keys)| (source.clone(), keys.iter().copied().collect::<Vec<usize>>()))
-                .collect::<Vec<(String, Vec<usize>)>>()
-        });
+        let outgoing = self
+            .successors
+            .get(node)
+            .map_or_else(Vec::new, |neighbors| {
+                neighbors
+                    .iter()
+                    .map(|(target, keys)| {
+                        (target.clone(), keys.iter().copied().collect::<Vec<usize>>())
+                    })
+                    .collect::<Vec<(String, Vec<usize>)>>()
+            });
+        let incoming = self
+            .predecessors
+            .get(node)
+            .map_or_else(Vec::new, |neighbors| {
+                neighbors
+                    .iter()
+                    .map(|(source, keys)| {
+                        (source.clone(), keys.iter().copied().collect::<Vec<usize>>())
+                    })
+                    .collect::<Vec<(String, Vec<usize>)>>()
+            });
 
         for (target, keys) in outgoing {
             for key in keys {
@@ -1015,9 +1053,7 @@ impl MultiDiGraph {
             keys.shift_remove(&key);
             drop_neighbor = keys.is_empty();
         }
-        if drop_neighbor
-            && let Some(neighbors) = self.successors.get_mut(source)
-        {
+        if drop_neighbor && let Some(neighbors) = self.successors.get_mut(source) {
             neighbors.shift_remove(target);
         }
     }
@@ -1030,9 +1066,7 @@ impl MultiDiGraph {
             keys.shift_remove(&key);
             drop_neighbor = keys.is_empty();
         }
-        if drop_neighbor
-            && let Some(neighbors) = self.predecessors.get_mut(target)
-        {
+        if drop_neighbor && let Some(neighbors) = self.predecessors.get_mut(target) {
             neighbors.shift_remove(source);
         }
     }
@@ -1409,6 +1443,56 @@ mod tests {
         assert_eq!(graph.successors("a"), Some(vec![]));
         assert_eq!(graph.predecessors("a"), Some(vec![]));
         assert_multidigraph_core_invariants(&graph);
+    }
+
+    #[test]
+    fn multidigraph_roundtrips_sparse_snapshot_keys() {
+        let mut graph = MultiDiGraph::strict();
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            0
+        );
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            1
+        );
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            2
+        );
+        assert!(graph.remove_edge("a", "b", Some(1)));
+        assert_eq!(
+            graph.add_edge("a", "b").expect("edge add should succeed"),
+            3
+        );
+
+        let snapshot = graph.snapshot();
+        assert_eq!(
+            snapshot
+                .edges
+                .iter()
+                .map(|edge| edge.key)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 3]
+        );
+
+        let mut replayed = MultiDiGraph::new(snapshot.mode);
+        for node in &snapshot.nodes {
+            let _ = replayed.add_node(node.clone());
+        }
+        for edge in &snapshot.edges {
+            replayed
+                .add_edge_with_key_and_attrs(
+                    edge.source.clone(),
+                    edge.target.clone(),
+                    edge.key,
+                    edge.attrs.clone(),
+                )
+                .expect("snapshot replay should preserve explicit keys");
+        }
+
+        assert_eq!(replayed.snapshot(), snapshot);
+        assert_multidigraph_core_invariants(&replayed);
     }
 
     #[test]
