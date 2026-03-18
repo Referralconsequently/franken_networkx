@@ -682,6 +682,20 @@ def to_dict_of_lists(G, nodelist=None):
     return {n: [nb for nb in G.neighbors(n) if nb in nodeset] for n in nodelist}
 
 
+def _empty_graph_from_create_using(create_using):
+    """Normalize NetworkX-style ``create_using`` inputs to an empty graph."""
+    if create_using is None:
+        return Graph()
+
+    if isinstance(create_using, type):
+        return create_using()
+
+    G = create_using
+    if hasattr(G, "clear"):
+        G.clear()
+    return G
+
+
 def from_dict_of_lists(d, create_using=None):
     """Return a graph from a dictionary of lists.
 
@@ -696,10 +710,7 @@ def from_dict_of_lists(d, create_using=None):
     -------
     G : Graph or DiGraph
     """
-    if create_using is not None:
-        G = create_using
-    else:
-        G = Graph()
+    G = _empty_graph_from_create_using(create_using)
 
     for node, neighbors in d.items():
         G.add_node(node)
@@ -825,10 +836,7 @@ def from_pandas_edgelist(df, source='source', target='target', edge_attr=None,
     -------
     G : Graph or DiGraph
     """
-    if create_using is not None:
-        G = create_using
-    else:
-        G = Graph()
+    G = _empty_graph_from_create_using(create_using)
 
     if edge_attr is True:
         attr_cols = [c for c in df.columns if c not in (source, target)]
@@ -921,10 +929,7 @@ def from_numpy_array(A, parallel_edges=False, create_using=None):
     """
     import numpy as np
 
-    if create_using is not None:
-        G = create_using
-    else:
-        G = Graph()
+    G = _empty_graph_from_create_using(create_using)
 
     n = A.shape[0]
     for i in range(n):
@@ -959,10 +964,7 @@ def from_dict_of_dicts(d, create_using=None, multigraph_input=False):
     -------
     G : Graph or DiGraph
     """
-    if create_using is not None:
-        G = create_using
-    else:
-        G = Graph()
+    G = _empty_graph_from_create_using(create_using)
 
     # Add all keys as nodes first (preserves isolated nodes like NetworkX).
     for u in d:
@@ -993,10 +995,7 @@ def from_edgelist(edgelist, create_using=None):
     -------
     G : Graph or DiGraph
     """
-    if create_using is not None:
-        G = create_using
-    else:
-        G = Graph()
+    G = _empty_graph_from_create_using(create_using)
 
     G.add_edges_from(edgelist)
     return G
@@ -1115,10 +1114,7 @@ def from_scipy_sparse_array(A, parallel_edges=False, create_using=None,
     """
     import scipy.sparse
 
-    if create_using is not None:
-        G = create_using
-    else:
-        G = Graph()
+    G = _empty_graph_from_create_using(create_using)
 
     coo = scipy.sparse.coo_array(A)
     n = coo.shape[0]

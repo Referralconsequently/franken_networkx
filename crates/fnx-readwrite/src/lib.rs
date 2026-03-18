@@ -665,10 +665,8 @@ impl EdgeListEngine {
                         &key_registry,
                     )?;
                 }
-                Ok(Event::Text(ref e)) => {
-                    if current_data_key.is_some() {
-                        current_data_text.push_str(&e.unescape().unwrap_or_default());
-                    }
+                Ok(Event::Text(ref e)) if current_data_key.is_some() => {
+                    current_data_text.push_str(&e.unescape().unwrap_or_default());
                 }
                 Ok(Event::End(ref e)) => {
                     self.handle_graphml_end_element(

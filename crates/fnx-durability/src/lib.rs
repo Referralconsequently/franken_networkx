@@ -4,6 +4,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -79,7 +80,21 @@ pub fn generate_sidecar_for_file(
     let source_hash = hash_bytes(&data);
     let encoder = Encoder::with_defaults(&data, mtu);
     let config = encoder.get_config();
-    let packets = encoder.get_encoded_packets(repair_symbols);
+    
+    let mut total_k = 0u32;
+    for block_encoder in encoder.get_block_encoders() {
+        total_k += block_encoder.source_packets().len() as u32;
+    }
+    
+    let blocks = encoder.get_block_encoders().len() as u32;
+    let repair_per_block = if blocks > 0 {
+        (repair_symbols + blocks - 1) / blocks
+    } else {
+        0
+    };
+    
+    let packets = encoder.get_encoded_packets(repair_per_block);
+    let actual_repair_count = packets.len() as u32 - total_k;
 
     let serialized_packets: Vec<Vec<u8>> = packets.iter().map(EncodingPacket::serialize).collect();
     let symbol_hashes: Vec<String> = serialized_packets
@@ -91,15 +106,11 @@ pub fn generate_sidecar_for_file(
         .map(|bytes| STANDARD.encode(bytes))
         .collect();
     let oti_b64 = STANDARD.encode(config.serialize());
-    let k = packets
-        .len()
-        .saturating_sub(repair_symbols as usize)
-        .try_into()
-        .unwrap_or(0);
-    let overhead_ratio = if k == 0 {
+    
+    let overhead_ratio = if total_k == 0 {
         0.0
     } else {
-        f64::from(repair_symbols) / f64::from(k)
+        f64::from(actual_repair_count) / f64::from(total_k)
     };
 
     let envelope = ArtifactEnvelope {
@@ -107,8 +118,8 @@ pub fn generate_sidecar_for_file(
         artifact_type: artifact_type.to_owned(),
         source_hash,
         raptorq: RaptorQSidecar {
-            k,
-            repair_symbols,
+            k: total_k,
+            repair_symbols: actual_repair_count,
             overhead_ratio,
             symbol_hashes,
             oti_b64,
@@ -131,13 +142,13 @@ pub fn scrub_artifact(
 ) -> Result<ArtifactEnvelope, DurabilityError> {
     let mut envelope = read_envelope(sidecar_path)?;
 
-    let source_hash = if artifact_path.exists() {
+    let current_source_hash = if artifact_path.exists() {
         hash_bytes(&fs::read(artifact_path)?)
     } else {
         String::new()
     };
 
-    if source_hash == envelope.source_hash {
+    if current_source_hash == envelope.source_hash {
         envelope.scrub = ScrubStatus {
             last_ok_unix_ms: unix_time_ms(),
             status: ScrubState::Ok,
@@ -149,11 +160,8 @@ pub fn scrub_artifact(
     let recovered = decode_from_envelope(&envelope)?;
     let recovered_hash = hash_bytes(&recovered);
     if recovered_hash != envelope.source_hash {
-        envelope.scrub = ScrubStatus {
-            last_ok_unix_ms: envelope.scrub.last_ok_unix_ms,
-            status: ScrubState::Failed,
-        };
-        write_envelope(sidecar_path, &envelope)?;
+        envelope.scrub.status = ScrubState::Failed;
+        let _ = write_envelope(sidecar_path, &envelope);
         return Err(DurabilityError::HashMismatch);
     }
 
@@ -179,11 +187,13 @@ pub fn run_decode_drill(
 ) -> Result<ArtifactEnvelope, DurabilityError> {
     let mut envelope = read_envelope(sidecar_path)?;
     let packets = envelope.raptorq.packets_b64.clone();
+    
     let drop_count = usize::try_from(envelope.raptorq.repair_symbols.min(2)).unwrap_or(0);
     let reduced: Vec<String> = packets.into_iter().skip(drop_count).collect();
 
     let recovered =
         decode_with_packets(&envelope, &reduced).or_else(|_| decode_from_envelope(&envelope))?;
+    
     let recovered_hash = hash_bytes(&recovered);
     if recovered_hash != envelope.source_hash {
         return Err(DurabilityError::HashMismatch);
@@ -256,6 +266,16 @@ fn unix_time_ms() -> u128 {
         .as_millis()
 }
 
+impl fmt::Display for ScrubState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ok => write!(f, "ok"),
+            Self::Recovered => write!(f, "recovered"),
+            Self::Failed => write!(f, "failed"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{generate_sidecar_for_file, run_decode_drill, scrub_artifact};
@@ -273,10 +293,33 @@ mod tests {
             generate_sidecar_for_file(&artifact, &sidecar, "artifact", "conformance", 1400, 4)
                 .expect("sidecar generation should succeed");
         assert_eq!(generated.artifact_id, "artifact");
+        assert!(generated.raptorq.k > 0);
 
         fs::write(&artifact, b"corrupted").expect("corruption write should succeed");
         let scrubbed = scrub_artifact(&artifact, &sidecar).expect("scrub recovery should succeed");
         assert_eq!(scrubbed.scrub.status, super::ScrubState::Recovered);
+        
+        let recovered_content = fs::read_to_string(&artifact).expect("read recovered");
+        assert_eq!(recovered_content, "{\"hello\":\"world\"}");
+    }
+
+    #[test]
+    fn generate_and_scrub_missing_artifact() {
+        let temp = tempdir().expect("tempdir should be created");
+        let artifact = temp.path().join("artifact.json");
+        let sidecar = temp.path().join("artifact.raptorq.json");
+        fs::write(&artifact, b"essential data").expect("artifact write");
+
+        generate_sidecar_for_file(&artifact, &sidecar, "missing_test", "data", 1400, 4)
+            .expect("generate");
+        
+        fs::remove_file(&artifact).expect("remove artifact");
+        assert!(!artifact.exists());
+
+        let scrubbed = scrub_artifact(&artifact, &sidecar).expect("recover missing");
+        assert_eq!(scrubbed.scrub.status, super::ScrubState::Recovered);
+        assert!(artifact.exists());
+        assert_eq!(fs::read_to_string(&artifact).unwrap(), "essential data");
     }
 
     #[test]

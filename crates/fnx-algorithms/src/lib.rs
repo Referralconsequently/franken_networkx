@@ -23,6 +23,73 @@ const HITS_DEFAULT_MAX_ITERATIONS: usize = 100;
 const HITS_DEFAULT_TOLERANCE: f64 = 1.0e-8;
 const DISTANCE_COMPARISON_EPSILON: f64 = 1.0e-12;
 
+pub trait GraphView {
+    fn nodes_ordered(&self) -> Vec<&str>;
+    fn neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>>;
+    fn neighbor_count(&self, node: &str) -> usize;
+    fn has_node(&self, node: &str) -> bool;
+    fn has_edge(&self, u: &str, v: &str) -> bool;
+    fn is_directed(&self) -> bool;
+    fn node_count(&self) -> usize;
+    fn edge_count(&self) -> usize;
+}
+
+impl GraphView for Graph {
+    fn nodes_ordered(&self) -> Vec<&str> {
+        self.nodes_ordered()
+    }
+    fn neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>> {
+        self.neighbors_iter(node)
+            .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = &str> + '_>)
+    }
+    fn neighbor_count(&self, node: &str) -> usize {
+        self.neighbor_count(node)
+    }
+    fn has_node(&self, node: &str) -> bool {
+        self.has_node(node)
+    }
+    fn has_edge(&self, u: &str, v: &str) -> bool {
+        self.has_edge(u, v)
+    }
+    fn is_directed(&self) -> bool {
+        false
+    }
+    fn node_count(&self) -> usize {
+        self.node_count()
+    }
+    fn edge_count(&self) -> usize {
+        self.edge_count()
+    }
+}
+
+impl GraphView for DiGraph {
+    fn nodes_ordered(&self) -> Vec<&str> {
+        self.nodes_ordered()
+    }
+    fn neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>> {
+        self.neighbors_iter(node)
+            .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = &str> + '_>)
+    }
+    fn neighbor_count(&self, node: &str) -> usize {
+        self.neighbor_count(node)
+    }
+    fn has_node(&self, node: &str) -> bool {
+        self.has_node(node)
+    }
+    fn has_edge(&self, u: &str, v: &str) -> bool {
+        self.has_edge(u, v)
+    }
+    fn is_directed(&self) -> bool {
+        true
+    }
+    fn node_count(&self) -> usize {
+        self.node_count()
+    }
+    fn edge_count(&self) -> usize {
+        self.edge_count()
+    }
+}
+
 #[must_use]
 pub fn cgse_witness_schema_version() -> &'static str {
     CGSE_WITNESS_ARTIFACT_SCHEMA_VERSION_V1
@@ -1118,6 +1185,15 @@ pub fn number_connected_components(graph: &Graph) -> NumberConnectedComponentsRe
 
 #[must_use]
 pub fn degree_centrality(graph: &Graph) -> DegreeCentralityResult {
+    degree_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn degree_centrality_directed(graph: &DiGraph) -> DegreeCentralityResult {
+    degree_centrality_generic(graph)
+}
+
+fn degree_centrality_generic<G: GraphView>(graph: &G) -> DegreeCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1167,6 +1243,15 @@ pub fn degree_centrality(graph: &Graph) -> DegreeCentralityResult {
 
 #[must_use]
 pub fn closeness_centrality(graph: &Graph) -> ClosenessCentralityResult {
+    closeness_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn closeness_centrality_directed(graph: &DiGraph) -> ClosenessCentralityResult {
+    closeness_centrality_generic(graph)
+}
+
+fn closeness_centrality_generic<G: GraphView>(graph: &G) -> ClosenessCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1195,18 +1280,17 @@ pub fn closeness_centrality(graph: &Graph) -> ClosenessCentralityResult {
         queue_peak = queue_peak.max(queue.len());
 
         while let Some(current) = queue.pop_front() {
-            let Some(neighbors) = graph.neighbors_iter(current) else {
-                continue;
-            };
             let current_distance = *distance.get(&current).unwrap_or(&0usize);
-            for neighbor in neighbors {
-                edges_scanned += 1;
-                if distance.contains_key(neighbor) {
-                    continue;
+            if let Some(neighbors) = graph.neighbors_iter(current) {
+                for neighbor in neighbors {
+                    edges_scanned += 1;
+                    if distance.contains_key(neighbor) {
+                        continue;
+                    }
+                    distance.insert(neighbor, current_distance + 1);
+                    queue.push_back(neighbor);
+                    queue_peak = queue_peak.max(queue.len());
                 }
-                distance.insert(neighbor, current_distance + 1);
-                queue.push_back(neighbor);
-                queue_peak = queue_peak.max(queue.len());
             }
         }
 
@@ -1243,6 +1327,15 @@ pub fn closeness_centrality(graph: &Graph) -> ClosenessCentralityResult {
 
 #[must_use]
 pub fn harmonic_centrality(graph: &Graph) -> HarmonicCentralityResult {
+    harmonic_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn harmonic_centrality_directed(graph: &DiGraph) -> HarmonicCentralityResult {
+    harmonic_centrality_generic(graph)
+}
+
+fn harmonic_centrality_generic<G: GraphView>(graph: &G) -> HarmonicCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1271,18 +1364,17 @@ pub fn harmonic_centrality(graph: &Graph) -> HarmonicCentralityResult {
         queue_peak = queue_peak.max(queue.len());
 
         while let Some(current) = queue.pop_front() {
-            let Some(neighbors) = graph.neighbors_iter(current) else {
-                continue;
-            };
             let current_distance = *distance.get(&current).unwrap_or(&0usize);
-            for neighbor in neighbors {
-                edges_scanned += 1;
-                if distance.contains_key(neighbor) {
-                    continue;
+            if let Some(neighbors) = graph.neighbors_iter(current) {
+                for neighbor in neighbors {
+                    edges_scanned += 1;
+                    if distance.contains_key(neighbor) {
+                        continue;
+                    }
+                    distance.insert(neighbor, current_distance + 1);
+                    queue.push_back(neighbor);
+                    queue_peak = queue_peak.max(queue.len());
                 }
-                distance.insert(neighbor, current_distance + 1);
-                queue.push_back(neighbor);
-                queue_peak = queue_peak.max(queue.len());
             }
         }
 
@@ -1325,6 +1417,15 @@ pub fn harmonic_centrality(graph: &Graph) -> HarmonicCentralityResult {
 
 #[must_use]
 pub fn katz_centrality(graph: &Graph) -> KatzCentralityResult {
+    katz_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn katz_centrality_directed(graph: &DiGraph) -> KatzCentralityResult {
+    katz_centrality_generic(graph)
+}
+
+fn katz_centrality_generic<G: GraphView>(graph: &G) -> KatzCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1363,6 +1464,19 @@ pub fn katz_centrality(graph: &Graph) -> KatzCentralityResult {
         .map(|(idx, node)| (*node, idx))
         .collect::<HashMap<&str, usize>>();
 
+    // Pre-calculate canonical neighbors for deterministic summation
+    let canonical_neighbors = canonical_nodes
+        .iter()
+        .map(|&v| {
+            let mut nbrs: Vec<&str> = graph
+                .neighbors_iter(v)
+                .map(|iter| iter.collect())
+                .unwrap_or_default();
+            nbrs.sort_unstable();
+            nbrs
+        })
+        .collect::<Vec<Vec<&str>>>();
+
     let mut scores = vec![0.0_f64; n];
     let mut next_scores = vec![0.0_f64; n];
     let mut iterations = 0usize;
@@ -1374,16 +1488,12 @@ pub fn katz_centrality(graph: &Graph) -> KatzCentralityResult {
         next_scores.fill(0.0);
 
         // Deterministic power iteration in canonical node/neighbor order.
-        for (source_idx, source) in canonical_nodes.iter().enumerate() {
+        for (source_idx, _source) in canonical_nodes.iter().enumerate() {
             let source_score = scores[source_idx];
-            let mut neighbors = graph
-                .neighbors_iter(source)
-                .map(|iter| iter.collect::<Vec<&str>>())
-                .unwrap_or_default();
-            neighbors.sort_unstable();
+            let neighbors = &canonical_neighbors[source_idx];
             edges_scanned += neighbors.len();
 
-            for neighbor in neighbors {
+            for &neighbor in neighbors {
                 let Some(&target_idx) = index_by_node.get(neighbor) else {
                     continue;
                 };
@@ -1436,6 +1546,15 @@ pub fn katz_centrality(graph: &Graph) -> KatzCentralityResult {
 
 #[must_use]
 pub fn hits_centrality(graph: &Graph) -> HitsCentralityResult {
+    hits_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn hits_centrality_directed(graph: &DiGraph) -> HitsCentralityResult {
+    hits_centrality_generic(graph)
+}
+
+fn hits_centrality_generic<G: GraphView>(graph: &G) -> HitsCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1479,6 +1598,19 @@ pub fn hits_centrality(graph: &Graph) -> HitsCentralityResult {
         .map(|(idx, node)| (*node, idx))
         .collect::<HashMap<&str, usize>>();
 
+    // Pre-calculate canonical neighbors for deterministic summation
+    let canonical_neighbors = canonical_nodes
+        .iter()
+        .map(|&v| {
+            let mut nbrs: Vec<&str> = graph
+                .neighbors_iter(v)
+                .map(|iter| iter.collect())
+                .unwrap_or_default();
+            nbrs.sort_unstable();
+            nbrs
+        })
+        .collect::<Vec<Vec<&str>>>();
+
     let n_f64 = n as f64;
     let mut hubs = vec![1.0 / n_f64; n];
     let mut authorities = vec![0.0_f64; n];
@@ -1491,15 +1623,11 @@ pub fn hits_centrality(graph: &Graph) -> HitsCentralityResult {
         authorities.fill(0.0);
         next_hubs.fill(0.0);
 
-        for (source_idx, source) in canonical_nodes.iter().enumerate() {
+        for (source_idx, _source) in canonical_nodes.iter().enumerate() {
             let source_hub = hubs[source_idx];
-            let mut neighbors = graph
-                .neighbors_iter(source)
-                .map(|iter| iter.collect::<Vec<&str>>())
-                .unwrap_or_default();
-            neighbors.sort_unstable();
+            let neighbors = &canonical_neighbors[source_idx];
             edges_scanned += neighbors.len();
-            for neighbor in neighbors {
+            for &neighbor in neighbors {
                 let Some(&target_idx) = index_by_node.get(neighbor) else {
                     continue;
                 };
@@ -1519,14 +1647,10 @@ pub fn hits_centrality(graph: &Graph) -> HitsCentralityResult {
             }
         }
 
-        for (source_idx, source) in canonical_nodes.iter().enumerate() {
-            let mut neighbors = graph
-                .neighbors_iter(source)
-                .map(|iter| iter.collect::<Vec<&str>>())
-                .unwrap_or_default();
-            neighbors.sort_unstable();
+        for (source_idx, _source) in canonical_nodes.iter().enumerate() {
+            let neighbors = &canonical_neighbors[source_idx];
             edges_scanned += neighbors.len();
-            let score = neighbors.into_iter().fold(0.0_f64, |acc, neighbor| {
+            let score = neighbors.iter().fold(0.0_f64, |acc, &neighbor| {
                 let Some(&target_idx) = index_by_node.get(neighbor) else {
                     return acc;
                 };
@@ -1608,6 +1732,15 @@ pub fn hits_centrality(graph: &Graph) -> HitsCentralityResult {
 
 #[must_use]
 pub fn pagerank(graph: &Graph) -> PageRankResult {
+    pagerank_generic(graph)
+}
+
+#[must_use]
+pub fn pagerank_directed(graph: &DiGraph) -> PageRankResult {
+    pagerank_generic(graph)
+}
+
+fn pagerank_generic<G: GraphView>(graph: &G) -> PageRankResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1646,6 +1779,20 @@ pub fn pagerank(graph: &Graph) -> PageRankResult {
         .enumerate()
         .map(|(idx, node)| (*node, idx))
         .collect::<HashMap<&str, usize>>();
+
+    // Pre-calculate canonical neighbors for deterministic summation
+    let canonical_neighbors = canonical_nodes
+        .iter()
+        .map(|&v| {
+            let mut nbrs: Vec<&str> = graph
+                .neighbors_iter(v)
+                .map(|iter| iter.collect())
+                .unwrap_or_default();
+            nbrs.sort_unstable();
+            nbrs
+        })
+        .collect::<Vec<Vec<&str>>>();
+
     let out_degree = canonical_nodes
         .iter()
         .map(|node| graph.neighbor_count(node))
@@ -1667,15 +1814,11 @@ pub fn pagerank(graph: &Graph) -> PageRankResult {
             .sum::<f64>();
         let dangling_term = PAGERANK_DEFAULT_ALPHA * dangling_mass / n_f64;
 
-        for (v_idx, v) in canonical_nodes.iter().enumerate() {
-            let mut neighbors = graph
-                .neighbors_iter(v)
-                .map(|iter| iter.collect::<Vec<&str>>())
-                .unwrap_or_default();
-            neighbors.sort_unstable();
+        for (v_idx, _v) in canonical_nodes.iter().enumerate() {
+            let neighbors = &canonical_neighbors[v_idx];
             edges_scanned += neighbors.len();
 
-            let inbound = neighbors.into_iter().fold(0.0_f64, |acc, neighbor| {
+            let inbound = neighbors.iter().fold(0.0_f64, |acc, &neighbor| {
                 let Some(&u_idx) = index_by_node.get(neighbor) else {
                     return acc;
                 };
@@ -1732,6 +1875,15 @@ pub fn pagerank(graph: &Graph) -> PageRankResult {
 
 #[must_use]
 pub fn eigenvector_centrality(graph: &Graph) -> EigenvectorCentralityResult {
+    eigenvector_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn eigenvector_centrality_directed(graph: &DiGraph) -> EigenvectorCentralityResult {
+    eigenvector_centrality_generic(graph)
+}
+
+fn eigenvector_centrality_generic<G: GraphView>(graph: &G) -> EigenvectorCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1781,11 +1933,10 @@ pub fn eigenvector_centrality(graph: &Graph) -> EigenvectorCentralityResult {
 
         for (source_idx, source) in canonical_nodes.iter().enumerate() {
             let source_score = scores[source_idx];
-            let mut neighbors = graph
+            let neighbors: Vec<&str> = graph
                 .neighbors_iter(source)
-                .map(|iter| iter.collect::<Vec<&str>>())
+                .map(|iter| iter.collect())
                 .unwrap_or_default();
-            neighbors.sort_unstable();
             edges_scanned += neighbors.len();
             for neighbor in neighbors {
                 let Some(&target_idx) = index_by_node.get(neighbor) else {
@@ -1840,6 +1991,15 @@ pub fn eigenvector_centrality(graph: &Graph) -> EigenvectorCentralityResult {
 
 #[must_use]
 pub fn betweenness_centrality(graph: &Graph) -> BetweennessCentralityResult {
+    betweenness_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn betweenness_centrality_directed(graph: &DiGraph) -> BetweennessCentralityResult {
+    betweenness_centrality_generic(graph)
+}
+
+fn betweenness_centrality_generic<G: GraphView>(graph: &G) -> BetweennessCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1884,20 +2044,19 @@ pub fn betweenness_centrality(graph: &Graph) -> BetweennessCentralityResult {
         while let Some(v) = queue.pop_front() {
             stack.push(v);
             let dist_v = *distance.get(v).unwrap_or(&-1);
-            let Some(neighbors) = graph.neighbors_iter(v) else {
-                continue;
-            };
-            for w in neighbors {
-                edges_scanned += 1;
-                if *distance.get(w).unwrap_or(&-1) < 0 {
-                    distance.insert(w, dist_v + 1);
-                    queue.push_back(w);
-                    queue_peak = queue_peak.max(queue.len());
-                }
-                if *distance.get(w).unwrap_or(&-1) == dist_v + 1 {
-                    let sigma_v = *sigma.get(v).unwrap_or(&0.0);
-                    *sigma.entry(w).or_insert(0.0) += sigma_v;
-                    predecessors.entry(w).or_default().push(v);
+            if let Some(neighbors) = graph.neighbors_iter(v) {
+                for w in neighbors {
+                    edges_scanned += 1;
+                    if *distance.get(w).unwrap_or(&-1) < 0 {
+                        distance.insert(w, dist_v + 1);
+                        queue.push_back(w);
+                        queue_peak = queue_peak.max(queue.len());
+                    }
+                    if *distance.get(w).unwrap_or(&-1) == dist_v + 1 {
+                        let sigma_v = *sigma.get(v).unwrap_or(&0.0);
+                        *sigma.entry(w).or_insert(0.0) += sigma_v;
+                        predecessors.entry(w).or_default().push(v);
+                    }
                 }
             }
         }
@@ -1951,6 +2110,15 @@ pub fn betweenness_centrality(graph: &Graph) -> BetweennessCentralityResult {
 
 #[must_use]
 pub fn edge_betweenness_centrality(graph: &Graph) -> EdgeBetweennessCentralityResult {
+    edge_betweenness_centrality_generic(graph)
+}
+
+#[must_use]
+pub fn edge_betweenness_centrality_directed(graph: &DiGraph) -> EdgeBetweennessCentralityResult {
+    edge_betweenness_centrality_generic(graph)
+}
+
+fn edge_betweenness_centrality_generic<G: GraphView>(graph: &G) -> EdgeBetweennessCentralityResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -1966,8 +2134,9 @@ pub fn edge_betweenness_centrality(graph: &Graph) -> EdgeBetweennessCentralityRe
         };
     }
 
+    let is_directed = graph.is_directed();
     let canonical_edge_key = |left: &str, right: &str| -> (String, String) {
-        if left <= right {
+        if is_directed || left <= right {
             (left.to_owned(), right.to_owned())
         } else {
             (right.to_owned(), left.to_owned())
@@ -1976,13 +2145,12 @@ pub fn edge_betweenness_centrality(graph: &Graph) -> EdgeBetweennessCentralityRe
 
     let mut edge_scores = HashMap::<(String, String), f64>::new();
     for node in &nodes {
-        let Some(neighbors) = graph.neighbors_iter(node) else {
-            continue;
-        };
-        for neighbor in neighbors {
-            edge_scores
-                .entry(canonical_edge_key(node, neighbor))
-                .or_insert(0.0);
+        if let Some(neighbors) = graph.neighbors_iter(node) {
+            for neighbor in neighbors {
+                edge_scores
+                    .entry(canonical_edge_key(node, neighbor))
+                    .or_insert(0.0);
+            }
         }
     }
 
@@ -2010,20 +2178,19 @@ pub fn edge_betweenness_centrality(graph: &Graph) -> EdgeBetweennessCentralityRe
         while let Some(v) = queue.pop_front() {
             stack.push(v);
             let dist_v = *distance.get(v).unwrap_or(&-1);
-            let Some(neighbors) = graph.neighbors_iter(v) else {
-                continue;
-            };
-            for w in neighbors {
-                edges_scanned += 1;
-                if *distance.get(w).unwrap_or(&-1) < 0 {
-                    distance.insert(w, dist_v + 1);
-                    queue.push_back(w);
-                    queue_peak = queue_peak.max(queue.len());
-                }
-                if *distance.get(w).unwrap_or(&-1) == dist_v + 1 {
-                    let sigma_v = *sigma.get(v).unwrap_or(&0.0);
-                    *sigma.entry(w).or_insert(0.0) += sigma_v;
-                    predecessors.entry(w).or_default().push(v);
+            if let Some(neighbors) = graph.neighbors_iter(v) {
+                for w in neighbors {
+                    edges_scanned += 1;
+                    if *distance.get(w).unwrap_or(&-1) < 0 {
+                        distance.insert(w, dist_v + 1);
+                        queue.push_back(w);
+                        queue_peak = queue_peak.max(queue.len());
+                    }
+                    if *distance.get(w).unwrap_or(&-1) == dist_v + 1 {
+                        let sigma_v = *sigma.get(v).unwrap_or(&0.0);
+                        *sigma.entry(w).or_insert(0.0) += sigma_v;
+                        predecessors.entry(w).or_default().push(v);
+                    }
                 }
             }
         }
@@ -4576,7 +4743,7 @@ pub fn partition_spanning_tree(
     let mut chosen = Vec::new();
     let mut total_weight = 0.0;
     let mut nodes_touched = 0usize;
-    for edge in included_edges.into_iter().chain(open_edges.into_iter()) {
+    for edge in included_edges.into_iter().chain(open_edges) {
         let left_root = find_partition_root(&mut parent, edge.left);
         let right_root = find_partition_root(&mut parent, edge.right);
         if left_root == right_root {
@@ -6039,6 +6206,15 @@ pub fn degree_assortativity_coefficient(graph: &Graph) -> DegreeAssortativityRes
 /// more nodes receive votes.
 #[must_use]
 pub fn voterank(graph: &Graph) -> VoterankResult {
+    voterank_generic(graph)
+}
+
+#[must_use]
+pub fn voterank_directed(graph: &DiGraph) -> VoterankResult {
+    voterank_generic(graph)
+}
+
+fn voterank_generic<G: GraphView>(graph: &G) -> VoterankResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -26768,4 +26944,26 @@ mod tests {
         let me = mixing_expansion(&g, &["a", "b"]);
         assert!((me - 0.25).abs() < 1e-6);
     }
+}
+
+#[test]
+fn test_betweenness_normalization_bug() {
+    let mut g = Graph::strict();
+    // Path graph a-b-c
+    g.add_edge("a", "b").unwrap();
+    g.add_edge("b", "c").unwrap();
+    
+    let result = betweenness_centrality(&g);
+    let scores: std::collections::HashMap<String, f64> = result.scores.into_iter().map(|s| (s.node, s.score)).collect();
+    
+    // In NetworkX:
+    // a: 0.0
+    // b: (1 * 1) / ((3-1)*(3-2)/2) = 1.0 / 1.0 = 1.0
+    // c: 0.0
+    
+    let b_score = *scores.get("b").unwrap();
+    println!("Betweenness score for b: {}", b_score);
+    
+    // CURRENT BUG: FrankenNetworkX returns 0.5 because it divides by (n-1)(n-2) = 2*1 = 2 instead of (n-1)(n-2)/2 = 1.
+    assert!( (b_score - 1.0).abs() < 1e-6, "Betweenness score for b should be 1.0, got {}", b_score);
 }

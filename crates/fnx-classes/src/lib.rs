@@ -4,7 +4,7 @@ pub mod digraph;
 
 use fnx_runtime::{
     CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm,
-    decision_theoretic_action, unix_time_ms,
+    unix_time_ms,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,21 @@ pub struct GraphSnapshot {
     pub mode: CompatibilityMode,
     pub nodes: Vec<String>,
     pub edges: Vec<EdgeSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiEdgeSnapshot {
+    pub left: String,
+    pub right: String,
+    pub key: usize,
+    pub attrs: AttrMap,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiGraphSnapshot {
+    pub mode: CompatibilityMode,
+    pub nodes: Vec<String>,
+    pub edges: Vec<MultiEdgeSnapshot>,
 }
 
 #[derive(Debug, Clone)]
@@ -211,8 +226,8 @@ impl Graph {
         }
         self.record_decision(
             "add_node",
-            DecisionAction::Allow,
             0.0,
+            false,
             vec![
                 EvidenceTerm {
                     signal: "node_preexisting".to_owned(),
@@ -257,20 +272,18 @@ impl Graph {
             0.08
         };
 
-        let action =
-            decision_theoretic_action(self.mode, incompatibility_probability, unknown_feature);
+        let action = self.record_decision(
+            "add_edge",
+            incompatibility_probability,
+            unknown_feature,
+            vec![EvidenceTerm {
+                signal: "unknown_incompatible_feature".to_owned(),
+                observed_value: unknown_feature.to_string(),
+                log_likelihood_ratio: 12.0,
+            }],
+        );
 
         if action == DecisionAction::FailClosed {
-            self.record_decision(
-                "add_edge",
-                action,
-                incompatibility_probability,
-                vec![EvidenceTerm {
-                    signal: "unknown_incompatible_feature".to_owned(),
-                    observed_value: unknown_feature.to_string(),
-                    log_likelihood_ratio: 12.0,
-                }],
-            );
             return Err(GraphError::FailClosed {
                 operation: "add_edge",
                 reason: "incompatible edge metadata".to_owned(),
@@ -320,8 +333,8 @@ impl Graph {
 
         self.record_decision(
             "add_edge",
-            action,
             incompatibility_probability,
+            unknown_feature,
             vec![
                 EvidenceTerm {
                     signal: "self_loop".to_owned(),
@@ -437,10 +450,15 @@ impl Graph {
     fn record_decision(
         &mut self,
         operation: &'static str,
-        action: DecisionAction,
         incompatibility_probability: f64,
+        unknown_incompatible_feature: bool,
         evidence: Vec<EvidenceTerm>,
-    ) {
+    ) -> DecisionAction {
+        let action = fnx_runtime::decision_theoretic_action(
+            self.mode,
+            incompatibility_probability,
+            unknown_incompatible_feature,
+        );
         self.ledger.record(DecisionRecord {
             ts_unix_ms: unix_time_ms(),
             operation: operation.to_owned(),
@@ -450,12 +468,445 @@ impl Graph {
             rationale: "argmin expected loss over {allow,full_validate,fail_closed}".to_owned(),
             evidence,
         });
+        action
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MultiGraph {
+    mode: CompatibilityMode,
+    revision: u64,
+    nodes: IndexMap<String, AttrMap>,
+    adjacency: IndexMap<String, IndexMap<String, IndexSet<usize>>>,
+    edges: IndexMap<EdgeKey, IndexMap<usize, AttrMap>>,
+    next_edge_key: IndexMap<EdgeKey, usize>,
+    ledger: EvidenceLedger,
+}
+
+impl MultiGraph {
+    #[must_use]
+    pub fn new(mode: CompatibilityMode) -> Self {
+        Self {
+            mode,
+            revision: 0,
+            nodes: IndexMap::new(),
+            adjacency: IndexMap::new(),
+            edges: IndexMap::new(),
+            next_edge_key: IndexMap::new(),
+            ledger: EvidenceLedger::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn strict() -> Self {
+        Self::new(CompatibilityMode::Strict)
+    }
+
+    #[must_use]
+    pub fn hardened() -> Self {
+        Self::new(CompatibilityMode::Hardened)
+    }
+
+    #[must_use]
+    pub fn mode(&self) -> CompatibilityMode {
+        self.mode
+    }
+
+    #[must_use]
+    pub fn node_count(&self) -> usize {
+        self.nodes.len()
+    }
+
+    #[must_use]
+    pub fn edge_count(&self) -> usize {
+        self.edges.values().map(IndexMap::len).sum()
+    }
+
+    #[must_use]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    #[must_use]
+    pub fn has_node(&self, node: &str) -> bool {
+        self.nodes.contains_key(node)
+    }
+
+    #[must_use]
+    pub fn has_edge(&self, left: &str, right: &str) -> bool {
+        self.edges
+            .get(&EdgeKey::new(left, right))
+            .is_some_and(|edge_bucket| !edge_bucket.is_empty())
+    }
+
+    #[must_use]
+    pub fn nodes_ordered(&self) -> Vec<&str> {
+        self.nodes.keys().map(String::as_str).collect()
+    }
+
+    #[must_use]
+    pub fn neighbors(&self, node: &str) -> Option<Vec<&str>> {
+        self.adjacency.get(node).map(|neighbors| {
+            neighbors
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<&str>>()
+        })
+    }
+
+    #[must_use]
+    pub fn edge_keys(&self, left: &str, right: &str) -> Option<Vec<usize>> {
+        self.edges.get(&EdgeKey::new(left, right)).map(|edge_bucket| {
+            edge_bucket.keys().copied().collect::<Vec<usize>>()
+        })
+    }
+
+    #[must_use]
+    pub fn node_attrs(&self, node: &str) -> Option<&AttrMap> {
+        self.nodes.get(node)
+    }
+
+    #[must_use]
+    pub fn edge_attrs(&self, left: &str, right: &str, key: usize) -> Option<&AttrMap> {
+        self.edges
+            .get(&EdgeKey::new(left, right))
+            .and_then(|edge_bucket| edge_bucket.get(&key))
+    }
+
+    #[must_use]
+    pub fn evidence_ledger(&self) -> &EvidenceLedger {
+        &self.ledger
+    }
+
+    #[must_use]
+    pub fn is_directed(&self) -> bool {
+        false
+    }
+
+    #[must_use]
+    pub fn is_multigraph(&self) -> bool {
+        true
+    }
+
+    pub fn add_node(&mut self, node: impl Into<String>) -> bool {
+        self.add_node_with_attrs(node, AttrMap::new())
+    }
+
+    pub fn add_node_with_attrs(&mut self, node: impl Into<String>, attrs: AttrMap) -> bool {
+        let node = node.into();
+        let existed = self.nodes.contains_key(&node);
+        let mut changed = !existed;
+        let attrs_for_change_check = attrs.clone();
+        let attrs_count = {
+            let bucket = self.nodes.entry(node.clone()).or_default();
+            if !attrs_for_change_check.is_empty()
+                && attrs_for_change_check
+                    .iter()
+                    .any(|(key, value)| bucket.get(key) != Some(value))
+            {
+                changed = true;
+            }
+            bucket.extend(attrs);
+            bucket.len()
+        };
+        self.adjacency.entry(node.clone()).or_default();
+        if changed {
+            self.revision = self.revision.saturating_add(1);
+        }
+        self.record_decision(
+            "add_node",
+            0.0,
+            false,
+            vec![
+                EvidenceTerm {
+                    signal: "node_preexisting".to_owned(),
+                    observed_value: existed.to_string(),
+                    log_likelihood_ratio: -3.0,
+                },
+                EvidenceTerm {
+                    signal: "attrs_count".to_owned(),
+                    observed_value: attrs_count.to_string(),
+                    log_likelihood_ratio: -1.0,
+                },
+            ],
+        );
+        !existed
+    }
+
+    pub fn add_edge(
+        &mut self,
+        left: impl Into<String>,
+        right: impl Into<String>,
+    ) -> Result<usize, GraphError> {
+        self.add_edge_with_attrs(left, right, AttrMap::new())
+    }
+
+    pub fn add_edge_with_attrs(
+        &mut self,
+        left: impl Into<String>,
+        right: impl Into<String>,
+        attrs: AttrMap,
+    ) -> Result<usize, GraphError> {
+        let left = left.into();
+        let right = right.into();
+
+        let unknown_feature = attrs
+            .keys()
+            .any(|key| key.starts_with("__fnx_incompatible"));
+        let incompatibility_probability = if unknown_feature {
+            1.0
+        } else if left == right {
+            0.22
+        } else {
+            0.08
+        };
+
+        let action = self.record_decision(
+            "add_edge",
+            incompatibility_probability,
+            unknown_feature,
+            vec![EvidenceTerm {
+                signal: "unknown_incompatible_feature".to_owned(),
+                observed_value: unknown_feature.to_string(),
+                log_likelihood_ratio: 12.0,
+            }],
+        );
+
+        if action == DecisionAction::FailClosed {
+            return Err(GraphError::FailClosed {
+                operation: "add_edge",
+                reason: "incompatible edge metadata".to_owned(),
+            });
+        }
+
+        let mut left_autocreated = false;
+        if !self.nodes.contains_key(&left) {
+            let _ = self.add_node(left.clone());
+            left_autocreated = true;
+        }
+        let mut right_autocreated = false;
+        if left == right {
+            right_autocreated = left_autocreated;
+        } else if !self.nodes.contains_key(&right) {
+            let _ = self.add_node(right.clone());
+            right_autocreated = true;
+        }
+
+        let edge_key = EdgeKey::new(&left, &right);
+        let key = *self.next_edge_key.entry(edge_key.clone()).or_insert(0);
+        self.next_edge_key
+            .entry(edge_key.clone())
+            .and_modify(|next| *next = next.saturating_add(1));
+        let edge_attr_count = {
+            let edge_bucket = self.edges.entry(edge_key).or_default();
+            edge_bucket.insert(key, attrs);
+            edge_bucket.len()
+        };
+
+        self.adjacency
+            .entry(left.clone())
+            .or_default()
+            .entry(right.clone())
+            .or_default()
+            .insert(key);
+        self.adjacency
+            .entry(right.clone())
+            .or_default()
+            .entry(left.clone())
+            .or_default()
+            .insert(key);
+        self.revision = self.revision.saturating_add(1);
+
+        self.record_decision(
+            "add_edge",
+            incompatibility_probability,
+            unknown_feature,
+            vec![
+                EvidenceTerm {
+                    signal: "edge_key".to_owned(),
+                    observed_value: key.to_string(),
+                    log_likelihood_ratio: -2.0,
+                },
+                EvidenceTerm {
+                    signal: "edge_attr_count".to_owned(),
+                    observed_value: edge_attr_count.to_string(),
+                    log_likelihood_ratio: -2.0,
+                },
+                EvidenceTerm {
+                    signal: "left_autocreated".to_owned(),
+                    observed_value: left_autocreated.to_string(),
+                    log_likelihood_ratio: -1.25,
+                },
+                EvidenceTerm {
+                    signal: "right_autocreated".to_owned(),
+                    observed_value: right_autocreated.to_string(),
+                    log_likelihood_ratio: -1.25,
+                },
+            ],
+        );
+
+        Ok(key)
+    }
+
+    pub fn remove_edge(&mut self, left: &str, right: &str, key: Option<usize>) -> bool {
+        let edge_key = EdgeKey::new(left, right);
+        let removal_key = key.or_else(|| {
+            self.edges
+                .get(&edge_key)
+                .and_then(|edge_bucket| edge_bucket.keys().next_back().copied())
+        });
+
+        let Some(removal_key) = removal_key else {
+            return false;
+        };
+
+        let removed = self
+            .edges
+            .get_mut(&edge_key)
+            .is_some_and(|edge_bucket| edge_bucket.shift_remove(&removal_key).is_some());
+        if !removed {
+            return false;
+        }
+
+        let should_drop_bucket = self
+            .edges
+            .get(&edge_key)
+            .is_some_and(IndexMap::is_empty);
+        if should_drop_bucket {
+            self.edges.shift_remove(&edge_key);
+            self.next_edge_key.shift_remove(&edge_key);
+        }
+
+        self.remove_adjacency_key(left, right, removal_key);
+        self.remove_adjacency_key(right, left, removal_key);
+        self.revision = self.revision.saturating_add(1);
+        true
+    }
+
+    pub fn remove_node(&mut self, node: &str) -> bool {
+        if !self.nodes.contains_key(node) {
+            return false;
+        }
+
+        let incident = self.adjacency.get(node).map_or_else(Vec::new, |neighbors| {
+            neighbors
+                .iter()
+                .map(|(neighbor, keys)| {
+                    (neighbor.clone(), keys.iter().copied().collect::<Vec<usize>>())
+                })
+                .collect::<Vec<(String, Vec<usize>)>>()
+        });
+
+        for (neighbor, keys) in incident {
+            for key in keys {
+                let _ = self.remove_edge(node, &neighbor, Some(key));
+            }
+        }
+
+        self.adjacency.shift_remove(node);
+        self.nodes.shift_remove(node);
+        self.revision = self.revision.saturating_add(1);
+        true
+    }
+
+    #[must_use]
+    pub fn edges_ordered(&self) -> Vec<MultiEdgeSnapshot> {
+        let mut ordered = Vec::with_capacity(self.edge_count());
+        let mut seen = HashSet::<(String, String, usize)>::with_capacity(self.edge_count());
+
+        for node in self.nodes.keys() {
+            if let Some(neighbors) = self.adjacency.get(node) {
+                for neighbor in neighbors.keys() {
+                    let pair = EdgeKey::new(node, neighbor);
+                    if let Some(edge_bucket) = self.edges.get(&pair) {
+                        for (key, attrs) in edge_bucket {
+                            let instance = (pair.left.clone(), pair.right.clone(), *key);
+                            if !seen.insert(instance.clone()) {
+                                continue;
+                            }
+                            ordered.push(MultiEdgeSnapshot {
+                                left: instance.0,
+                                right: instance.1,
+                                key: instance.2,
+                                attrs: attrs.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        if ordered.len() < self.edge_count() {
+            for (pair, edge_bucket) in &self.edges {
+                for (key, attrs) in edge_bucket {
+                    let instance = (pair.left.clone(), pair.right.clone(), *key);
+                    if seen.insert(instance.clone()) {
+                        ordered.push(MultiEdgeSnapshot {
+                            left: instance.0,
+                            right: instance.1,
+                            key: instance.2,
+                            attrs: attrs.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        ordered
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> MultiGraphSnapshot {
+        MultiGraphSnapshot {
+            mode: self.mode,
+            nodes: self.nodes.keys().cloned().collect(),
+            edges: self.edges_ordered(),
+        }
+    }
+
+    fn remove_adjacency_key(&mut self, source: &str, target: &str, key: usize) {
+        let mut drop_neighbor = false;
+        if let Some(neighbors) = self.adjacency.get_mut(source)
+            && let Some(keys) = neighbors.get_mut(target)
+        {
+            keys.shift_remove(&key);
+            drop_neighbor = keys.is_empty();
+        }
+        if drop_neighbor
+            && let Some(neighbors) = self.adjacency.get_mut(source)
+        {
+            neighbors.shift_remove(target);
+        }
+    }
+
+    fn record_decision(
+        &mut self,
+        operation: &'static str,
+        incompatibility_probability: f64,
+        unknown_incompatible_feature: bool,
+        evidence: Vec<EvidenceTerm>,
+    ) -> DecisionAction {
+        let action = fnx_runtime::decision_theoretic_action(
+            self.mode,
+            incompatibility_probability,
+            unknown_incompatible_feature,
+        );
+        self.ledger.record(DecisionRecord {
+            ts_unix_ms: unix_time_ms(),
+            operation: operation.to_owned(),
+            mode: self.mode,
+            action,
+            incompatibility_probability,
+            rationale: "argmin expected loss over {allow,full_validate,fail_closed}".to_owned(),
+            evidence,
+        });
+        action
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AttrMap, Graph, GraphError};
+    use super::{AttrMap, Graph, GraphError, MultiGraph};
     use fnx_runtime::{CompatibilityMode, DecisionAction, DecisionRecord};
     use proptest::prelude::*;
     use std::collections::BTreeSet;
@@ -517,6 +968,31 @@ mod tests {
             }
         }
         assert_eq!(graph.edge_count(), unique_edges.len());
+    }
+
+    fn assert_multigraph_core_invariants(graph: &MultiGraph) {
+        let mut edge_instances = BTreeSet::new();
+        for node in graph.nodes_ordered() {
+            let neighbors = graph
+                .neighbors(node)
+                .expect("multigraph nodes should always have adjacency buckets");
+            for neighbor in neighbors {
+                assert!(graph.has_node(neighbor));
+                assert!(graph.has_edge(node, neighbor));
+                let reverse_neighbors = graph
+                    .neighbors(neighbor)
+                    .expect("neighbor should always have adjacency bucket");
+                assert!(reverse_neighbors.contains(&node));
+                let keys = graph
+                    .edge_keys(node, neighbor)
+                    .expect("parallel edge bucket should exist");
+                for key in keys {
+                    let canonical = canonical_edge(node, neighbor);
+                    edge_instances.insert((canonical.0, canonical.1, key));
+                }
+            }
+        }
+        assert_eq!(graph.edge_count(), edge_instances.len());
     }
 
     fn assert_decision_record_schema(record: &DecisionRecord, expected_mode: CompatibilityMode) {
@@ -707,6 +1183,46 @@ mod tests {
 
         assert_eq!(replayed.snapshot(), snapshot);
         assert_graph_core_invariants(&replayed);
+    }
+
+    #[test]
+    fn multigraph_tracks_parallel_edges_with_distinct_keys() {
+        let mut graph = MultiGraph::strict();
+        let first = graph.add_edge("a", "b").expect("edge add should succeed");
+        let second = graph.add_edge("a", "b").expect("edge add should succeed");
+
+        assert_ne!(first, second);
+        assert_eq!(graph.edge_count(), 2);
+        assert_eq!(graph.edge_keys("a", "b"), Some(vec![0, 1]));
+        assert_multigraph_core_invariants(&graph);
+    }
+
+    #[test]
+    fn multigraph_remove_edge_without_key_removes_latest_instance() {
+        let mut graph = MultiGraph::strict();
+        let first = graph.add_edge("a", "b").expect("edge add should succeed");
+        let second = graph.add_edge("a", "b").expect("edge add should succeed");
+
+        assert!(graph.remove_edge("a", "b", None));
+        assert_eq!(graph.edge_count(), 1);
+        assert_eq!(graph.edge_keys("a", "b"), Some(vec![first]));
+        assert_ne!(first, second);
+        assert_multigraph_core_invariants(&graph);
+    }
+
+    #[test]
+    fn multigraph_remove_node_clears_parallel_incident_edges() {
+        let mut graph = MultiGraph::strict();
+        let _ = graph.add_edge("a", "b").expect("edge add should succeed");
+        let _ = graph.add_edge("a", "b").expect("edge add should succeed");
+        let _ = graph.add_edge("b", "c").expect("edge add should succeed");
+
+        assert!(graph.remove_node("b"));
+        assert_eq!(graph.edge_count(), 0);
+        assert!(!graph.has_node("b"));
+        assert_eq!(graph.neighbors("a"), Some(vec![]));
+        assert_eq!(graph.neighbors("c"), Some(vec![]));
+        assert_multigraph_core_invariants(&graph);
     }
 
     proptest! {

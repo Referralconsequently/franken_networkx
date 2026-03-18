@@ -175,6 +175,19 @@ class TestDictOfLists:
         G = fnx.from_dict_of_lists({})
         assert G.number_of_nodes() == 0
 
+    def test_create_using_graph_class(self):
+        G = fnx.from_dict_of_lists({0: [1], 1: [0]}, create_using=fnx.DiGraph)
+        assert isinstance(G, fnx.DiGraph)
+        assert G.has_edge(0, 1)
+
+    def test_create_using_instance_is_cleared(self):
+        G = fnx.Graph()
+        G.add_edge("stale", "edge")
+        H = fnx.from_dict_of_lists({0: [1], 1: [0]}, create_using=G)
+        assert H is G
+        assert not H.has_node("stale")
+        assert H.number_of_edges() == 1
+
 
 # ---------------------------------------------------------------------------
 # to/from_edgelist
@@ -205,6 +218,11 @@ class TestEdgelist:
         edges = [(0, 1, {"weight": 1.0}), (1, 2, {"weight": 2.0})]
         G = fnx.from_edgelist(edges)
         assert G.number_of_edges() == 2
+
+    def test_from_edgelist_create_using_graph_class(self):
+        G = fnx.from_edgelist([(0, 1)], create_using=fnx.DiGraph)
+        assert isinstance(G, fnx.DiGraph)
+        assert G.has_edge(0, 1)
 
 
 # ---------------------------------------------------------------------------

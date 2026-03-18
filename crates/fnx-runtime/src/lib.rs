@@ -484,6 +484,9 @@ impl AsupersyncAdapterMachine {
             AsupersyncAdapterState::Syncing,
             AsupersyncAdapterEventType::ResumeApplied,
         )?;
+        if resume_cursor == self.committed_cursor {
+            return Ok(()); // No-op
+        }
         if resume_cursor > self.committed_cursor {
             return self.fail_closed(
                 AsupersyncAdapterEventType::ConflictDetected,

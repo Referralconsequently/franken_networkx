@@ -656,6 +656,11 @@ pub fn average_shortest_path_length(
     }
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "Connectivity is undefined for the null graph.",
+        ));
+    }
     let (connected, avg) = py.allow_threads(|| {
         let conn = fnx_algorithms::is_connected(inner);
         let result = fnx_algorithms::average_shortest_path_length(inner);
@@ -835,6 +840,11 @@ pub fn is_connected(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
     let gr = extract_graph(g)?;
     require_undirected(&gr, "is_connected")?;
     let inner = gr.undirected();
+    if inner.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err(
+            "Connectivity is undefined for the null graph.",
+        ));
+    }
     log::info!(target: "franken_networkx", "is_connected: nodes={} edges={}", inner.node_count(), inner.edge_count());
     Ok(py.allow_threads(|| fnx_algorithms::is_connected(inner).is_connected))
 }
@@ -958,8 +968,16 @@ pub fn bridges(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<(PyObject, 
 #[pyfunction]
 pub fn degree_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::degree_centrality(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::degree_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::degree_centrality_directed(inner))
+        }
+    };
     centrality_to_dict(py, &gr, &result.scores)
 }
 
@@ -967,8 +985,16 @@ pub fn degree_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<Py
 #[pyfunction]
 pub fn closeness_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::closeness_centrality(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::closeness_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::closeness_centrality_directed(inner))
+        }
+    };
     centrality_to_dict(py, &gr, &result.scores)
 }
 
@@ -976,8 +1002,16 @@ pub fn closeness_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py
 #[pyfunction]
 pub fn harmonic_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::harmonic_centrality(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::harmonic_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::harmonic_centrality_directed(inner))
+        }
+    };
     centrality_to_dict(py, &gr, &result.scores)
 }
 
@@ -985,8 +1019,16 @@ pub fn harmonic_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<
 #[pyfunction]
 pub fn katz_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::katz_centrality(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::katz_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::katz_centrality_directed(inner))
+        }
+    };
     centrality_to_dict(py, &gr, &result.scores)
 }
 
@@ -1004,9 +1046,17 @@ pub fn katz_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDi
 #[pyfunction]
 pub fn betweenness_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    log::info!(target: "franken_networkx", "betweenness_centrality: nodes={} edges={}", inner.node_count(), inner.edge_count());
-    let result = py.allow_threads(|| fnx_algorithms::betweenness_centrality(inner));
+    log::info!(target: "franken_networkx", "betweenness_centrality: nodes={}", gr.undirected().node_count());
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::betweenness_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::betweenness_centrality_directed(inner))
+        }
+    };
     centrality_to_dict(py, &gr, &result.scores)
 }
 
@@ -1014,8 +1064,16 @@ pub fn betweenness_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<
 #[pyfunction]
 pub fn edge_betweenness_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::edge_betweenness_centrality(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::edge_betweenness_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::edge_betweenness_centrality_directed(inner))
+        }
+    };
     let dict = PyDict::new(py);
     for s in &result.scores {
         let key = pyo3::types::PyTuple::new(
@@ -1031,8 +1089,16 @@ pub fn edge_betweenness_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyRe
 #[pyfunction]
 pub fn eigenvector_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::eigenvector_centrality(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::eigenvector_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::eigenvector_centrality_directed(inner))
+        }
+    };
     centrality_to_dict(py, &gr, &result.scores)
 }
 
@@ -1051,9 +1117,17 @@ pub fn eigenvector_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<
 #[pyfunction]
 pub fn pagerank(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    log::info!(target: "franken_networkx", "pagerank: nodes={} edges={}", inner.node_count(), inner.edge_count());
-    let result = py.allow_threads(|| fnx_algorithms::pagerank(inner));
+    log::info!(target: "franken_networkx", "pagerank: nodes={}", gr.undirected().node_count());
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::pagerank(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::pagerank_directed(inner))
+        }
+    };
     centrality_to_dict(py, &gr, &result.scores)
 }
 
@@ -1061,8 +1135,16 @@ pub fn pagerank(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
 #[pyfunction]
 pub fn hits(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<(Py<PyDict>, Py<PyDict>)> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::hits_centrality(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::hits_centrality(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::hits_centrality_directed(inner))
+        }
+    };
     let hubs = centrality_to_dict(py, &gr, &result.hubs)?;
     let auths = centrality_to_dict(py, &gr, &result.authorities)?;
     Ok((hubs, auths))
@@ -1093,8 +1175,16 @@ pub fn degree_assortativity_coefficient(py: Python<'_>, g: &Bound<'_, PyAny>) ->
 #[pyfunction]
 pub fn voterank(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::voterank(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::voterank(inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::voterank_directed(inner))
+        }
+    };
     Ok(result
         .ranked
         .iter()
@@ -3900,6 +3990,11 @@ pub fn is_weakly_connected(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bo
         ));
     }
     if let GraphRef::Directed { dg, .. } = &gr {
+        if dg.inner.node_count() == 0 {
+            return Err(crate::NetworkXPointlessConcept::new_err(
+                "Connectivity is undefined for the null graph.",
+            ));
+        }
         Ok(fnx_algorithms::is_weakly_connected(&dg.inner))
     } else {
         unreachable!()
