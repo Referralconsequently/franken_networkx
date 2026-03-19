@@ -463,6 +463,40 @@ impl Graph {
     }
 
     #[must_use]
+    pub fn edges_ordered_borrowed(&self) -> Vec<(&str, &str, &AttrMap)> {
+        let mut ordered = Vec::with_capacity(self.edges.len());
+        let mut seen = HashSet::<EdgeKeyRef>::with_capacity(self.edges.len());
+
+        for node in self.nodes.keys() {
+            if let Some(neighbors) = self.adjacency.get(node) {
+                for neighbor in neighbors {
+                    let key = EdgeKeyRef::new(node, neighbor);
+                    if !seen.insert(key) {
+                        continue;
+                    }
+                    if let Some(attrs) = self.edges.get(&key) {
+                        ordered.push((node.as_str(), neighbor.as_str(), attrs));
+                    }
+                }
+            }
+        }
+
+        if ordered.len() < self.edges.len() {
+            for (key, attrs) in &self.edges {
+                let rkey = EdgeKeyRef {
+                    left: &key.left,
+                    right: &key.right,
+                };
+                if seen.insert(rkey) {
+                    ordered.push((&key.left, &key.right, attrs));
+                }
+            }
+        }
+
+        ordered
+    }
+
+    #[must_use]
     pub fn snapshot(&self) -> GraphSnapshot {
         GraphSnapshot {
             mode: self.mode,

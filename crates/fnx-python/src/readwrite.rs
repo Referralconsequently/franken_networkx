@@ -5,7 +5,7 @@
 //! Internally delegates to `fnx_readwrite::EdgeListEngine`.
 
 use crate::PyGraph;
-use crate::algorithms::extract_graph;
+use crate::algorithms::{GraphRef, extract_graph};
 use crate::digraph::PyDiGraph;
 use fnx_readwrite::{DiReadWriteReport, EdgeListEngine, ReadWriteReport};
 use pyo3::prelude::*;
@@ -158,13 +158,17 @@ fn read_edgelist(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyGraph> {
 fn write_edgelist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
     let gr = extract_graph(g)?;
     let mut engine = EdgeListEngine::hardened();
-    let content = match gr {
-        crate::algorithms::GraphRef::Undirected(pg) => py
-            .allow_threads(|| engine.write_edgelist(&pg.inner))
-            .map_err(rw_error_to_py)?,
-        crate::algorithms::GraphRef::Directed { dg, .. } => py
-            .allow_threads(|| engine.write_digraph_edgelist(&dg.inner))
-            .map_err(rw_error_to_py)?,
+    let content = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| engine.write_edgelist(inner))
+                .map_err(rw_error_to_py)?
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| engine.write_digraph_edgelist(inner))
+                .map_err(rw_error_to_py)?
+        }
     };
     write_output(py, path, &content)
 }
@@ -189,13 +193,17 @@ fn read_adjlist(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyGraph> {
 fn write_adjlist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
     let gr = extract_graph(g)?;
     let mut engine = EdgeListEngine::hardened();
-    let content = match gr {
-        crate::algorithms::GraphRef::Undirected(pg) => py
-            .allow_threads(|| engine.write_adjlist(&pg.inner))
-            .map_err(rw_error_to_py)?,
-        crate::algorithms::GraphRef::Directed { dg, .. } => py
-            .allow_threads(|| engine.write_digraph_adjlist(&dg.inner))
-            .map_err(rw_error_to_py)?,
+    let content = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| engine.write_adjlist(inner))
+                .map_err(rw_error_to_py)?
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| engine.write_digraph_adjlist(inner))
+                .map_err(rw_error_to_py)?
+        }
     };
     write_output(py, path, &content)
 }
@@ -209,13 +217,17 @@ fn write_adjlist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) 
 fn node_link_data(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let gr = extract_graph(g)?;
     let mut engine = EdgeListEngine::hardened();
-    let json_str = match gr {
-        crate::algorithms::GraphRef::Undirected(pg) => py
-            .allow_threads(|| engine.write_json_graph(&pg.inner))
-            .map_err(rw_error_to_py)?,
-        crate::algorithms::GraphRef::Directed { dg, .. } => py
-            .allow_threads(|| engine.write_digraph_json_graph(&dg.inner))
-            .map_err(rw_error_to_py)?,
+    let json_str = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| engine.write_json_graph(inner))
+                .map_err(rw_error_to_py)?
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| engine.write_digraph_json_graph(inner))
+                .map_err(rw_error_to_py)?
+        }
     };
     let json_mod = py.import("json")?;
     let result = json_mod.call_method1("loads", (json_str,))?;
@@ -228,11 +240,6 @@ fn node_link_graph(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<PyObject
     let json_mod = py.import("json")?;
     let json_str: String = json_mod.call_method1("dumps", (data,))?.extract()?;
     let mut engine = EdgeListEngine::hardened();
-    
-    // We try to read as undirected first, then directed?
-    // Actually we need to know if it's directed.
-    // For now let's assume undirected or use a heuristic.
-    // Better: add a way to detect.
     
     let report = engine.read_json_graph(&json_str).map_err(rw_error_to_py)?;
     Ok(report_to_pygraph(py, report)?.into_pyobject(py)?.into_any().unbind())
@@ -267,13 +274,17 @@ fn read_graphml(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyObject> {
 fn write_graphml(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
     let gr = extract_graph(g)?;
     let mut engine = EdgeListEngine::hardened();
-    let content = match gr {
-        crate::algorithms::GraphRef::Undirected(pg) => py
-            .allow_threads(|| engine.write_graphml(&pg.inner))
-            .map_err(rw_error_to_py)?,
-        crate::algorithms::GraphRef::Directed { dg, .. } => py
-            .allow_threads(|| engine.write_digraph_graphml(&dg.inner))
-            .map_err(rw_error_to_py)?,
+    let content = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| engine.write_graphml(inner))
+                .map_err(rw_error_to_py)?
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| engine.write_digraph_graphml(inner))
+                .map_err(rw_error_to_py)?
+        }
     };
     write_output(py, path, &content)
 }

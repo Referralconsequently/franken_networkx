@@ -191,8 +191,10 @@ pub fn run_decode_drill(
     let drop_count = usize::try_from(envelope.raptorq.repair_symbols.min(2)).unwrap_or(0);
     let reduced: Vec<String> = packets.into_iter().skip(drop_count).collect();
 
-    let recovered =
-        decode_with_packets(&envelope, &reduced).or_else(|_| decode_from_envelope(&envelope))?;
+    let (recovered, reason) = match decode_with_packets(&envelope, &reduced) {
+        Ok(data) => (data, "decode_drill_reduced"),
+        Err(_) => (decode_from_envelope(&envelope)?, "decode_drill_full"),
+    };
 
     let recovered_hash = hash_bytes(&recovered);
     if recovered_hash != envelope.source_hash {
@@ -202,7 +204,7 @@ pub fn run_decode_drill(
     fs::write(recovered_output, &recovered)?;
     let proof = DecodeProof {
         ts_unix_ms: unix_time_ms(),
-        reason: "decode_drill".to_owned(),
+        reason: reason.to_owned(),
         recovered_blocks: envelope.raptorq.k,
         proof_hash: recovered_hash.clone(),
     };

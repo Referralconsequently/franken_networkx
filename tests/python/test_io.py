@@ -155,3 +155,23 @@ class TestGraphMLIO:
             assert H.number_of_edges() == 2
         finally:
             os.unlink(path)
+
+    def test_directed_graphml(self):
+        D = fnx.DiGraph()
+        D.add_edge("a", "b")
+        D.add_edge("b", "a")
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".graphml", delete=False
+        ) as f:
+            path = f.name
+
+        try:
+            fnx.write_graphml(D, path)
+            H = fnx.read_graphml(path)
+            assert isinstance(H, fnx.DiGraph)
+            assert H.has_edge("a", "b")
+            assert H.has_edge("b", "a")
+            assert H.number_of_nodes() == 2
+            assert H.number_of_edges() == 2
+        finally:
+            os.unlink(path)

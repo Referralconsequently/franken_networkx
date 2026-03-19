@@ -471,6 +471,9 @@ impl AsupersyncAdapterMachine {
                 AsupersyncAdapterReasonCode::ConflictDetected,
             );
         }
+        if cursor == self.committed_cursor {
+            return Ok(()); // No-op
+        }
         self.committed_cursor = cursor;
         self.transition(
             AsupersyncAdapterEventType::ChunkCommitted,
