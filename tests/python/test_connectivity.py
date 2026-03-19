@@ -36,6 +36,35 @@ class TestConnectivity:
         G_fnx, G_nx = complete_graph
         assert fnx.node_connectivity(G_fnx) == nx.node_connectivity(G_nx)
 
+    def test_node_connectivity_directed(self, fnx, nx):
+        D_fnx = fnx.DiGraph()
+        D_fnx.add_edge(0, 1)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+
+        assert fnx.node_connectivity(D_fnx) == nx.node_connectivity(D_nx)
+
+    def test_minimum_node_cut_directed(self, fnx, nx):
+        D_fnx = fnx.DiGraph()
+        D_fnx.add_edge(0, 1)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+
+        assert_sets_equal(fnx.minimum_node_cut(D_fnx), nx.minimum_node_cut(D_nx))
+
+    def test_edge_connectivity_directed(self, fnx, nx):
+        D_fnx = fnx.DiGraph()
+        D_fnx.add_edge(0, 1)
+        D_fnx.add_edge(1, 0)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+        D_nx.add_edge(1, 0)
+
+        assert fnx.edge_connectivity(D_fnx) == nx.edge_connectivity(D_nx)
+
     def test_articulation_points(self, fnx, nx, path_graph):
         G_fnx, G_nx = path_graph
         fnx_ap = set(str(x) for x in fnx.articulation_points(G_fnx))

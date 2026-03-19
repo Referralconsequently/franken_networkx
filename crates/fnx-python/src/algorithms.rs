@@ -1037,16 +1037,48 @@ pub fn number_connected_components(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyRe
 #[pyfunction]
 pub fn node_connectivity(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    Ok(py.allow_threads(|| fnx_algorithms::global_node_connectivity(inner).value))
+    match &gr {
+        GraphRef::Undirected(pg) => {
+            Ok(py.allow_threads(|| fnx_algorithms::global_node_connectivity(&pg.inner).value))
+        }
+        GraphRef::Directed { dg, .. } => Ok(py.allow_threads(|| {
+            fnx_algorithms::node_connectivity_directed_global(&dg.inner).value
+        })),
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                Ok(py.allow_threads(|| {
+                    fnx_algorithms::node_connectivity_directed_global(dg).value
+                }))
+            } else {
+                Ok(py.allow_threads(|| {
+                    fnx_algorithms::global_node_connectivity(gr.undirected()).value
+                }))
+            }
+        }
+    }
 }
 
 /// Return a minimum node cut of the graph.
 #[pyfunction]
 pub fn minimum_node_cut(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::global_minimum_node_cut(inner));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            py.allow_threads(|| fnx_algorithms::global_minimum_node_cut(&pg.inner))
+        }
+        GraphRef::Directed { dg, .. } => {
+            py.allow_threads(|| fnx_algorithms::global_minimum_node_cut_directed(&dg.inner))
+        }
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                py.allow_threads(|| fnx_algorithms::global_minimum_node_cut_directed(dg))
+            } else {
+                py.allow_threads(|| fnx_algorithms::global_minimum_node_cut(gr.undirected()))
+            }
+        }
+    };
     Ok(result
         .cut_nodes
         .iter()
@@ -1059,11 +1091,28 @@ pub fn minimum_node_cut(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<Py
 #[pyo3(signature = (g, capacity="capacity"))]
 pub fn edge_connectivity(py: Python<'_>, g: &Bound<'_, PyAny>, capacity: &str) -> PyResult<f64> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
     let cap = capacity.to_owned();
-    Ok(py.allow_threads(move || {
-        fnx_algorithms::global_edge_connectivity_edmonds_karp(inner, &cap).value
-    }))
+    match &gr {
+        GraphRef::Undirected(pg) => Ok(py.allow_threads(move || {
+            fnx_algorithms::global_edge_connectivity_edmonds_karp(&pg.inner, &cap).value
+        })),
+        GraphRef::Directed { dg, .. } => Ok(py.allow_threads(move || {
+            fnx_algorithms::global_edge_connectivity_edmonds_karp_directed(&dg.inner, &cap).value
+        })),
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                Ok(py.allow_threads(move || {
+                    fnx_algorithms::global_edge_connectivity_edmonds_karp_directed(dg, &cap).value
+                }))
+            } else {
+                let inner = gr.undirected();
+                Ok(py.allow_threads(move || {
+                    fnx_algorithms::global_edge_connectivity_edmonds_karp(inner, &cap).value
+                }))
+            }
+        }
+    }
 }
 
 /// Return articulation points (cut vertices) of the graph.

@@ -216,6 +216,18 @@ class TestNonEdges:
         # No edges at all => 3 non-edges: (0,1), (0,2), (1,2)
         assert len(result) == 3
 
+    @needs_nx
+    def test_non_edges_directed_matches_nx(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_node(2)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+        D_nx.add_node(2)
+
+        assert fnx.non_edges(D) == list(nx.non_edges(D_nx))
+
 
 # ---------------------------------------------------------------------------
 # average_node_connectivity
@@ -239,6 +251,20 @@ class TestAverageNodeConnectivity:
     def test_empty_graph(self):
         G = fnx.Graph()
         assert fnx.average_node_connectivity(G) == pytest.approx(0.0)
+
+    @needs_nx
+    def test_directed_matches_nx(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_node(2)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+        D_nx.add_node(2)
+
+        assert fnx.average_node_connectivity(D) == pytest.approx(
+            nx.average_node_connectivity(D_nx)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +296,12 @@ class TestIsKEdgeConnected:
         G.add_node(1)
         assert fnx.is_k_edge_connected(G, 1) is False
 
+    def test_directed_raises(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        with pytest.raises(fnx.NetworkXNotImplemented):
+            fnx.is_k_edge_connected(D, 1)
+
 
 # ---------------------------------------------------------------------------
 # global_node_connectivity
@@ -287,6 +319,12 @@ class TestGlobalNodeConnectivity:
         G = fnx.Graph()
         G.add_node(0)
         assert fnx.global_node_connectivity(G) == 0
+
+    def test_directed_orders_pairs(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(0, 2)
+        assert fnx.global_node_connectivity(D) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +366,22 @@ class TestAllPairsDijkstra:
             fnx_dists, fnx_paths = fnx_result[node]
             for target in range(4):
                 assert fnx_dists[target] == pytest.approx(nx_dists[target])
+
+    @needs_nx
+    def test_directed_matches_nx(self):
+        D = fnx.DiGraph()
+        D.add_edge(0, 1, weight=1.0)
+        D.add_edge(0, 2, weight=1.0)
+        D.add_edge(1, 2, weight=1.0)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1, weight=1.0)
+        D_nx.add_edge(0, 2, weight=1.0)
+        D_nx.add_edge(1, 2, weight=1.0)
+
+        assert fnx.all_pairs_dijkstra(D, weight="weight") == dict(
+            nx.all_pairs_dijkstra(D_nx, weight="weight")
+        )
 
 
 # ---------------------------------------------------------------------------
