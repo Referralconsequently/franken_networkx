@@ -1372,6 +1372,24 @@ impl PyDiGraph {
         }
     }
 
+    /// Return attributes of the edge (u, v).
+    #[pyo3(signature = (u, v, default=None))]
+    fn get_edge_data(
+        &self,
+        py: Python<'_>,
+        u: &Bound<'_, PyAny>,
+        v: &Bound<'_, PyAny>,
+        default: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        let u_c = node_key_to_string(py, u)?;
+        let v_c = node_key_to_string(py, v)?;
+        let ek = (u_c, v_c);
+        Ok(self
+            .edge_py_attrs
+            .get(&ek)
+            .map_or_else(|| default.unwrap_or_else(|| py.None()), |d| d.clone_ref(py).into_any()))
+    }
+
     // ---- Views (properties) ----
 
     #[getter]

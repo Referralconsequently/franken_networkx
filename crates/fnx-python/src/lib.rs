@@ -288,6 +288,44 @@ impl PyMultiGraph {
         }
     }
 
+    /// Return attributes of the edge (u, v).
+    /// If key is None, returns a dict of key -> attr_dict.
+    #[pyo3(signature = (u, v, key=None, default=None))]
+    fn get_edge_data(
+        &self,
+        py: Python<'_>,
+        u: &Bound<'_, PyAny>,
+        v: &Bound<'_, PyAny>,
+        key: Option<usize>,
+        default: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        let u_c = node_key_to_string(py, u)?;
+        let v_c = node_key_to_string(py, v)?;
+        if let Some(k) = key {
+            let ek = Self::edge_key(&u_c, &v_c, k);
+            Ok(self.edge_py_attrs.get(&ek).map_or_else(
+                || default.unwrap_or_else(|| py.None()),
+                |d| d.clone_ref(py).into_any(),
+            ))
+        } else {
+            let keys = self.inner.edge_keys(&u_c, &v_c).unwrap_or_default();
+            if keys.is_empty() {
+                Ok(default.unwrap_or_else(|| py.None()))
+            } else {
+                let result = PyDict::new(py);
+                for k in keys {
+                    let ek = Self::edge_key(&u_c, &v_c, k);
+                    let attrs = self
+                        .edge_py_attrs
+                        .get(&ek)
+                        .map_or_else(|| PyDict::new(py).unbind(), |d| d.clone_ref(py));
+                    result.set_item(k, attrs.bind(py))?;
+                }
+                Ok(result.into_any().unbind())
+            }
+        }
+    }
+
     #[pyo3(signature = (weight=None))]
     fn size(&self, py: Python<'_>, weight: Option<&str>) -> PyResult<f64> {
         match weight {
@@ -1539,6 +1577,24 @@ impl PyGraph {
             }
             _ => Ok(self.inner.edge_count()),
         }
+    }
+
+    /// Return attributes of the edge (u, v).
+    #[pyo3(signature = (u, v, default=None))]
+    fn get_edge_data(
+        &self,
+        py: Python<'_>,
+        u: &Bound<'_, PyAny>,
+        v: &Bound<'_, PyAny>,
+        default: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        let u_c = node_key_to_string(py, u)?;
+        let v_c = node_key_to_string(py, v)?;
+        let ek = Self::edge_key(&u_c, &v_c);
+        Ok(self
+            .edge_py_attrs
+            .get(&ek)
+            .map_or_else(|| default.unwrap_or_else(|| py.None()), |d| d.clone_ref(py).into_any()))
     }
 
     /// ``G.nodes`` — a `NodeView` of the graph's nodes. Supports ``len``, ``in``,

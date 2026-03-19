@@ -714,7 +714,7 @@ impl EdgeListEngine {
             unknown_incompatible_feature: false,
         })?;
 
-        self.write_graphml_impl(graph.nodes_ordered(), graph.edges_ordered(), false)
+        self.write_graphml_impl(graph, false)
     }
 
     pub fn write_digraph_graphml(&mut self, graph: &DiGraph) -> Result<String, ReadWriteError> {
@@ -726,15 +726,17 @@ impl EdgeListEngine {
             unknown_incompatible_feature: false,
         })?;
 
-        self.write_graphml_impl(graph.nodes_ordered(), graph.edges_ordered(), true)
+        self.write_graphml_impl(graph, true)
     }
 
-    fn write_graphml_impl(
+    fn write_graphml_impl<G>(
         &mut self,
-        nodes: Vec<&str>,
-        edges: Vec<fnx_classes::EdgeSnapshot>,
+        graph: &G,
         directed: bool,
-    ) -> Result<String, ReadWriteError> {
+    ) -> Result<String, ReadWriteError> 
+    where
+        G: GraphLikeRead,
+    {
         let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
         writer
@@ -752,17 +754,47 @@ impl EdgeListEngine {
             .write_event(Event::Start(graphml_start))
             .map_err(|e| xml_write_err("graphml_start", e))?;
 
+        // Collect all distinct attribute keys from nodes and edges.
+        let mut node_attr_keys = BTreeSet::new();
         let mut edge_attr_keys = BTreeSet::new();
+        
+        let nodes = graph.nodes_ordered();
+        for node_id in &nodes {
+            if let Some(attrs) = graph.node_attrs(node_id) {
+                for key in attrs.keys() {
+                    node_attr_keys.insert(key.clone());
+                }
+            }
+        }
+        
+        let edges = graph.edges_ordered();
         for edge in &edges {
             for key in edge.attrs.keys() {
                 edge_attr_keys.insert(key.clone());
             }
         }
 
+        // Emit <key> declarations for node attributes.
         let mut key_counter = 0_usize;
+        let mut node_key_ids: BTreeMap<String, String> = BTreeMap::new();
+        for attr_name in &node_attr_keys {
+            let key_id = format!("n{key_counter}");
+            key_counter += 1;
+            let mut key_elem = BytesStart::new("key");
+            key_elem.push_attribute(("id", key_id.as_str()));
+            key_elem.push_attribute(("for", "node"));
+            key_elem.push_attribute(("attr.name", attr_name.as_str()));
+            key_elem.push_attribute(("attr.type", "string"));
+            writer
+                .write_event(Event::Empty(key_elem))
+                .map_err(|e| xml_write_err("key_node", e))?;
+            node_key_ids.insert(attr_name.clone(), key_id);
+        }
+
+        // Emit <key> declarations for edge attributes.
         let mut edge_key_ids: BTreeMap<String, String> = BTreeMap::new();
         for attr_name in &edge_attr_keys {
-            let key_id = format!("d{key_counter}");
+            let key_id = format!("e{key_counter}");
             key_counter += 1;
             let mut key_elem = BytesStart::new("key");
             key_elem.push_attribute(("id", key_id.as_str()));
@@ -775,6 +807,7 @@ impl EdgeListEngine {
             edge_key_ids.insert(attr_name.clone(), key_id);
         }
 
+        // Emit <graph> element.
         let mut graph_elem = BytesStart::new("graph");
         graph_elem.push_attribute(("id", "G"));
         graph_elem.push_attribute((
@@ -785,14 +818,45 @@ impl EdgeListEngine {
             .write_event(Event::Start(graph_elem))
             .map_err(|e| xml_write_err("graph_start", e))?;
 
+        // Emit <node> elements.
         for node_id in &nodes {
+            let node_attrs = graph.node_attrs(node_id);
+            let has_data = node_attrs.is_some_and(|a| !a.is_empty());
             let mut node_elem = BytesStart::new("node");
             node_elem.push_attribute(("id", *node_id));
-            writer
-                .write_event(Event::Empty(node_elem))
-                .map_err(|e| xml_write_err("node_empty", e))?;
+
+            if has_data {
+                writer
+                    .write_event(Event::Start(node_elem))
+                    .map_err(|e| xml_write_err("node_start", e))?;
+                if let Some(attrs) = node_attrs {
+                    for (attr_name, attr_value) in attrs {
+                        if let Some(key_id) = node_key_ids.get(attr_name) {
+                            let mut data_elem = BytesStart::new("data");
+                            data_elem.push_attribute(("key", key_id.as_str()));
+                            writer
+                                .write_event(Event::Start(data_elem))
+                                .map_err(|e| xml_write_err("data_start", e))?;
+                            writer
+                                .write_event(Event::Text(BytesText::new(attr_value)))
+                                .map_err(|e| xml_write_err("data_text", e))?;
+                            writer
+                                .write_event(Event::End(BytesEnd::new("data")))
+                                .map_err(|e| xml_write_err("data_end", e))?;
+                        }
+                    }
+                }
+                writer
+                    .write_event(Event::End(BytesEnd::new("node")))
+                    .map_err(|e| xml_write_err("node_end", e))?;
+            } else {
+                writer
+                    .write_event(Event::Empty(node_elem))
+                    .map_err(|e| xml_write_err("node_empty", e))?;
+            }
         }
 
+        // Emit <edge> elements.
         for edge in &edges {
             let has_data = !edge.attrs.is_empty();
             let mut edge_elem = BytesStart::new("edge");
@@ -1217,6 +1281,36 @@ impl EdgeListEngine {
     }
 }
 
+trait GraphLikeRead {
+    fn nodes_ordered(&self) -> Vec<&str>;
+    fn node_attrs(&self, node: &str) -> Option<&AttrMap>;
+    fn edges_ordered(&self) -> Vec<fnx_classes::EdgeSnapshot>;
+}
+
+impl GraphLikeRead for Graph {
+    fn nodes_ordered(&self) -> Vec<&str> {
+        self.nodes_ordered()
+    }
+    fn node_attrs(&self, node: &str) -> Option<&AttrMap> {
+        self.node_attrs(node)
+    }
+    fn edges_ordered(&self) -> Vec<fnx_classes::EdgeSnapshot> {
+        self.edges_ordered()
+    }
+}
+
+impl GraphLikeRead for DiGraph {
+    fn nodes_ordered(&self) -> Vec<&str> {
+        self.nodes_ordered()
+    }
+    fn node_attrs(&self, node: &str) -> Option<&AttrMap> {
+        self.node_attrs(node)
+    }
+    fn edges_ordered(&self) -> Vec<fnx_classes::EdgeSnapshot> {
+        self.edges_ordered()
+    }
+}
+
 trait GraphLike {
     fn add_node(&mut self, node: String) -> bool;
     fn add_node_with_attrs(&mut self, node: String, attrs: AttrMap) -> bool;
@@ -1603,6 +1697,34 @@ mod tests {
             .expect("graphml read should succeed");
         assert!(parsed.warnings.is_empty());
         assert_eq!(graph.snapshot(), parsed.graph.snapshot());
+    }
+
+    #[test]
+    fn graphml_round_trip_with_node_attrs() {
+        let mut graph = Graph::strict();
+        graph.add_node_with_attrs(
+            "a".to_owned(),
+            BTreeMap::from([("color".to_owned(), "red".to_owned())]),
+        );
+        graph.add_node_with_attrs(
+            "b".to_owned(),
+            BTreeMap::from([("color".to_owned(), "blue".to_owned())]),
+        );
+        graph.add_edge("a", "b").expect("edge add should succeed");
+
+        let mut engine = EdgeListEngine::strict();
+        let xml = engine
+            .write_graphml(&graph)
+            .expect("graphml write should succeed");
+        let parsed = engine
+            .read_graphml(&xml)
+            .expect("graphml read should succeed");
+        assert!(parsed.warnings.is_empty());
+        assert_eq!(graph.snapshot(), parsed.graph.snapshot());
+        assert_eq!(
+            parsed.graph.node_attrs("a").unwrap().get("color").unwrap(),
+            "red"
+        );
     }
 
     #[test]
