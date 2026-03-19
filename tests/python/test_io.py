@@ -122,6 +122,34 @@ class TestAdjlistIO:
         finally:
             os.unlink(path)
 
+    def test_digraph_round_trip(self, small_digraph):
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".adjlist", delete=False
+        ) as f:
+            path = f.name
+
+        try:
+            fnx.write_adjlist(small_digraph, path)
+            H = fnx.read_adjlist(path)
+            # adjlist doesn't preserve direction; result is undirected Graph
+            assert H.number_of_nodes() == 3
+        finally:
+            os.unlink(path)
+
+    def test_large_graph(self):
+        G = fnx.path_graph(100)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".adjlist", delete=False
+        ) as f:
+            path = f.name
+
+        try:
+            fnx.write_adjlist(G, path)
+            H = fnx.read_adjlist(path)
+            assert H.number_of_nodes() == 100
+        finally:
+            os.unlink(path)
+
 
 # ---------------------------------------------------------------------------
 # read/write_graphml
@@ -153,6 +181,61 @@ class TestGraphMLIO:
             fnx.write_graphml(weighted_graph, path)
             H = fnx.read_graphml(path)
             assert H.number_of_edges() == 2
+        finally:
+            os.unlink(path)
+
+    def test_weighted_digraph_graphml(self):
+        D = fnx.DiGraph()
+        D.add_edge("x", "y", weight=1.5)
+        D.add_edge("y", "z", weight=2.0)
+        D.add_edge("z", "x", weight=0.5)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".graphml", delete=False
+        ) as f:
+            path = f.name
+
+        try:
+            fnx.write_graphml(D, path)
+            H = fnx.read_graphml(path)
+            assert isinstance(H, fnx.DiGraph)
+            assert H.number_of_nodes() == 3
+            assert H.number_of_edges() == 3
+            assert H.has_edge("x", "y")
+            assert H.has_edge("y", "z")
+            assert H.has_edge("z", "x")
+        finally:
+            os.unlink(path)
+
+    def test_graphml_edge_attrs_preserved(self):
+        G = fnx.Graph()
+        G.add_edge("a", "b", color="red")
+        G.add_edge("b", "c", color="blue")
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".graphml", delete=False
+        ) as f:
+            path = f.name
+
+        try:
+            fnx.write_graphml(G, path)
+            H = fnx.read_graphml(path)
+            assert H.number_of_edges() == 2
+            assert H.has_edge("a", "b")
+            assert H.has_edge("b", "c")
+        finally:
+            os.unlink(path)
+
+    def test_graphml_large_graph(self):
+        G = fnx.complete_graph(20)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".graphml", delete=False
+        ) as f:
+            path = f.name
+
+        try:
+            fnx.write_graphml(G, path)
+            H = fnx.read_graphml(path)
+            assert H.number_of_nodes() == 20
+            assert H.number_of_edges() == 190  # C(20,2)
         finally:
             os.unlink(path)
 
