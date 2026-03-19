@@ -303,7 +303,7 @@ impl DegreeView {
             .iter()
             .map(|n| {
                 let py_key = g.py_node_key(py, n);
-                let deg = g.inner.neighbor_count(n);
+                let deg = g.inner.degree(n);
                 let py_degree = deg.into_pyobject(py)?.into_any().unbind();
                 tuple_object(py, &[py_key, py_degree])
             })
@@ -325,7 +325,7 @@ impl DegreeView {
                 n.repr()?
             )));
         }
-        Ok(g.inner.neighbor_count(&canonical))
+        Ok(g.inner.degree(&canonical))
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
@@ -334,7 +334,7 @@ impl DegreeView {
             .inner
             .nodes_ordered()
             .iter()
-            .map(|n| format!("('{}', {})", n, g.inner.neighbor_count(n)))
+            .map(|n| format!("('{}', {})", n, g.inner.degree(n)))
             .collect();
         format!("DegreeView([{}])", items.join(", "))
     }

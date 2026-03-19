@@ -196,6 +196,19 @@ impl Graph {
         self.adjacency.get(node).map_or(0, IndexSet::len)
     }
 
+    /// Return the degree of a node.
+    /// Self-loops contribute 2 to the degree (NetworkX convention).
+    #[must_use]
+    pub fn degree(&self, node: &str) -> usize {
+        let count = self.neighbor_count(node);
+        // If node has a self-loop, add 1 extra (self-loop contributes 2 total)
+        if self.has_edge(node, node) {
+            count + 1
+        } else {
+            count
+        }
+    }
+
     #[must_use]
     pub fn node_attrs(&self, node: &str) -> Option<&AttrMap> {
         self.nodes.get(node)
@@ -646,11 +659,22 @@ impl MultiGraph {
     }
 
     /// Return the degree of a node (total number of parallel edges incident).
+    /// Self-loops contribute 2 to the degree each (NetworkX convention).
     #[must_use]
     pub fn degree(&self, node: &str) -> usize {
-        self.adjacency
-            .get(node)
-            .map_or(0, |neighbors| neighbors.values().map(IndexSet::len).sum())
+        self.adjacency.get(node).map_or(0, |neighbors| {
+            let mut deg = 0;
+            for (neighbor, keys) in neighbors {
+                let count = keys.len();
+                if neighbor == node {
+                    // Self-loops count double (NetworkX convention)
+                    deg += count * 2;
+                } else {
+                    deg += count;
+                }
+            }
+            deg
+        })
     }
 
     pub fn add_node(&mut self, node: impl Into<String>) -> bool {
