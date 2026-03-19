@@ -45,6 +45,17 @@ class TestConnectivity:
 
         assert fnx.node_connectivity(D_fnx) == nx.node_connectivity(D_nx)
 
+    def test_node_connectivity_directed_cycle_tiebreak(self, fnx, nx):
+        D_fnx = fnx.DiGraph()
+        D_fnx.add_edge(0, 1)
+        D_fnx.add_edge(1, 0)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+        D_nx.add_edge(1, 0)
+
+        assert fnx.node_connectivity(D_fnx) == nx.node_connectivity(D_nx)
+
     def test_minimum_node_cut_directed(self, fnx, nx):
         D_fnx = fnx.DiGraph()
         D_fnx.add_edge(0, 1)
@@ -53,6 +64,45 @@ class TestConnectivity:
         D_nx.add_edge(0, 1)
 
         assert_sets_equal(fnx.minimum_node_cut(D_fnx), nx.minimum_node_cut(D_nx))
+
+    def test_minimum_node_cut_directed_cycle_tiebreak(self, fnx, nx):
+        D_fnx = fnx.DiGraph()
+        D_fnx.add_edge(0, 1)
+        D_fnx.add_edge(1, 0)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+        D_nx.add_edge(1, 0)
+
+        assert_sets_equal(fnx.minimum_node_cut(D_fnx), nx.minimum_node_cut(D_nx))
+
+    def test_minimum_node_cut_disconnected_raises(self, fnx, nx):
+        G_fnx = fnx.Graph()
+        G_fnx.add_node(0)
+        G_fnx.add_node(1)
+
+        G_nx = nx.Graph()
+        G_nx.add_node(0)
+        G_nx.add_node(1)
+
+        with pytest.raises(nx.NetworkXError):
+            nx.minimum_node_cut(G_nx)
+        with pytest.raises(fnx.NetworkXError):
+            fnx.minimum_node_cut(G_fnx)
+
+    def test_minimum_node_cut_directed_disconnected_raises(self, fnx, nx):
+        D_fnx = fnx.DiGraph()
+        D_fnx.add_edge(0, 1)
+        D_fnx.add_node(2)
+
+        D_nx = nx.DiGraph()
+        D_nx.add_edge(0, 1)
+        D_nx.add_node(2)
+
+        with pytest.raises(nx.NetworkXError):
+            nx.minimum_node_cut(D_nx)
+        with pytest.raises(fnx.NetworkXError):
+            fnx.minimum_node_cut(D_fnx)
 
     def test_edge_connectivity_directed(self, fnx, nx):
         D_fnx = fnx.DiGraph()
