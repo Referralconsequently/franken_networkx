@@ -639,7 +639,10 @@ impl PyMultiDiGraph {
     fn __bool__(&self) -> bool {
         self.inner.node_count() > 0
     }
+}
 
+#[pymethods]
+impl PyMultiDiGraph {
     // -----------------------------------------------------------------------
     // View-like property methods
     // -----------------------------------------------------------------------
@@ -985,14 +988,13 @@ impl PyMultiDiGraph {
     // Bulk mutation
     // -----------------------------------------------------------------------
 
-    #[pyo3(signature = (ebunch_to_add, weight=None))]
+    #[pyo3(signature = (ebunch_to_add, weight="weight"))]
     fn add_weighted_edges_from(
         &mut self,
         py: Python<'_>,
         ebunch_to_add: &Bound<'_, PyAny>,
-        weight: Option<&str>,
+        weight: &str,
     ) -> PyResult<()> {
-        let weight_key = weight.unwrap_or("weight");
         let iter = PyIterator::from_object(ebunch_to_add)?;
         for item in iter {
             let item = item?;
@@ -1008,7 +1010,7 @@ impl PyMultiDiGraph {
             let v = &tuple.get_item(1)?;
             let w = &tuple.get_item(2)?;
             let d = PyDict::new(py);
-            d.set_item(weight_key, w)?;
+            d.set_item(weight, w)?;
             self.add_edge(py, u, v, None, Some(&d))?;
         }
         Ok(())

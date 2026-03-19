@@ -775,7 +775,10 @@ impl PyMultiGraph {
     fn __bool__(&self) -> bool {
         self.inner.node_count() > 0
     }
+}
 
+#[pymethods]
+impl PyMultiGraph {
     // -----------------------------------------------------------------------
     // View-like property methods
     // -----------------------------------------------------------------------
@@ -1030,14 +1033,13 @@ impl PyMultiGraph {
     // -----------------------------------------------------------------------
 
     /// Add weighted edges from a list of (u, v, weight) tuples.
-    #[pyo3(signature = (ebunch_to_add, weight=None))]
+    #[pyo3(signature = (ebunch_to_add, weight="weight"))]
     fn add_weighted_edges_from(
         &mut self,
         py: Python<'_>,
         ebunch_to_add: &Bound<'_, PyAny>,
-        weight: Option<&str>,
+        weight: &str,
     ) -> PyResult<()> {
-        let weight_key = weight.unwrap_or("weight");
         let iter = PyIterator::from_object(ebunch_to_add)?;
         for item in iter {
             let item = item?;
@@ -1053,7 +1055,7 @@ impl PyMultiGraph {
             let v = &tuple.get_item(1)?;
             let w = &tuple.get_item(2)?;
             let d = PyDict::new(py);
-            d.set_item(weight_key, w)?;
+            d.set_item(weight, w)?;
             self.add_edge(py, u, v, None, Some(&d))?;
         }
         Ok(())

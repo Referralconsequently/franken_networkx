@@ -6106,9 +6106,31 @@ fn all_pairs_dijkstra_path_length(
     weight: &str,
 ) -> PyResult<PyObject> {
     let gr = extract_graph(g)?;
-    require_undirected(&gr, "all_pairs_dijkstra_path_length")?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_path_length(inner, weight));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_path_length(&pg.inner, weight))
+        }
+        GraphRef::Directed { dg, .. } => py.allow_threads(|| {
+            fnx_algorithms::all_pairs_dijkstra_directed(&dg.inner, weight)
+                .into_iter()
+                .map(|(source, (dists, _paths))| (source, dists))
+                .collect::<HashMap<_, _>>()
+        }),
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                py.allow_threads(|| {
+                    fnx_algorithms::all_pairs_dijkstra_directed(dg, weight)
+                        .into_iter()
+                        .map(|(source, (dists, _paths))| (source, dists))
+                        .collect::<HashMap<_, _>>()
+                })
+            } else {
+                let inner = gr.undirected();
+                py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_path_length(inner, weight))
+            }
+        }
+    };
     let outer_dict = PyDict::new(py);
     for (source, targets) in &result {
         let inner_dict = PyDict::new(py);
@@ -6129,9 +6151,31 @@ fn all_pairs_dijkstra_path(
     weight: &str,
 ) -> PyResult<PyObject> {
     let gr = extract_graph(g)?;
-    require_undirected(&gr, "all_pairs_dijkstra_path")?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_path(inner, weight));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => {
+            py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_path(&pg.inner, weight))
+        }
+        GraphRef::Directed { dg, .. } => py.allow_threads(|| {
+            fnx_algorithms::all_pairs_dijkstra_directed(&dg.inner, weight)
+                .into_iter()
+                .map(|(source, (_dists, paths))| (source, paths))
+                .collect::<HashMap<_, _>>()
+        }),
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                py.allow_threads(|| {
+                    fnx_algorithms::all_pairs_dijkstra_directed(dg, weight)
+                        .into_iter()
+                        .map(|(source, (_dists, paths))| (source, paths))
+                        .collect::<HashMap<_, _>>()
+                })
+            } else {
+                let inner = gr.undirected();
+                py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_path(inner, weight))
+            }
+        }
+    };
     let outer_dict = PyDict::new(py);
     for (source, targets) in &result {
         let inner_dict = PyDict::new(py);
@@ -7116,7 +7160,37 @@ fn mixing_expansion(
 #[pyo3(signature = (g,))]
 fn non_edges(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<(PyObject, PyObject)>> {
     let gr = extract_graph(g)?;
-    let result = fnx_algorithms::non_edges(gr.undirected());
+    let result: Vec<(String, String)> = match &gr {
+        GraphRef::Directed { dg, .. } => {
+            let nodes = dg.inner.nodes_ordered();
+            let mut missing = Vec::new();
+            for &u in &nodes {
+                for &v in &nodes {
+                    if u != v && !dg.inner.has_edge(u, v) {
+                        missing.push((u.to_owned(), v.to_owned()));
+                    }
+                }
+            }
+            missing
+        }
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                let nodes = dg.nodes_ordered();
+                let mut missing = Vec::new();
+                for &u in &nodes {
+                    for &v in &nodes {
+                        if u != v && !dg.has_edge(u, v) {
+                            missing.push((u.to_owned(), v.to_owned()));
+                        }
+                    }
+                }
+                missing
+            } else {
+                fnx_algorithms::non_edges(gr.undirected())
+            }
+        }
+    };
     Ok(result
         .iter()
         .map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v)))
@@ -7128,8 +7202,26 @@ fn non_edges(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<(PyObject, Py
 #[pyo3(signature = (g,))]
 fn average_node_connectivity(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    Ok(py.allow_threads(|| fnx_algorithms::average_node_connectivity(inner)))
+    match &gr {
+        GraphRef::Undirected(pg) => {
+            Ok(py.allow_threads(|| fnx_algorithms::average_node_connectivity(&pg.inner)))
+        }
+        GraphRef::Directed { dg, .. } => Ok(py.allow_threads(|| {
+            fnx_algorithms::average_node_connectivity_directed(&dg.inner)
+        })),
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                Ok(py.allow_threads(|| {
+                    fnx_algorithms::average_node_connectivity_directed(dg)
+                }))
+            } else {
+                Ok(py.allow_threads(|| {
+                    fnx_algorithms::average_node_connectivity(gr.undirected())
+                }))
+            }
+        }
+    }
 }
 
 /// Return True if the graph is k-edge-connected.
@@ -7137,6 +7229,11 @@ fn average_node_connectivity(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f
 #[pyo3(signature = (g, k))]
 fn is_k_edge_connected(py: Python<'_>, g: &Bound<'_, PyAny>, k: usize) -> PyResult<bool> {
     let gr = extract_graph(g)?;
+    if gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "is_k_edge_connected is not implemented for directed graphs.",
+        ));
+    }
     let inner = gr.undirected();
     Ok(py.allow_threads(|| fnx_algorithms::is_k_edge_connected(inner, k)))
 }
@@ -7146,9 +7243,21 @@ fn is_k_edge_connected(py: Python<'_>, g: &Bound<'_, PyAny>, k: usize) -> PyResu
 #[pyo3(signature = (g, weight="weight"))]
 fn all_pairs_dijkstra(py: Python<'_>, g: &Bound<'_, PyAny>, weight: &str) -> PyResult<PyObject> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
     let w = weight.to_owned();
-    let result = py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra(inner, &w));
+    let result = match &gr {
+        GraphRef::Undirected(pg) => py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra(&pg.inner, &w)),
+        GraphRef::Directed { dg, .. } => {
+            py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_directed(&dg.inner, &w))
+        }
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra_directed(dg, &w))
+            } else {
+                py.allow_threads(|| fnx_algorithms::all_pairs_dijkstra(gr.undirected(), &w))
+            }
+        }
+    };
     let outer = PyDict::new(py);
     for (source, (dists, paths)) in &result {
         let dist_dict = PyDict::new(py);
@@ -7160,7 +7269,7 @@ fn all_pairs_dijkstra(py: Python<'_>, g: &Bound<'_, PyAny>, weight: &str) -> PyR
             let py_path: Vec<PyObject> = path.iter().map(|n| gr.py_node_key(py, n)).collect();
             path_dict.set_item(gr.py_node_key(py, target), PyList::new(py, &py_path)?)?;
         }
-        let pair = PyTuple::new(py, &[dist_dict.as_any(), path_dict.as_any()])?;
+        let pair = PyTuple::new(py, [dist_dict.as_any(), path_dict.as_any()])?;
         outer.set_item(gr.py_node_key(py, source), pair)?;
     }
     Ok(outer.into_any().unbind())
@@ -7195,9 +7304,29 @@ fn number_of_spanning_arborescences(
 #[pyo3(signature = (g,))]
 fn global_node_connectivity(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::global_node_connectivity(inner));
-    Ok(result.value)
+    match &gr {
+        GraphRef::Undirected(pg) => {
+            let result = py.allow_threads(|| fnx_algorithms::global_node_connectivity(&pg.inner));
+            Ok(result.value)
+        }
+        GraphRef::Directed { dg, .. } => {
+            let result =
+                py.allow_threads(|| fnx_algorithms::global_node_connectivity_directed(&dg.inner));
+            Ok(result.value)
+        }
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed checked above");
+                let result =
+                    py.allow_threads(|| fnx_algorithms::global_node_connectivity_directed(dg));
+                Ok(result.value)
+            } else {
+                let result =
+                    py.allow_threads(|| fnx_algorithms::global_node_connectivity(gr.undirected()));
+                Ok(result.value)
+            }
+        }
+    }
 }
 
 // ===========================================================================

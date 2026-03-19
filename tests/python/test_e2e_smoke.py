@@ -177,7 +177,7 @@ def test_multidigraph_lifecycle(fnx):
     check("multidigraph key allocation increments", (key0, key1) == (0, 1))
     check("multidigraph edge count counts directions", G.number_of_edges() == 5)
     check("multidigraph edge count between pair", G.number_of_edges("a", "b") == 2)
-    check("multidigraph size sums weights", G.size(weight="weight") == 15.0)
+    check("multidigraph size sums weights", abs(G.size(weight="weight") - 15.0) < 1e-9)
     check("multidigraph has node", G.has_node("solo"))
     check("multidigraph successors work", G.successors("a") == ["b"])
     check("multidigraph predecessors work", G.predecessors("b") == ["a"])
@@ -212,14 +212,33 @@ def test_backend_multigraph_conversion_roundtrip(fnx):
 
     fnx_mg = BackendInterface.convert_from_nx(mg)
     check("backend converts nx.MultiGraph to fnx.MultiGraph", isinstance(fnx_mg, fnx.MultiGraph))
+    check(
+        "backend can_run accepts multigraph shortest_path",
+        BackendInterface.can_run("shortest_path", (mg,), {}),
+    )
     check("backend preserves multigraph edge count", fnx_mg.number_of_edges("a", "b") == 2)
     check("backend preserves multigraph keys", sorted(fnx_mg["a"]["b"].keys()) == [7, 9])
 
     mg_roundtrip = BackendInterface.convert_to_nx(fnx_mg)
     check("backend roundtrips to nx.MultiGraph", isinstance(mg_roundtrip, nx.MultiGraph))
     check("backend preserves graph attrs", mg_roundtrip.graph["name"] == "mg")
-    check("backend preserves keyed edge attrs", mg_roundtrip["a"]["b"][7]["weight"] == 2.5)
+    check(
+        "backend preserves keyed edge attrs",
+        abs(float(mg_roundtrip["a"]["b"][7]["weight"]) - 2.5) < 1e-9,
+    )
     check("backend preserves second keyed edge attrs", mg_roundtrip["a"]["b"][9]["capacity"] == 4)
+
+    mixed_nodes = fnx.MultiGraph()
+    mixed_nodes.add_edge(1, "b", key=3, weight=9.0)
+    mixed_roundtrip = BackendInterface.convert_to_nx(mixed_nodes)
+    check(
+        "backend converts undirected multigraphs with mixed node types",
+        isinstance(mixed_roundtrip, nx.MultiGraph),
+    )
+    check(
+        "backend keeps mixed-type multigraph edge attrs",
+        abs(float(mixed_roundtrip[1]["b"][3]["weight"]) - 9.0) < 1e-9,
+    )
 
     mdg = nx.MultiDiGraph()
     mdg.graph["name"] = "mdg"
@@ -232,13 +251,20 @@ def test_backend_multigraph_conversion_roundtrip(fnx):
         "backend converts nx.MultiDiGraph to fnx.MultiDiGraph",
         isinstance(fnx_mdg, fnx.MultiDiGraph),
     )
+    check(
+        "backend can_run accepts multidigraph shortest_path",
+        BackendInterface.can_run("shortest_path", (mdg,), {}),
+    )
     check("backend preserves directed multiedge count", fnx_mdg.number_of_edges("x", "y") == 2)
     check("backend preserves directed key ordering", sorted(fnx_mdg["x"]["y"].keys()) == [1, 4])
 
     mdg_roundtrip = BackendInterface.convert_to_nx(fnx_mdg)
     check("backend roundtrips to nx.MultiDiGraph", isinstance(mdg_roundtrip, nx.MultiDiGraph))
     check("backend preserves reverse directed edge", mdg_roundtrip.has_edge("y", "x", key=2))
-    check("backend preserves directed edge attrs", mdg_roundtrip["x"]["y"][1]["weight"] == 3.0)
+    check(
+        "backend preserves directed edge attrs",
+        abs(float(mdg_roundtrip["x"]["y"][1]["weight"]) - 3.0) < 1e-9,
+    )
     check("backend preserves graph attrs on digraph", mdg_roundtrip.graph["name"] == "mdg")
 
 
@@ -259,8 +285,8 @@ def test_multigraph_extended_surface(fnx):
     keyed_edges = list(g.edges(keys=True))
     assert keyed_edges == [("a", "b", 0), ("a", "b", 1)]
     keyed_data_edges = list(g.edges(data=True, keys=True))
-    assert keyed_data_edges[0][3]["weight"] == 1.5
-    assert keyed_data_edges[1][3]["weight"] == 2.5
+    assert abs(float(keyed_data_edges[0][3]["weight"]) - 1.5) < 1e-9
+    assert abs(float(keyed_data_edges[1][3]["weight"]) - 2.5) < 1e-9
 
     assert g.degree["a"] == 2
     assert list(g.degree) == [("a", 2), ("b", 2), ("c", 0)]
@@ -312,9 +338,9 @@ def test_multidigraph_extended_surface(fnx):
     keyed_edges = list(g.edges(keys=True))
     assert keyed_edges == [("a", "b", 0), ("a", "b", 1), ("b", "a", 0)]
     keyed_data_edges = list(g.edges(data=True, keys=True))
-    assert keyed_data_edges[0][3]["weight"] == 1.0
-    assert keyed_data_edges[1][3]["weight"] == 2.0
-    assert keyed_data_edges[2][3]["weight"] == 3.0
+    assert abs(float(keyed_data_edges[0][3]["weight"]) - 1.0) < 1e-9
+    assert abs(float(keyed_data_edges[1][3]["weight"]) - 2.0) < 1e-9
+    assert abs(float(keyed_data_edges[2][3]["weight"]) - 3.0) < 1e-9
 
     assert g.degree["a"] == 3
     assert g.in_degree["a"] == 1

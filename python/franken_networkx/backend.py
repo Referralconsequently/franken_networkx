@@ -407,7 +407,7 @@ def _fnx_to_nx(fg):
         for u in fg:
             for v, keyed_attrs in fg[u].items():
                 if not fg.is_directed():
-                    edge_id = (min(u, v), max(u, v))
+                    edge_id = frozenset((u, v))
                     if edge_id in seen:
                         continue
                     seen.add(edge_id)
@@ -459,11 +459,6 @@ class BackendInterface:
         """Return True if this backend can run the named algorithm."""
         if name not in _SUPPORTED_ALGORITHMS:
             return False
-        # Multigraphs are not supported.
-        if args:
-            g = args[0]
-            if hasattr(g, "is_multigraph") and g.is_multigraph():
-                return False
         return True
 
     @staticmethod

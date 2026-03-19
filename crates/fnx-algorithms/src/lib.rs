@@ -2577,6 +2577,75 @@ pub fn global_edge_connectivity_edmonds_karp(
 }
 
 #[must_use]
+pub fn global_edge_connectivity_edmonds_karp_directed(
+    digraph: &DiGraph,
+    capacity_attr: &str,
+) -> EdgeConnectivityResult {
+    let nodes = digraph.nodes_ordered();
+    if nodes.len() < 2 {
+        return EdgeConnectivityResult {
+            value: 0.0,
+            witness: ComplexityWitness {
+                algorithm: "edmonds_karp_global_edge_connectivity_directed".to_owned(),
+                complexity_claim: "O(|V| * |E|^2)".to_owned(),
+                nodes_touched: digraph.node_count(),
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    if !is_weakly_connected(digraph) {
+        return EdgeConnectivityResult {
+            value: 0.0,
+            witness: ComplexityWitness {
+                algorithm: "edmonds_karp_global_edge_connectivity_directed".to_owned(),
+                complexity_claim: "O(|V| * |E|^2)".to_owned(),
+                nodes_touched: digraph.node_count(),
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let mut best_value = nodes
+        .iter()
+        .map(|node| digraph.degree(node) as f64)
+        .min_by(|left, right| left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(0.0);
+    let mut nodes_touched = 0usize;
+    let mut edges_scanned = 0usize;
+    let mut queue_peak = 0usize;
+
+    for (index, &source) in nodes.iter().enumerate() {
+        let target = nodes.get(index + 1).copied().unwrap_or(nodes[0]);
+        let cut = minimum_cut_edmonds_karp_directed(digraph, source, target, capacity_attr);
+        best_value = best_value.min(cut.value);
+        nodes_touched += cut.witness.nodes_touched;
+        edges_scanned += cut.witness.edges_scanned;
+        queue_peak = queue_peak.max(cut.witness.queue_peak);
+        if best_value <= 0.0 {
+            break;
+        }
+    }
+
+    EdgeConnectivityResult {
+        value: if best_value.is_finite() {
+            best_value
+        } else {
+            0.0
+        },
+        witness: ComplexityWitness {
+            algorithm: "edmonds_karp_global_edge_connectivity_directed".to_owned(),
+            complexity_claim: "O(|V| * |E|^2)".to_owned(),
+            nodes_touched,
+            edges_scanned,
+            queue_peak,
+        },
+    }
+}
+
+#[must_use]
 pub fn global_minimum_edge_cut_edmonds_karp(
     graph: &Graph,
     capacity_attr: &str,
@@ -6598,6 +6667,54 @@ fn build_node_split_auxiliary(graph: &Graph) -> HashMap<String, HashMap<String, 
     residual
 }
 
+/// Build auxiliary directed graph for node connectivity on a directed graph.
+/// Each node v -> v_in, v_out with capacity 1.0.
+/// Each original arc (u, v) -> u_out -> v_in with large capacity.
+fn build_node_split_auxiliary_directed(digraph: &DiGraph) -> HashMap<String, HashMap<String, f64>> {
+    let nodes = digraph.nodes_ordered();
+    let large_cap = (nodes.len() + 1) as f64;
+    let mut residual: HashMap<String, HashMap<String, f64>> = HashMap::new();
+
+    for node in &nodes {
+        let n_in = format!("{node}_in");
+        let n_out = format!("{node}_out");
+        residual.entry(n_in.clone()).or_default();
+        residual.entry(n_out.clone()).or_default();
+        residual
+            .entry(n_in.clone())
+            .or_default()
+            .insert(n_out.clone(), 1.0);
+        residual
+            .entry(n_out.clone())
+            .or_default()
+            .entry(n_in.clone())
+            .or_insert(0.0);
+    }
+
+    for node in &nodes {
+        let n_out = format!("{node}_out");
+        if let Some(successors) = digraph.successors_iter(node) {
+            for succ in successors {
+                if succ == *node {
+                    continue;
+                }
+                let succ_in = format!("{succ}_in");
+                residual
+                    .entry(n_out.clone())
+                    .or_default()
+                    .insert(succ_in.clone(), large_cap);
+                residual
+                    .entry(succ_in.clone())
+                    .or_default()
+                    .entry(n_out.clone())
+                    .or_insert(0.0);
+            }
+        }
+    }
+
+    residual
+}
+
 /// Compute node connectivity between two specific nodes s and t.
 ///
 /// Uses node-splitting + Edmonds-Karp max-flow on auxiliary graph.
@@ -6740,6 +6857,172 @@ pub fn global_node_connectivity(graph: &Graph) -> NodeConnectivityResult {
     }
 }
 
+/// Compute node connectivity between two specific nodes in a directed graph.
+#[must_use]
+pub fn node_connectivity_directed(
+    digraph: &DiGraph,
+    source: &str,
+    sink: &str,
+) -> NodeConnectivityResult {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    if !digraph.has_node(source) || !digraph.has_node(sink) || source == sink {
+        return NodeConnectivityResult {
+            value: 0,
+            witness: ComplexityWitness {
+                algorithm: "node_connectivity_directed".to_owned(),
+                complexity_claim: "O(|V| * |E|^2)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let mut residual = build_node_split_auxiliary_directed(digraph);
+    let s_out = format!("{source}_out");
+    let t_in = format!("{sink}_in");
+
+    let mut stats = (0_usize, 0_usize, 0_usize);
+    let flow = aux_max_flow(&mut residual, &s_out, &t_in, &mut stats);
+
+    NodeConnectivityResult {
+        value: flow as usize,
+        witness: ComplexityWitness {
+            algorithm: "node_connectivity_directed".to_owned(),
+            complexity_claim: "O(|V| * |E|^2)".to_owned(),
+            nodes_touched: n,
+            edges_scanned: stats.1,
+            queue_peak: stats.2,
+        },
+    }
+}
+
+/// Compute global node connectivity for a directed graph by checking all ordered pairs.
+#[must_use]
+pub fn global_node_connectivity_directed(digraph: &DiGraph) -> NodeConnectivityResult {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    if n <= 1 {
+        return NodeConnectivityResult {
+            value: 0,
+            witness: ComplexityWitness {
+                algorithm: "global_node_connectivity_directed".to_owned(),
+                complexity_claim: "O(|V|^2 * |V| * |E|^2)".to_owned(),
+                nodes_touched: n,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let mut min_value = usize::MAX;
+    let mut total_edges_scanned = 0usize;
+    let mut max_queue_peak = 0usize;
+
+    for &source in &nodes {
+        for &target in &nodes {
+            if source == target {
+                continue;
+            }
+            let result = node_connectivity_directed(digraph, source, target);
+            min_value = min_value.min(result.value);
+            total_edges_scanned += result.witness.edges_scanned;
+            max_queue_peak = max_queue_peak.max(result.witness.queue_peak);
+            if min_value == 0 {
+                break;
+            }
+        }
+        if min_value == 0 {
+            break;
+        }
+    }
+
+    NodeConnectivityResult {
+        value: if min_value == usize::MAX { 0 } else { min_value },
+        witness: ComplexityWitness {
+            algorithm: "global_node_connectivity_directed".to_owned(),
+            complexity_claim: "O(|V|^2 * |V| * |E|^2)".to_owned(),
+            nodes_touched: n,
+            edges_scanned: total_edges_scanned,
+            queue_peak: max_queue_peak,
+        },
+    }
+}
+
+/// Compute directed node connectivity with NetworkX global semantics.
+#[must_use]
+pub fn node_connectivity_directed_global(digraph: &DiGraph) -> NodeConnectivityResult {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    if n <= 1 || !is_weakly_connected(digraph) {
+        return NodeConnectivityResult {
+            value: 0,
+            witness: ComplexityWitness {
+                algorithm: "node_connectivity_directed_global".to_owned(),
+                complexity_claim: "O(|V| * |E|^2)".to_owned(),
+                nodes_touched: n,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let (&v, mut k) = nodes
+        .iter()
+        .map(|node| (node, digraph.degree(node)))
+        .min_by_key(|&(node, degree)| (degree, node))
+        .unwrap_or((&"", 0));
+    let mut total_edges_scanned = 0usize;
+    let mut max_queue_peak = 0usize;
+
+    let mut neighbors = HashSet::<&str>::new();
+    if let Some(preds) = digraph.predecessors_iter(v) {
+        neighbors.extend(preds);
+    }
+    if let Some(succs) = digraph.successors_iter(v) {
+        neighbors.extend(succs);
+    }
+
+    for &w in &nodes {
+        if w == v || neighbors.contains(w) {
+            continue;
+        }
+        let result = node_connectivity_directed(digraph, v, w);
+        k = k.min(result.value);
+        total_edges_scanned += result.witness.edges_scanned;
+        max_queue_peak = max_queue_peak.max(result.witness.queue_peak);
+    }
+
+    let mut neighbor_vec: Vec<&str> = neighbors.into_iter().collect();
+    neighbor_vec.sort_unstable();
+    for &x in &neighbor_vec {
+        for &y in &neighbor_vec {
+            if x == y || digraph.has_edge(x, y) {
+                continue;
+            }
+            let result = node_connectivity_directed(digraph, x, y);
+            k = k.min(result.value);
+            total_edges_scanned += result.witness.edges_scanned;
+            max_queue_peak = max_queue_peak.max(result.witness.queue_peak);
+        }
+    }
+
+    NodeConnectivityResult {
+        value: k,
+        witness: ComplexityWitness {
+            algorithm: "node_connectivity_directed_global".to_owned(),
+            complexity_claim: "O(|V| * |E|^2)".to_owned(),
+            nodes_touched: n,
+            edges_scanned: total_edges_scanned,
+            queue_peak: max_queue_peak,
+        },
+    }
+}
+
 /// Compute minimum s-t node cut: the smallest set of nodes whose removal disconnects s from t.
 ///
 /// Uses node-splitting + Edmonds-Karp, then BFS on residual to find min-cut nodes.
@@ -6814,6 +7097,87 @@ pub fn minimum_node_cut(graph: &Graph, source: &str, sink: &str) -> MinimumNodeC
         cut_nodes,
         witness: ComplexityWitness {
             algorithm: "minimum_node_cut".to_owned(),
+            complexity_claim: "O(|V| * |E|^2)".to_owned(),
+            nodes_touched: n,
+            edges_scanned: stats.1,
+            queue_peak: stats.2,
+        },
+    }
+}
+
+/// Compute minimum s-t node cut on a directed graph.
+#[must_use]
+pub fn minimum_node_cut_directed(
+    digraph: &DiGraph,
+    source: &str,
+    sink: &str,
+) -> MinimumNodeCutResult {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    if !digraph.has_node(source) || !digraph.has_node(sink) || source == sink {
+        return MinimumNodeCutResult {
+            cut_nodes: vec![],
+            witness: ComplexityWitness {
+                algorithm: "minimum_node_cut_directed".to_owned(),
+                complexity_claim: "O(|V| * |E|^2)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let mut residual = build_node_split_auxiliary_directed(digraph);
+    let s_out = format!("{source}_out");
+    let t_in = format!("{sink}_in");
+
+    let mut stats = (0_usize, 0_usize, 0_usize);
+    let _flow = aux_max_flow(&mut residual, &s_out, &t_in, &mut stats);
+
+    let mut visited = HashSet::<String>::new();
+    let mut queue = VecDeque::<String>::new();
+    queue.push_back(s_out.clone());
+    visited.insert(s_out);
+
+    while let Some(current) = queue.pop_front() {
+        let neighbors: Vec<String> = residual
+            .get(&current)
+            .map(|caps| caps.keys().cloned().collect())
+            .unwrap_or_default();
+        for nb in neighbors {
+            if visited.contains(&nb) {
+                continue;
+            }
+            let cap = residual
+                .get(&current)
+                .and_then(|caps| caps.get(&nb))
+                .copied()
+                .unwrap_or(0.0);
+            if cap > 0.0 {
+                visited.insert(nb.clone());
+                queue.push_back(nb);
+            }
+        }
+    }
+
+    let mut cut_nodes: Vec<String> = Vec::new();
+    for node in &nodes {
+        if *node == source || *node == sink {
+            continue;
+        }
+        let n_in = format!("{node}_in");
+        let n_out = format!("{node}_out");
+        if visited.contains(&n_in) && !visited.contains(&n_out) {
+            cut_nodes.push((*node).to_owned());
+        }
+    }
+    cut_nodes.sort();
+
+    MinimumNodeCutResult {
+        cut_nodes,
+        witness: ComplexityWitness {
+            algorithm: "minimum_node_cut_directed".to_owned(),
             complexity_claim: "O(|V| * |E|^2)".to_owned(),
             nodes_touched: n,
             edges_scanned: stats.1,
@@ -6919,6 +7283,90 @@ pub fn global_minimum_node_cut(graph: &Graph) -> MinimumNodeCutResult {
         witness: ComplexityWitness {
             algorithm: "global_minimum_node_cut".to_owned(),
             complexity_claim: "O(|V|^2 * |V| * |E|^2)".to_owned(),
+            nodes_touched: n,
+            edges_scanned: total_edges_scanned,
+            queue_peak: max_queue_peak,
+        },
+    }
+}
+
+/// Compute global minimum node cut on a directed graph using NetworkX semantics.
+#[must_use]
+pub fn global_minimum_node_cut_directed(digraph: &DiGraph) -> MinimumNodeCutResult {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    if n <= 1 || !is_weakly_connected(digraph) {
+        return MinimumNodeCutResult {
+            cut_nodes: vec![],
+            witness: ComplexityWitness {
+                algorithm: "global_minimum_node_cut_directed".to_owned(),
+                complexity_claim: "O(|V| * |E|^2)".to_owned(),
+                nodes_touched: n,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let &v = nodes
+        .iter()
+        .min_by_key(|node| (digraph.degree(node), *node))
+        .unwrap_or(&"");
+
+    let mut min_cut: Vec<String> = digraph
+        .successors_iter(v)
+        .map(|it| it.map(str::to_owned).collect())
+        .unwrap_or_default();
+    min_cut.sort();
+    min_cut.dedup();
+
+    let mut neighbors = HashSet::<&str>::new();
+    if let Some(preds) = digraph.predecessors_iter(v) {
+        neighbors.extend(preds);
+    }
+    if let Some(succs) = digraph.successors_iter(v) {
+        neighbors.extend(succs);
+    }
+
+    let mut total_edges_scanned = 0usize;
+    let mut max_queue_peak = 0usize;
+
+    for &w in &nodes {
+        if w == v || neighbors.contains(w) {
+            continue;
+        }
+        let result = minimum_node_cut_directed(digraph, v, w);
+        total_edges_scanned += result.witness.edges_scanned;
+        max_queue_peak = max_queue_peak.max(result.witness.queue_peak);
+        if result.cut_nodes.len() <= min_cut.len() {
+            min_cut = result.cut_nodes;
+        }
+    }
+
+    let mut neighbor_vec: Vec<&str> = neighbors.into_iter().collect();
+    neighbor_vec.sort_unstable();
+    for &x in &neighbor_vec {
+        for &y in &neighbor_vec {
+            if x == y || digraph.has_edge(x, y) {
+                continue;
+            }
+            let result = minimum_node_cut_directed(digraph, x, y);
+            total_edges_scanned += result.witness.edges_scanned;
+            max_queue_peak = max_queue_peak.max(result.witness.queue_peak);
+            if result.cut_nodes.len() <= min_cut.len() {
+                min_cut = result.cut_nodes;
+            }
+        }
+    }
+
+    min_cut.sort();
+
+    MinimumNodeCutResult {
+        cut_nodes: min_cut,
+        witness: ComplexityWitness {
+            algorithm: "global_minimum_node_cut_directed".to_owned(),
+            complexity_claim: "O(|V| * |E|^2)".to_owned(),
             nodes_touched: n,
             edges_scanned: total_edges_scanned,
             queue_peak: max_queue_peak,
@@ -13649,6 +14097,80 @@ pub fn single_source_dijkstra_directed(
     distances
 }
 
+/// Single-source Dijkstra returning (distances, paths) for directed graph.
+#[must_use]
+pub fn single_source_dijkstra_full_directed(
+    digraph: &DiGraph,
+    source: &str,
+    weight_attr: &str,
+) -> (HashMap<String, f64>, HashMap<String, Vec<String>>) {
+    let mut distances: HashMap<String, f64> = HashMap::new();
+    let mut predecessors: HashMap<String, Option<String>> = HashMap::new();
+    if !digraph.has_node(source) {
+        return (distances, HashMap::new());
+    }
+
+    let mut settled = HashSet::<String>::new();
+    distances.insert(source.to_owned(), 0.0);
+    predecessors.insert(source.to_owned(), None);
+
+    let ordered_nodes = digraph.nodes_ordered();
+
+    loop {
+        let mut current: Option<(&str, f64)> = None;
+        for &node in &ordered_nodes {
+            if settled.contains(node) {
+                continue;
+            }
+            let Some(&d) = distances.get(node) else {
+                continue;
+            };
+            match current {
+                None => current = Some((node, d)),
+                Some((_, best)) if d < best => current = Some((node, d)),
+                _ => {}
+            }
+        }
+
+        let Some((cur, cur_dist)) = current else {
+            break;
+        };
+        settled.insert(cur.to_owned());
+
+        if let Some(neighbors) = digraph.successors(cur) {
+            for nbr in neighbors {
+                if settled.contains(nbr) {
+                    continue;
+                }
+                let w = digraph_edge_weight_or_default(digraph, cur, nbr, weight_attr);
+                let new_dist = cur_dist + w;
+                let update = match distances.get(nbr) {
+                    Some(&existing) => new_dist + DISTANCE_COMPARISON_EPSILON < existing,
+                    None => true,
+                };
+                if update {
+                    distances.insert(nbr.to_owned(), new_dist);
+                    predecessors.insert(nbr.to_owned(), Some(cur.to_owned()));
+                }
+            }
+        }
+    }
+
+    let mut paths = HashMap::new();
+    for node in distances.keys() {
+        let mut path = vec![node.clone()];
+        let mut cur = node.as_str();
+        while let Some(Some(prev)) = predecessors.get(cur) {
+            path.push(prev.clone());
+            cur = prev;
+        }
+        path.reverse();
+        paths.insert(node.clone(), path);
+    }
+
+    (distances, paths)
+}
+
 /// Single-source Dijkstra returning (distances, paths) for undirected graph.
 /// Matches `networkx.single_source_dijkstra(G, source, weight=weight)`.
 #[must_use]
@@ -13840,6 +14362,21 @@ pub fn all_pairs_dijkstra(
     let mut result = HashMap::new();
     for node in graph.nodes_ordered() {
         let (dists, paths) = single_source_dijkstra_full(graph, node, weight_attr);
+        result.insert(node.to_owned(), (dists, paths));
+    }
+    result
+}
+
+/// All-pairs Dijkstra returning (distances, paths) for directed graphs.
+#[allow(clippy::type_complexity)]
+#[must_use]
+pub fn all_pairs_dijkstra_directed(
+    digraph: &DiGraph,
+    weight_attr: &str,
+) -> HashMap<String, (HashMap<String, f64>, HashMap<String, Vec<String>>)> {
+    let mut result = HashMap::new();
+    for node in digraph.nodes_ordered() {
+        let (dists, paths) = single_source_dijkstra_full_directed(digraph, node, weight_attr);
         result.insert(node.to_owned(), (dists, paths));
     }
     result
@@ -16696,6 +17233,35 @@ pub fn average_node_connectivity(graph: &Graph) -> f64 {
             count += 1;
         }
     }
+    if count == 0 {
+        0.0
+    } else {
+        total / count as f64
+    }
+}
+
+/// Compute average node connectivity over all ordered pairs in a directed graph.
+#[must_use]
+pub fn average_node_connectivity_directed(digraph: &DiGraph) -> f64 {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 {
+        return 0.0;
+    }
+
+    let mut total = 0.0;
+    let mut count = 0usize;
+    for &source in &nodes {
+        for &target in &nodes {
+            if source == target {
+                continue;
+            }
+            let nc = node_connectivity_directed(digraph, source, target);
+            total += nc.value as f64;
+            count += 1;
+        }
+    }
+
     if count == 0 {
         0.0
     } else {

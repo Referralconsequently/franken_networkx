@@ -408,10 +408,10 @@ impl Graph {
             if let Some(left_neighbors) = self.adjacency.get_mut(left) {
                 left_neighbors.shift_remove(right);
             }
-            if left != right {
-                if let Some(right_neighbors) = self.adjacency.get_mut(right) {
-                    right_neighbors.shift_remove(left);
-                }
+            if left != right
+                && let Some(right_neighbors) = self.adjacency.get_mut(right)
+            {
+                right_neighbors.shift_remove(left);
             }
             self.revision = self.revision.saturating_add(1);
         }
