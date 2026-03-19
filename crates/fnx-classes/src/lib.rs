@@ -650,9 +650,7 @@ impl MultiGraph {
     pub fn degree(&self, node: &str) -> usize {
         self.adjacency
             .get(node)
-            .map_or(0, |neighbors| {
-                neighbors.values().map(IndexSet::len).sum()
-            })
+            .map_or(0, |neighbors| neighbors.values().map(IndexSet::len).sum())
     }
 
     pub fn add_node(&mut self, node: impl Into<String>) -> bool {

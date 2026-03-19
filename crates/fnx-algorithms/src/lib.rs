@@ -3189,14 +3189,14 @@ fn compute_max_flow_residual<G: FlowGraphView>(
             let Some(prev) = predecessor.get(&cursor).cloned() else {
                 break;
             };
-            
+
             // Forward edge update
             if let Some(forward_caps) = residual.get_mut(&prev)
                 && let Some(cap) = forward_caps.get_mut(&cursor)
             {
                 *cap = (*cap - bottleneck).max(0.0);
             }
-            
+
             // Reverse edge update
             if let Some(reverse_caps) = residual.get_mut(&cursor) {
                 if let Some(cap) = reverse_caps.get_mut(&prev) {
@@ -3209,7 +3209,7 @@ fn compute_max_flow_residual<G: FlowGraphView>(
                 new_map.insert(prev.clone(), bottleneck);
                 residual.insert(cursor.clone(), new_map);
             }
-            
+
             cursor = prev;
         }
 
@@ -6517,14 +6517,14 @@ fn aux_max_flow(
         let mut cursor = sink.to_owned();
         while cursor != source {
             let prev = predecessor.get(&cursor).unwrap().clone();
-            
+
             // Forward edge update
             if let Some(forward_caps) = residual.get_mut(&prev)
                 && let Some(cap) = forward_caps.get_mut(&cursor)
             {
                 *cap -= bottleneck;
             }
-            
+
             // Reverse edge update
             if let Some(reverse_caps) = residual.get_mut(&cursor) {
                 if let Some(cap) = reverse_caps.get_mut(&prev) {
@@ -6537,7 +6537,7 @@ fn aux_max_flow(
                 new_map.insert(prev.clone(), bottleneck);
                 residual.insert(cursor.clone(), new_map);
             }
-            
+
             cursor = prev;
         }
         total_flow += bottleneck;

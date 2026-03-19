@@ -300,7 +300,10 @@ impl EdgeListEngine {
         Ok(ReadWriteReport { graph, warnings })
     }
 
-    pub fn read_digraph_edgelist(&mut self, input: &str) -> Result<DiReadWriteReport, ReadWriteError> {
+    pub fn read_digraph_edgelist(
+        &mut self,
+        input: &str,
+    ) -> Result<DiReadWriteReport, ReadWriteError> {
         self.dispatch.resolve(&DispatchRequest {
             operation: "read_edgelist".to_owned(),
             requested_backend: None,
@@ -425,7 +428,10 @@ impl EdgeListEngine {
         Ok(ReadWriteReport { graph, warnings })
     }
 
-    pub fn read_digraph_adjlist(&mut self, input: &str) -> Result<DiReadWriteReport, ReadWriteError> {
+    pub fn read_digraph_adjlist(
+        &mut self,
+        input: &str,
+    ) -> Result<DiReadWriteReport, ReadWriteError> {
         self.dispatch.resolve(&DispatchRequest {
             operation: "read_adjlist".to_owned(),
             requested_backend: None,
@@ -617,7 +623,10 @@ impl EdgeListEngine {
         Ok(ReadWriteReport { graph, warnings })
     }
 
-    pub fn read_digraph_json_graph(&mut self, input: &str) -> Result<DiReadWriteReport, ReadWriteError> {
+    pub fn read_digraph_json_graph(
+        &mut self,
+        input: &str,
+    ) -> Result<DiReadWriteReport, ReadWriteError> {
         self.dispatch.resolve(&DispatchRequest {
             operation: "read_json_graph".to_owned(),
             requested_backend: None,
@@ -729,11 +738,7 @@ impl EdgeListEngine {
         self.write_graphml_impl(graph, true)
     }
 
-    fn write_graphml_impl<G>(
-        &mut self,
-        graph: &G,
-        directed: bool,
-    ) -> Result<String, ReadWriteError> 
+    fn write_graphml_impl<G>(&mut self, graph: &G, directed: bool) -> Result<String, ReadWriteError>
     where
         G: GraphLikeRead,
     {
@@ -757,7 +762,7 @@ impl EdgeListEngine {
         // Collect all distinct attribute keys from nodes and edges.
         let mut node_attr_keys = BTreeSet::new();
         let mut edge_attr_keys = BTreeSet::new();
-        
+
         let nodes = graph.nodes_ordered();
         for node_id in &nodes {
             if let Some(attrs) = graph.node_attrs(node_id) {
@@ -766,7 +771,7 @@ impl EdgeListEngine {
                 }
             }
         }
-        
+
         let edges = graph.edges_ordered();
         for edge in &edges {
             for key in edge.attrs.keys() {
@@ -939,7 +944,10 @@ impl EdgeListEngine {
         Ok(ReadWriteReport { graph, warnings })
     }
 
-    pub fn read_digraph_graphml(&mut self, input: &str) -> Result<DiReadWriteReport, ReadWriteError> {
+    pub fn read_digraph_graphml(
+        &mut self,
+        input: &str,
+    ) -> Result<DiReadWriteReport, ReadWriteError> {
         self.dispatch.resolve(&DispatchRequest {
             operation: "read_graphml".to_owned(),
             requested_backend: None,
@@ -1335,7 +1343,8 @@ impl GraphLike for Graph {
         target: String,
         attrs: AttrMap,
     ) -> Result<bool, GraphError> {
-        self.add_edge_with_attrs(source, target, attrs).map(|_| true)
+        self.add_edge_with_attrs(source, target, attrs)
+            .map(|_| true)
     }
 }
 
@@ -1352,7 +1361,8 @@ impl GraphLike for DiGraph {
         target: String,
         attrs: AttrMap,
     ) -> Result<bool, GraphError> {
-        self.add_edge_with_attrs(source, target, attrs).map(|_| true)
+        self.add_edge_with_attrs(source, target, attrs)
+            .map(|_| true)
     }
 }
 

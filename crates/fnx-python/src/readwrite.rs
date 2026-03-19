@@ -240,9 +240,12 @@ fn node_link_graph(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<PyObject
     let json_mod = py.import("json")?;
     let json_str: String = json_mod.call_method1("dumps", (data,))?.extract()?;
     let mut engine = EdgeListEngine::hardened();
-    
+
     let report = engine.read_json_graph(&json_str).map_err(rw_error_to_py)?;
-    Ok(report_to_pygraph(py, report)?.into_pyobject(py)?.into_any().unbind())
+    Ok(report_to_pygraph(py, report)?
+        .into_pyobject(py)?
+        .into_any()
+        .unbind())
 }
 
 // ---------------------------------------------------------------------------
@@ -254,18 +257,24 @@ fn node_link_graph(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<PyObject
 fn read_graphml(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let input = read_input(py, path)?;
     let mut engine = EdgeListEngine::hardened();
-    
+
     // Check if input says it's directed.
     if input.contains("edgedefault=\"directed\"") {
         let report = py
             .allow_threads(|| engine.read_digraph_graphml(&input))
             .map_err(rw_error_to_py)?;
-        Ok(di_report_to_pydigraph(py, report)?.into_pyobject(py)?.into_any().unbind())
+        Ok(di_report_to_pydigraph(py, report)?
+            .into_pyobject(py)?
+            .into_any()
+            .unbind())
     } else {
         let report = py
             .allow_threads(|| engine.read_graphml(&input))
             .map_err(rw_error_to_py)?;
-        Ok(report_to_pygraph(py, report)?.into_pyobject(py)?.into_any().unbind())
+        Ok(report_to_pygraph(py, report)?
+            .into_pyobject(py)?
+            .into_any()
+            .unbind())
     }
 }
 

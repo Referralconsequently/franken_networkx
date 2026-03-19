@@ -31,18 +31,25 @@ fn required_string_array(schema: &Value, key: &str) -> Vec<String> {
 #[test]
 fn reliability_budget_artifacts_are_complete_and_gate_passes() {
     let root = repo_root();
-    let schema = load_json(
-        &root.join("artifacts/conformance/schema/v1/reliability_budget_gate_schema_v1.json"),
-    );
-    let spec = load_json(&root.join("artifacts/conformance/v1/reliability_budget_gate_v1.json"));
-    let report =
-        load_json(&root.join("artifacts/conformance/latest/reliability_budget_report_v1.json"));
-    let quarantine = load_json(&root.join("artifacts/conformance/latest/flake_quarantine_v1.json"));
+    let schema_path =
+        root.join("artifacts/conformance/schema/v1/reliability_budget_gate_schema_v1.json");
+    let schema = load_json(&schema_path);
+
+    let spec_path = root.join("artifacts/conformance/v1/reliability_budget_gate_v1.json");
+    let spec = load_json(&spec_path);
+
+    let report_path = root.join("artifacts/conformance/latest/reliability_budget_report_v1.json");
+    let report = load_json(&report_path);
+
+    let quarantine_path = root.join("artifacts/conformance/latest/flake_quarantine_v1.json");
+    let quarantine = load_json(&quarantine_path);
 
     for key in required_string_array(&schema, "required_top_level_keys") {
         assert!(
             spec.get(&key).is_some(),
-            "reliability spec missing top-level key `{key}`"
+            "reliability spec at {} missing top-level key `{}` required by schema",
+            spec_path.display(),
+            key
         );
     }
 
@@ -67,70 +74,97 @@ fn reliability_budget_artifacts_are_complete_and_gate_passes() {
         required_string_array(&schema, "required_quarantine_test_keys");
 
     let required_budget_keys = required_string_array(&schema, "required_budget_keys");
-    let spec_budgets = spec["budget_definitions"]
-        .as_array()
-        .expect("spec.budget_definitions should be array");
+    let spec_budgets = spec["budget_definitions"].as_array().unwrap_or_else(|| {
+        panic!(
+            "spec.budget_definitions at {} should be array",
+            spec_path.display()
+        )
+    });
     let mut observed_spec_budget_ids = BTreeSet::new();
     for (idx, budget) in spec_budgets.iter().enumerate() {
         for key in &required_budget_keys {
             assert!(
                 budget.get(key).is_some(),
-                "spec.budget_definitions[{idx}] missing key `{key}`"
+                "spec.budget_definitions[{idx}] at {} missing required key `{key}`",
+                spec_path.display()
             );
         }
         let budget_id = budget["budget_id"]
             .as_str()
-            .expect("spec budget_id should be string");
+            .unwrap_or_else(|| panic!("spec.budget_definitions[{idx}].budget_id should be string"));
         assert!(
             observed_spec_budget_ids.insert(budget_id.to_owned()),
-            "duplicate spec budget_id `{budget_id}`"
+            "duplicate spec budget_id `{budget_id}` in {}",
+            spec_path.display()
         );
     }
     assert_eq!(
-        observed_spec_budget_ids, required_budget_ids,
-        "spec budget coverage drifted"
+        observed_spec_budget_ids,
+        required_budget_ids,
+        "spec budget coverage drifted from schema requirements at {}",
+        spec_path.display()
     );
 
     assert_eq!(
         report["source_bead_id"].as_str(),
         Some("bd-315.23"),
-        "reliability report must point to bd-315.23"
+        "reliability report at {} must point to bd-315.23",
+        report_path.display()
     );
     for key in &required_report_top_level_keys {
         assert!(
             report.get(key).is_some(),
-            "reliability report missing top-level key `{key}`"
+            "reliability report at {} missing top-level key `{key}`",
+            report_path.display()
         );
     }
     let report_run_id = report["run_id"]
         .as_str()
-        .expect("report.run_id should be string")
+        .unwrap_or_else(|| {
+            panic!(
+                "report.run_id at {} should be string",
+                report_path.display()
+            )
+        })
         .to_owned();
     assert!(
         !report_run_id.trim().is_empty(),
-        "report.run_id should be non-empty"
+        "report.run_id at {} should be non-empty",
+        report_path.display()
     );
-    let report_seed = report["deterministic_seed"]
-        .as_str()
-        .expect("report.deterministic_seed should be string");
+    let report_seed = report["deterministic_seed"].as_str().unwrap_or_else(|| {
+        panic!(
+            "report.deterministic_seed at {} should be string",
+            report_path.display()
+        )
+    });
     assert!(
         report_seed.len() >= 16,
-        "report.deterministic_seed should be hash-like"
+        "report.deterministic_seed at {} should be hash-like (len >= 16)",
+        report_path.display()
     );
-    let report_status = report["status"]
-        .as_str()
-        .expect("report.status should be string");
+    let report_status = report["status"].as_str().unwrap_or_else(|| {
+        panic!(
+            "report.status at {} should be string",
+            report_path.display()
+        )
+    });
     assert!(
         allowed_status_values.contains(report_status),
-        "report.status `{report_status}` outside schema status set"
+        "report.status `{report_status}` at {} outside schema status set",
+        report_path.display()
     );
 
-    let report_budgets = report["budgets"]
-        .as_array()
-        .expect("report.budgets should be array");
+    let report_budgets = report["budgets"].as_array().unwrap_or_else(|| {
+        panic!(
+            "report.budgets at {} should be array",
+            report_path.display()
+        )
+    });
     assert!(
         !report_budgets.is_empty(),
-        "report.budgets must be non-empty"
+        "report.budgets at {} must be non-empty",
+        report_path.display()
     );
 
     let mut observed_report_budget_ids = BTreeSet::new();

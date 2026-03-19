@@ -662,21 +662,39 @@ impl PyMultiDiGraph {
     fn degree(slf: PyRef<'_, Self>) -> PyResult<Py<MultiDiGraphDegreeView>> {
         let py = slf.py();
         let graph_py: Py<PyMultiDiGraph> = Py::from(slf);
-        Py::new(py, MultiDiGraphDegreeView { graph: graph_py, kind: DegreeKind::Total })
+        Py::new(
+            py,
+            MultiDiGraphDegreeView {
+                graph: graph_py,
+                kind: DegreeKind::Total,
+            },
+        )
     }
 
     #[getter]
     fn in_degree(slf: PyRef<'_, Self>) -> PyResult<Py<MultiDiGraphDegreeView>> {
         let py = slf.py();
         let graph_py: Py<PyMultiDiGraph> = Py::from(slf);
-        Py::new(py, MultiDiGraphDegreeView { graph: graph_py, kind: DegreeKind::In })
+        Py::new(
+            py,
+            MultiDiGraphDegreeView {
+                graph: graph_py,
+                kind: DegreeKind::In,
+            },
+        )
     }
 
     #[getter]
     fn out_degree(slf: PyRef<'_, Self>) -> PyResult<Py<MultiDiGraphDegreeView>> {
         let py = slf.py();
         let graph_py: Py<PyMultiDiGraph> = Py::from(slf);
-        Py::new(py, MultiDiGraphDegreeView { graph: graph_py, kind: DegreeKind::Out })
+        Py::new(
+            py,
+            MultiDiGraphDegreeView {
+                graph: graph_py,
+                kind: DegreeKind::Out,
+            },
+        )
     }
 
     #[getter]
@@ -755,7 +773,9 @@ impl PyMultiDiGraph {
                 .map(|attrs| crate::py_dict_to_attr_map(attrs.bind(py)))
                 .transpose()?
                 .unwrap_or_default();
-            new_graph.inner.add_node_with_attrs(canonical.clone(), rust_attrs);
+            new_graph
+                .inner
+                .add_node_with_attrs(canonical.clone(), rust_attrs);
             new_graph
                 .node_key_map
                 .insert(canonical.clone(), py_key.clone_ref(py));
@@ -767,12 +787,14 @@ impl PyMultiDiGraph {
         }
         for ((u, v, key), attrs) in &self.edge_py_attrs {
             let rust_attrs = crate::py_dict_to_attr_map(attrs.bind(py))?;
-            let _ = new_graph.inner.add_edge_with_key_and_attrs(
-                u.clone(), v.clone(), *key, rust_attrs,
+            let _ =
+                new_graph
+                    .inner
+                    .add_edge_with_key_and_attrs(u.clone(), v.clone(), *key, rust_attrs);
+            new_graph.edge_py_attrs.insert(
+                (u.clone(), v.clone(), *key),
+                attrs.bind(py).copy()?.unbind(),
             );
-            new_graph
-                .edge_py_attrs
-                .insert((u.clone(), v.clone(), *key), attrs.bind(py).copy()?.unbind());
         }
         Ok(new_graph)
     }
@@ -803,7 +825,9 @@ impl PyMultiDiGraph {
                 .map(|attrs| crate::py_dict_to_attr_map(attrs.bind(py)))
                 .transpose()?
                 .unwrap_or_default();
-            new_graph.inner.add_node_with_attrs(canonical.clone(), rust_attrs);
+            new_graph
+                .inner
+                .add_node_with_attrs(canonical.clone(), rust_attrs);
             if let Some(py_key) = self.node_key_map.get(canonical) {
                 new_graph
                     .node_key_map
@@ -820,11 +844,15 @@ impl PyMultiDiGraph {
             if keep.contains(u) && keep.contains(v) {
                 let rust_attrs = crate::py_dict_to_attr_map(attrs.bind(py))?;
                 let _ = new_graph.inner.add_edge_with_key_and_attrs(
-                    u.clone(), v.clone(), *key, rust_attrs,
+                    u.clone(),
+                    v.clone(),
+                    *key,
+                    rust_attrs,
                 );
-                new_graph
-                    .edge_py_attrs
-                    .insert((u.clone(), v.clone(), *key), attrs.bind(py).copy()?.unbind());
+                new_graph.edge_py_attrs.insert(
+                    (u.clone(), v.clone(), *key),
+                    attrs.bind(py).copy()?.unbind(),
+                );
             }
         }
 
@@ -866,14 +894,20 @@ impl PyMultiDiGraph {
                 if let Some(attrs) = self.edge_py_attrs.get(&ek) {
                     let rust_attrs = crate::py_dict_to_attr_map(attrs.bind(py))?;
                     let _ = new_graph.inner.add_edge_with_key_and_attrs(
-                        u.clone(), v.clone(), k, rust_attrs,
+                        u.clone(),
+                        v.clone(),
+                        k,
+                        rust_attrs,
                     );
                     new_graph
                         .edge_py_attrs
                         .insert(ek, attrs.bind(py).copy()?.unbind());
                 } else {
                     let _ = new_graph.inner.add_edge_with_key_and_attrs(
-                        u.clone(), v.clone(), k, AttrMap::new(),
+                        u.clone(),
+                        v.clone(),
+                        k,
+                        AttrMap::new(),
                     );
                 }
             }
@@ -920,7 +954,9 @@ impl PyMultiDiGraph {
                 .map(|attrs| crate::py_dict_to_attr_map(attrs.bind(py)))
                 .transpose()?
                 .unwrap_or_default();
-            new_graph.inner.add_node_with_attrs(canonical.clone(), rust_attrs);
+            new_graph
+                .inner
+                .add_node_with_attrs(canonical.clone(), rust_attrs);
             new_graph
                 .node_key_map
                 .insert(canonical.clone(), py_key.clone_ref(py));
@@ -933,12 +969,14 @@ impl PyMultiDiGraph {
         // Reverse all edges
         for ((u, v, key), attrs) in &self.edge_py_attrs {
             let rust_attrs = crate::py_dict_to_attr_map(attrs.bind(py))?;
-            let _ = new_graph.inner.add_edge_with_key_and_attrs(
-                v.clone(), u.clone(), *key, rust_attrs,
+            let _ =
+                new_graph
+                    .inner
+                    .add_edge_with_key_and_attrs(v.clone(), u.clone(), *key, rust_attrs);
+            new_graph.edge_py_attrs.insert(
+                (v.clone(), u.clone(), *key),
+                attrs.bind(py).copy()?.unbind(),
             );
-            new_graph
-                .edge_py_attrs
-                .insert((v.clone(), u.clone(), *key), attrs.bind(py).copy()?.unbind());
         }
         Ok(new_graph)
     }
@@ -958,9 +996,9 @@ impl PyMultiDiGraph {
         let iter = PyIterator::from_object(ebunch_to_add)?;
         for item in iter {
             let item = item?;
-            let tuple = item.downcast::<PyTuple>().map_err(|_| {
-                PyTypeError::new_err("each edge must be a (u, v, w) tuple")
-            })?;
+            let tuple = item
+                .downcast::<PyTuple>()
+                .map_err(|_| PyTypeError::new_err("each edge must be a (u, v, w) tuple"))?;
             if tuple.len() < 3 {
                 return Err(PyValueError::new_err(
                     "each edge must have at least 3 elements (u, v, weight)",
@@ -1101,7 +1139,12 @@ impl MultiDiGraphNodeView {
             .into_iter()
             .map(|n| g.py_node_key(py, n))
             .collect();
-        Py::new(py, crate::NodeIterator { inner: nodes.into_iter() })
+        Py::new(
+            py,
+            crate::NodeIterator {
+                inner: nodes.into_iter(),
+            },
+        )
     }
 
     #[pyo3(signature = (data=false, default=None))]
@@ -1116,19 +1159,25 @@ impl MultiDiGraphNodeView {
             let mut result = Vec::new();
             for node in g.inner.nodes_ordered() {
                 let py_node = g.py_node_key(py, node);
-                let attrs = g
-                    .node_py_attrs
-                    .get(node)
-                    .map_or_else(
-                        || default.as_ref().map_or_else(|| PyDict::new(py).into_any().unbind(), |d| d.clone_ref(py)),
-                        |d| d.clone_ref(py).into_any(),
-                    );
+                let attrs = g.node_py_attrs.get(node).map_or_else(
+                    || {
+                        default.as_ref().map_or_else(
+                            || PyDict::new(py).into_any().unbind(),
+                            |d| d.clone_ref(py),
+                        )
+                    },
+                    |d| d.clone_ref(py).into_any(),
+                );
                 let pair = PyTuple::new(py, &[py_node, attrs])?;
                 result.push(pair.into_any().unbind());
             }
             Ok(result)
         } else {
-            Ok(g.inner.nodes_ordered().into_iter().map(|n| g.py_node_key(py, n)).collect())
+            Ok(g.inner
+                .nodes_ordered()
+                .into_iter()
+                .map(|n| g.py_node_key(py, n))
+                .collect())
         }
     }
 
@@ -1138,9 +1187,10 @@ impl MultiDiGraphNodeView {
         if !g.inner.has_node(&canonical) {
             return Err(PyKeyError::new_err(format!("{}", n.repr()?)));
         }
-        Ok(g.node_py_attrs
-            .get(&canonical)
-            .map_or_else(|| PyDict::new(py).into_any().unbind(), |d| d.clone_ref(py).into_any()))
+        Ok(g.node_py_attrs.get(&canonical).map_or_else(
+            || PyDict::new(py).into_any().unbind(),
+            |d| d.clone_ref(py).into_any(),
+        ))
     }
 }
 
@@ -1175,29 +1225,35 @@ impl MultiDiGraphEdgeView {
             let py_v = g.py_node_key(py, &edge.target);
             if data && keys {
                 let ek = PyMultiDiGraph::edge_key(&edge.source, &edge.target, edge.key);
-                let attrs = g
-                    .edge_py_attrs
-                    .get(&ek)
-                    .map_or_else(
-                        || default.as_ref().map_or_else(|| PyDict::new(py).into_any().unbind(), |d| d.clone_ref(py)),
-                        |d| d.clone_ref(py).into_any(),
-                    );
-                let key_obj: PyObject = edge.key.into_pyobject(py).expect("key").into_any().unbind();
+                let attrs = g.edge_py_attrs.get(&ek).map_or_else(
+                    || {
+                        default.as_ref().map_or_else(
+                            || PyDict::new(py).into_any().unbind(),
+                            |d| d.clone_ref(py),
+                        )
+                    },
+                    |d| d.clone_ref(py).into_any(),
+                );
+                let key_obj: PyObject =
+                    edge.key.into_pyobject(py).expect("key").into_any().unbind();
                 let tuple = PyTuple::new(py, &[py_u, py_v, key_obj, attrs])?;
                 result.push(tuple.into_any().unbind());
             } else if data {
                 let ek = PyMultiDiGraph::edge_key(&edge.source, &edge.target, edge.key);
-                let attrs = g
-                    .edge_py_attrs
-                    .get(&ek)
-                    .map_or_else(
-                        || default.as_ref().map_or_else(|| PyDict::new(py).into_any().unbind(), |d| d.clone_ref(py)),
-                        |d| d.clone_ref(py).into_any(),
-                    );
+                let attrs = g.edge_py_attrs.get(&ek).map_or_else(
+                    || {
+                        default.as_ref().map_or_else(
+                            || PyDict::new(py).into_any().unbind(),
+                            |d| d.clone_ref(py),
+                        )
+                    },
+                    |d| d.clone_ref(py).into_any(),
+                );
                 let tuple = PyTuple::new(py, &[py_u, py_v, attrs])?;
                 result.push(tuple.into_any().unbind());
             } else if keys {
-                let key_obj: PyObject = edge.key.into_pyobject(py).expect("key").into_any().unbind();
+                let key_obj: PyObject =
+                    edge.key.into_pyobject(py).expect("key").into_any().unbind();
                 let tuple = PyTuple::new(py, &[py_u, py_v, key_obj])?;
                 result.push(tuple.into_any().unbind());
             } else {
@@ -1205,7 +1261,12 @@ impl MultiDiGraphEdgeView {
                 result.push(tuple.into_any().unbind());
             }
         }
-        Py::new(py, crate::NodeIterator { inner: result.into_iter() })
+        Py::new(
+            py,
+            crate::NodeIterator {
+                inner: result.into_iter(),
+            },
+        )
     }
 }
 
@@ -1248,7 +1309,12 @@ impl MultiDiGraphDegreeView {
             let pair = PyTuple::new(py, &[py_node, deg_obj])?;
             result.push(pair.into_any().unbind());
         }
-        Py::new(py, crate::NodeIterator { inner: result.into_iter() })
+        Py::new(
+            py,
+            crate::NodeIterator {
+                inner: result.into_iter(),
+            },
+        )
     }
 }
 
@@ -1995,10 +2061,10 @@ impl PyDiGraph {
         let u_c = node_key_to_string(py, u)?;
         let v_c = node_key_to_string(py, v)?;
         let ek = (u_c, v_c);
-        Ok(self
-            .edge_py_attrs
-            .get(&ek)
-            .map_or_else(|| default.unwrap_or_else(|| py.None()), |d| d.clone_ref(py).into_any()))
+        Ok(self.edge_py_attrs.get(&ek).map_or_else(
+            || default.unwrap_or_else(|| py.None()),
+            |d| d.clone_ref(py).into_any(),
+        ))
     }
 
     // ---- Views (properties) ----

@@ -115,43 +115,48 @@ impl BackendRegistry {
             });
         }
 
-        let compatible: Vec<&BackendSpec> = self
-            .backends
-            .iter()
-            .filter(|backend| {
-                let mode_allowed = match self.mode {
-                    CompatibilityMode::Strict => backend.allow_in_strict,
-                    CompatibilityMode::Hardened => backend.allow_in_hardened,
-                };
-                mode_allowed
+        let compatible_backend = if let Some(name) = &request.requested_backend {
+            self.backends.iter().find(|backend| {
+                backend.name == *name
+                    && (match self.mode {
+                        CompatibilityMode::Strict => backend.allow_in_strict,
+                        CompatibilityMode::Hardened => backend.allow_in_hardened,
+                    })
                     && request
                         .required_features
                         .is_subset(&backend.supported_features)
             })
-            .collect();
-
-        if compatible.is_empty() {
-            self.record_dispatch(request, action, None, "no_compatible_backend");
-            return Err(DispatchError::NoCompatibleBackend {
-                operation: request.operation.clone(),
-            });
-        }
-
-        let selected = if let Some(name) = &request.requested_backend {
-            compatible
-                .iter()
-                .find(|backend| backend.name == *name)
-                .copied()
         } else {
-            compatible.first().copied()
+            self.backends.iter().find(|backend| {
+                (match self.mode {
+                    CompatibilityMode::Strict => backend.allow_in_strict,
+                    CompatibilityMode::Hardened => backend.allow_in_hardened,
+                }) && request
+                    .required_features
+                    .is_subset(&backend.supported_features)
+            })
         };
 
-        let Some(selected) = selected else {
-            self.record_dispatch(request, action, None, "requested_backend_unavailable");
-            return Err(DispatchError::FailClosed {
-                operation: request.operation.clone(),
-                reason: "requested backend unavailable under current compatibility mode".to_owned(),
-            });
+        let Some(selected) = compatible_backend else {
+            let (reason, error) = if request.requested_backend.is_some() {
+                (
+                    "requested_backend_unavailable",
+                    DispatchError::FailClosed {
+                        operation: request.operation.clone(),
+                        reason: "requested backend unavailable under current compatibility mode"
+                            .to_owned(),
+                    },
+                )
+            } else {
+                (
+                    "no_compatible_backend",
+                    DispatchError::NoCompatibleBackend {
+                        operation: request.operation.clone(),
+                    },
+                )
+            };
+            self.record_dispatch(request, action, None, reason);
+            return Err(error);
         };
 
         let selected_name = selected.name.clone();
@@ -188,8 +193,9 @@ impl BackendRegistry {
                     signal: "requested_backend".to_owned(),
                     observed_value: request
                         .requested_backend
-                        .clone()
-                        .unwrap_or_else(|| "none".to_owned()),
+                        .as_deref()
+                        .unwrap_or("none")
+                        .to_owned(),
                     log_likelihood_ratio: -1.0,
                 },
                 EvidenceTerm {
