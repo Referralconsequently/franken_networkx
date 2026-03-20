@@ -1,0 +1,316 @@
+"""Tests verifying algorithm dispatch works correctly on MultiGraph and MultiDiGraph.
+
+Algorithms should transparently accept multigraph inputs by converting them to
+simple graphs internally (collapsing parallel edges). Results should match
+NetworkX behavior on equivalent simple-graph projections.
+"""
+
+import pytest
+
+import franken_networkx as fnx
+
+try:
+    import networkx as nx
+
+    HAS_NX = True
+except ImportError:
+    HAS_NX = False
+
+needs_nx = pytest.mark.skipif(not HAS_NX, reason="networkx not installed")
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def mg_triangle():
+    """MultiGraph triangle with parallel edges on one side."""
+    G = fnx.MultiGraph()
+    G.add_edge(0, 1, weight=1.0)
+    G.add_edge(0, 1, weight=5.0)  # parallel
+    G.add_edge(1, 2, weight=2.0)
+    G.add_edge(0, 2, weight=3.0)
+    return G
+
+
+@pytest.fixture
+def mg_path():
+    """MultiGraph path with a parallel edge."""
+    G = fnx.MultiGraph()
+    G.add_edge(0, 1)
+    G.add_edge(0, 1)  # parallel
+    G.add_edge(1, 2)
+    G.add_edge(2, 3)
+    return G
+
+
+@pytest.fixture
+def mdg_cycle():
+    """MultiDiGraph 3-cycle with a parallel edge."""
+    D = fnx.MultiDiGraph()
+    D.add_edge("a", "b")
+    D.add_edge("a", "b")  # parallel
+    D.add_edge("b", "c")
+    D.add_edge("c", "a")
+    return D
+
+
+@pytest.fixture
+def mdg_dag():
+    """MultiDiGraph DAG."""
+    D = fnx.MultiDiGraph()
+    D.add_edge(0, 1)
+    D.add_edge(0, 2)
+    D.add_edge(1, 3)
+    D.add_edge(2, 3)
+    return D
+
+
+# ---------------------------------------------------------------------------
+# Connectivity on MultiGraph
+# ---------------------------------------------------------------------------
+
+
+class TestMultiGraphConnectivity:
+    def test_is_connected(self, mg_triangle):
+        assert fnx.is_connected(mg_triangle)
+
+    def test_connected_components(self, mg_triangle):
+        comps = fnx.connected_components(mg_triangle)
+        assert len(comps) == 1
+
+    def test_number_connected_components(self, mg_path):
+        assert fnx.number_connected_components(mg_path) == 1
+
+    def test_disconnected_multigraph(self):
+        G = fnx.MultiGraph()
+        G.add_edge(0, 1)
+        G.add_edge(2, 3)
+        assert not fnx.is_connected(G)
+        assert fnx.number_connected_components(G) == 2
+
+    def test_bridges(self, mg_path):
+        b = fnx.bridges(mg_path)
+        # After collapsing parallel edges, this is a simple path 0-1-2-3
+        # All edges are bridges in a path graph
+        assert len(b) == 3
+
+
+# ---------------------------------------------------------------------------
+# Shortest path on MultiGraph
+# ---------------------------------------------------------------------------
+
+
+class TestMultiGraphShortestPath:
+    def test_shortest_path(self, mg_path):
+        path = fnx.shortest_path(mg_path, 0, 3)
+        assert path == [0, 1, 2, 3]
+
+    def test_has_path(self, mg_path):
+        assert fnx.has_path(mg_path, 0, 3)
+
+    def test_shortest_path_length(self, mg_path):
+        length = fnx.shortest_path_length(mg_path, 0, 3)
+        assert length == 3
+
+    def test_dijkstra_path(self, mg_triangle):
+        path = fnx.dijkstra_path(mg_triangle, 0, 2, weight="weight")
+        assert path is not None
+        assert path[0] == 0
+        assert path[-1] == 2
+
+
+# ---------------------------------------------------------------------------
+# Centrality on MultiGraph
+# ---------------------------------------------------------------------------
+
+
+class TestMultiGraphCentrality:
+    def test_degree_centrality(self, mg_triangle):
+        dc = fnx.degree_centrality(mg_triangle)
+        assert len(dc) == 3
+        for v in dc.values():
+            assert 0.0 <= v <= 1.0
+
+    def test_betweenness_centrality(self, mg_triangle):
+        bc = fnx.betweenness_centrality(mg_triangle)
+        assert len(bc) == 3
+
+    def test_pagerank(self, mg_triangle):
+        pr = fnx.pagerank(mg_triangle)
+        assert len(pr) == 3
+        assert abs(sum(pr.values()) - 1.0) < 1e-6
+
+    def test_closeness_centrality(self, mg_triangle):
+        cc = fnx.closeness_centrality(mg_triangle)
+        assert len(cc) == 3
+
+
+# ---------------------------------------------------------------------------
+# Clustering on MultiGraph
+# ---------------------------------------------------------------------------
+
+
+class TestMultiGraphClustering:
+    def test_clustering(self, mg_triangle):
+        cl = fnx.clustering(mg_triangle)
+        assert len(cl) == 3
+        # Triangle has clustering coefficient 1.0 for all nodes
+        for v in cl.values():
+            assert v == pytest.approx(1.0)
+
+    def test_transitivity(self, mg_triangle):
+        t = fnx.transitivity(mg_triangle)
+        assert t == pytest.approx(1.0)
+
+    def test_triangles(self, mg_triangle):
+        tri = fnx.triangles(mg_triangle)
+        assert all(v == 1 for v in tri.values())
+
+
+# ---------------------------------------------------------------------------
+# Matching on MultiGraph
+# ---------------------------------------------------------------------------
+
+
+class TestMultiGraphMatching:
+    def test_max_weight_matching(self, mg_path):
+        m = fnx.max_weight_matching(mg_path)
+        assert len(m) == 2  # path of 4 nodes -> 2 edges in matching
+
+    def test_maximal_matching(self, mg_triangle):
+        m = fnx.maximal_matching(mg_triangle)
+        assert len(m) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tree / MST on MultiGraph
+# ---------------------------------------------------------------------------
+
+
+class TestMultiGraphTree:
+    def test_is_tree_path(self, mg_path):
+        # After collapsing parallel edges, still a path -> tree
+        assert fnx.is_tree(mg_path)
+
+    def test_minimum_spanning_tree(self, mg_triangle):
+        mst = fnx.minimum_spanning_tree(mg_triangle)
+        assert mst.number_of_nodes() == 3
+        assert mst.number_of_edges() == 2  # tree has n-1 edges
+
+
+# ---------------------------------------------------------------------------
+# Graph operators on MultiGraph
+# ---------------------------------------------------------------------------
+
+
+class TestMultiGraphOperators:
+    def test_density(self, mg_triangle):
+        d = fnx.density(mg_triangle)
+        # Simple projection is K3 -> density 1.0
+        assert d == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# MultiDiGraph algorithms
+# ---------------------------------------------------------------------------
+
+
+class TestMultiDiGraphAlgorithms:
+    def test_shortest_path(self, mdg_cycle):
+        path = fnx.shortest_path(mdg_cycle, "a", "c")
+        assert path is not None
+        assert path[0] == "a"
+        assert path[-1] == "c"
+
+    def test_strongly_connected_components(self, mdg_cycle):
+        sccs = fnx.strongly_connected_components(mdg_cycle)
+        assert len(sccs) == 1  # full cycle -> 1 SCC
+
+    def test_is_strongly_connected(self, mdg_cycle):
+        assert fnx.is_strongly_connected(mdg_cycle)
+
+    def test_weakly_connected(self, mdg_cycle):
+        assert fnx.is_weakly_connected(mdg_cycle)
+
+    def test_pagerank(self, mdg_cycle):
+        pr = fnx.pagerank(mdg_cycle)
+        assert len(pr) == 3
+        assert abs(sum(pr.values()) - 1.0) < 1e-6
+
+    def test_topological_sort_dag(self, mdg_dag):
+        assert fnx.is_directed_acyclic_graph(mdg_dag)
+        topo = fnx.topological_sort(mdg_dag)
+        assert len(topo) == 4
+        # 0 must come before 1,2; 1,2 must come before 3
+        idx = {n: i for i, n in enumerate(topo)}
+        assert idx[0] < idx[1]
+        assert idx[0] < idx[2]
+        assert idx[1] < idx[3]
+        assert idx[2] < idx[3]
+
+    def test_condensation(self, mdg_cycle):
+        cond = fnx.condensation(mdg_cycle)
+        assert cond is not None
+
+    def test_ancestors_descendants(self, mdg_dag):
+        anc = fnx.ancestors(mdg_dag, 3)
+        assert 0 in anc
+        desc = fnx.descendants(mdg_dag, 0)
+        assert 3 in desc
+
+
+# ---------------------------------------------------------------------------
+# Cross-validation with NetworkX
+# ---------------------------------------------------------------------------
+
+
+@needs_nx
+class TestMultiGraphNxParity:
+    def test_pagerank_sums_to_one(self):
+        """PageRank on MultiGraph should sum to 1 (uses simple projection)."""
+        G = fnx.MultiGraph()
+        G.add_edge(0, 1)
+        G.add_edge(0, 1)
+        G.add_edge(1, 2)
+        G.add_edge(2, 0)
+
+        pr = fnx.pagerank(G)
+        assert abs(sum(pr.values()) - 1.0) < 1e-6
+
+    def test_is_connected_matches_nx(self):
+        G = fnx.MultiGraph()
+        G.add_edge(0, 1)
+        G.add_node(2)
+
+        N = nx.MultiGraph()
+        N.add_edge(0, 1)
+        N.add_node(2)
+
+        assert fnx.is_connected(G) == nx.is_connected(N)
+
+    def test_strongly_connected_multidigraph(self):
+        D = fnx.MultiDiGraph()
+        D.add_edge(0, 1)
+        D.add_edge(1, 0)
+        D.add_edge(0, 1)  # parallel
+
+        N = nx.MultiDiGraph()
+        N.add_edge(0, 1)
+        N.add_edge(1, 0)
+        N.add_edge(0, 1)
+
+        assert fnx.is_strongly_connected(D) == nx.is_strongly_connected(N)
+
+    def test_shortest_path_matches_nx(self):
+        G = fnx.MultiGraph()
+        G.add_edge(0, 1)
+        G.add_edge(1, 2)
+
+        N = nx.MultiGraph()
+        N.add_edge(0, 1)
+        N.add_edge(1, 2)
+
+        assert fnx.shortest_path(G, 0, 2) == nx.shortest_path(N, 0, 2)
