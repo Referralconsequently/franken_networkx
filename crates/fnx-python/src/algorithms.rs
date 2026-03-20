@@ -838,7 +838,173 @@ pub fn shortest_path(
     method: &str,
 ) -> PyResult<PyObject> {
     let gr = extract_graph(g)?;
-    if let Some(inner) = gr.digraph() {
+    if let Some(weight_attr) = weight {
+        if let Some(weighted_projection) = gr.weighted_digraph_projection(weight_attr) {
+            let inner = weighted_projection.as_ref();
+            log::info!(target: "franken_networkx", "shortest_path: directed nodes={} edges={}", inner.node_count(), inner.edge_count());
+            match (source, target) {
+                (Some(src), Some(tgt)) => {
+                    let s = node_key_to_string(py, src)?;
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &s, src)?;
+                    validate_node(&gr, &t, tgt)?;
+
+                    let path =
+                        compute_single_shortest_path_directed(inner, &s, &t, Some(weight_attr), method)?;
+                    match path {
+                        Some(p) => {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            Ok(py_path.into_pyobject(py)?.into_any().unbind())
+                        }
+                        None => Err(NetworkXNoPath::new_err(format!(
+                            "No path between {} and {}.",
+                            s, t
+                        ))),
+                    }
+                }
+                (Some(src), None) => {
+                    let s = node_key_to_string(py, src)?;
+                    validate_node(&gr, &s, src)?;
+                    let result = PyDict::new(py);
+                    for node in inner.nodes_ordered() {
+                        if let Some(p) = compute_single_shortest_path_directed(
+                            inner,
+                            &s,
+                            node,
+                            Some(weight_attr),
+                            method,
+                        )? {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            result.set_item(gr.py_node_key(py, node), py_path)?;
+                        }
+                    }
+                    Ok(result.into_any().unbind())
+                }
+                (None, Some(tgt)) => {
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &t, tgt)?;
+                    let result = PyDict::new(py);
+                    for node in inner.nodes_ordered() {
+                        if let Some(p) = compute_single_shortest_path_directed(
+                            inner,
+                            node,
+                            &t,
+                            Some(weight_attr),
+                            method,
+                        )? {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            result.set_item(gr.py_node_key(py, node), py_path)?;
+                        }
+                    }
+                    Ok(result.into_any().unbind())
+                }
+                (None, None) => {
+                    let result = PyDict::new(py);
+                    for src_node in inner.nodes_ordered() {
+                        let inner_dict = PyDict::new(py);
+                        for tgt_node in inner.nodes_ordered() {
+                            if let Some(p) = compute_single_shortest_path_directed(
+                                inner,
+                                src_node,
+                                tgt_node,
+                                Some(weight_attr),
+                                method,
+                            )? {
+                                let py_path: Vec<PyObject> =
+                                    p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                                inner_dict.set_item(gr.py_node_key(py, tgt_node), py_path)?;
+                            }
+                        }
+                        result.set_item(gr.py_node_key(py, src_node), inner_dict)?;
+                    }
+                    Ok(result.into_any().unbind())
+                }
+            }
+        } else {
+            let weighted_projection = gr.weighted_undirected_projection(weight_attr);
+            let inner = weighted_projection.as_ref();
+            log::info!(target: "franken_networkx", "shortest_path: nodes={} edges={}", inner.node_count(), inner.edge_count());
+            match (source, target) {
+                (Some(src), Some(tgt)) => {
+                    let s = node_key_to_string(py, src)?;
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &s, src)?;
+                    validate_node(&gr, &t, tgt)?;
+
+                    let path = compute_single_shortest_path(inner, &s, &t, Some(weight_attr), method)?;
+                    match path {
+                        Some(p) => {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            Ok(py_path.into_pyobject(py)?.into_any().unbind())
+                        }
+                        None => Err(NetworkXNoPath::new_err(format!(
+                            "No path between {} and {}.",
+                            s, t
+                        ))),
+                    }
+                }
+                (Some(src), None) => {
+                    let s = node_key_to_string(py, src)?;
+                    validate_node(&gr, &s, src)?;
+                    let result = PyDict::new(py);
+                    for node in inner.nodes_ordered() {
+                        if let Some(p) =
+                            compute_single_shortest_path(inner, &s, node, Some(weight_attr), method)?
+                        {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            result.set_item(gr.py_node_key(py, node), py_path)?;
+                        }
+                    }
+                    Ok(result.into_any().unbind())
+                }
+                (None, Some(tgt)) => {
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &t, tgt)?;
+                    let result = PyDict::new(py);
+                    for node in inner.nodes_ordered() {
+                        if let Some(p) = compute_single_shortest_path(
+                            inner,
+                            node,
+                            &t,
+                            Some(weight_attr),
+                            method,
+                        )? {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            result.set_item(gr.py_node_key(py, node), py_path)?;
+                        }
+                    }
+                    Ok(result.into_any().unbind())
+                }
+                (None, None) => {
+                    let result = PyDict::new(py);
+                    for src_node in inner.nodes_ordered() {
+                        let inner_dict = PyDict::new(py);
+                        for tgt_node in inner.nodes_ordered() {
+                            if let Some(p) = compute_single_shortest_path(
+                                inner,
+                                src_node,
+                                tgt_node,
+                                Some(weight_attr),
+                                method,
+                            )? {
+                                let py_path: Vec<PyObject> =
+                                    p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                                inner_dict.set_item(gr.py_node_key(py, tgt_node), py_path)?;
+                            }
+                        }
+                        result.set_item(gr.py_node_key(py, src_node), inner_dict)?;
+                    }
+                    Ok(result.into_any().unbind())
+                }
+            }
+        }
+    } else if let Some(inner) = gr.digraph() {
         log::info!(target: "franken_networkx", "shortest_path: directed nodes={} edges={}", inner.node_count(), inner.edge_count());
         match (source, target) {
             (Some(src), Some(tgt)) => {
@@ -847,7 +1013,7 @@ pub fn shortest_path(
                 validate_node(&gr, &s, src)?;
                 validate_node(&gr, &t, tgt)?;
 
-                let path = compute_single_shortest_path_directed(inner, &s, &t, weight, method)?;
+                let path = compute_single_shortest_path_directed(inner, &s, &t, None, method)?;
                 match path {
                     Some(p) => {
                         let py_path: Vec<PyObject> =
@@ -866,7 +1032,7 @@ pub fn shortest_path(
                 let result = PyDict::new(py);
                 for node in inner.nodes_ordered() {
                     if let Some(p) =
-                        compute_single_shortest_path_directed(inner, &s, node, weight, method)?
+                        compute_single_shortest_path_directed(inner, &s, node, None, method)?
                     {
                         let py_path: Vec<PyObject> =
                             p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -881,7 +1047,7 @@ pub fn shortest_path(
                 let result = PyDict::new(py);
                 for node in inner.nodes_ordered() {
                     if let Some(p) =
-                        compute_single_shortest_path_directed(inner, node, &t, weight, method)?
+                        compute_single_shortest_path_directed(inner, node, &t, None, method)?
                     {
                         let py_path: Vec<PyObject> =
                             p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -895,9 +1061,9 @@ pub fn shortest_path(
                 for src_node in inner.nodes_ordered() {
                     let inner_dict = PyDict::new(py);
                     for tgt_node in inner.nodes_ordered() {
-                        if let Some(p) = compute_single_shortest_path_directed(
-                            inner, src_node, tgt_node, weight, method,
-                        )? {
+                        if let Some(p) =
+                            compute_single_shortest_path_directed(inner, src_node, tgt_node, None, method)?
+                        {
                             let py_path: Vec<PyObject> =
                                 p.iter().map(|n| gr.py_node_key(py, n)).collect();
                             inner_dict.set_item(gr.py_node_key(py, tgt_node), py_path)?;
@@ -918,7 +1084,7 @@ pub fn shortest_path(
                 validate_node(&gr, &s, src)?;
                 validate_node(&gr, &t, tgt)?;
 
-                let path = compute_single_shortest_path(inner, &s, &t, weight, method)?;
+                let path = compute_single_shortest_path(inner, &s, &t, None, method)?;
                 match path {
                     Some(p) => {
                         let py_path: Vec<PyObject> =
@@ -936,7 +1102,7 @@ pub fn shortest_path(
                 validate_node(&gr, &s, src)?;
                 let result = PyDict::new(py);
                 for node in inner.nodes_ordered() {
-                    if let Some(p) = compute_single_shortest_path(inner, &s, node, weight, method)?
+                    if let Some(p) = compute_single_shortest_path(inner, &s, node, None, method)?
                     {
                         let py_path: Vec<PyObject> =
                             p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -950,7 +1116,7 @@ pub fn shortest_path(
                 validate_node(&gr, &t, tgt)?;
                 let result = PyDict::new(py);
                 for node in inner.nodes_ordered() {
-                    if let Some(p) = compute_single_shortest_path(inner, node, &t, weight, method)?
+                    if let Some(p) = compute_single_shortest_path(inner, node, &t, None, method)?
                     {
                         let py_path: Vec<PyObject> =
                             p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -965,7 +1131,7 @@ pub fn shortest_path(
                     let inner_dict = PyDict::new(py);
                     for tgt_node in inner.nodes_ordered() {
                         if let Some(p) =
-                            compute_single_shortest_path(inner, src_node, tgt_node, weight, method)?
+                            compute_single_shortest_path(inner, src_node, tgt_node, None, method)?
                         {
                             let py_path: Vec<PyObject> =
                                 p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -1000,7 +1166,13 @@ pub fn shortest_path_length(
     validate_node(&gr, &t, target)?;
     if let Some(inner) = gr.digraph() {
         if let Some(w) = weight {
-            match fnx_algorithms::dijkstra_path_length_directed(inner, &s, &t, w) {
+            let weighted_projection = gr.weighted_digraph_projection(w).expect("directed graph");
+            match fnx_algorithms::dijkstra_path_length_directed(
+                weighted_projection.as_ref(),
+                &s,
+                &t,
+                w,
+            ) {
                 Some(len) => Ok(len.into_pyobject(py)?.into_any().unbind()),
                 None => Err(NetworkXNoPath::new_err(format!(
                     "No path between {} and {}.",
@@ -1022,6 +1194,8 @@ pub fn shortest_path_length(
     } else {
         let inner = gr.undirected();
         if let Some(_w) = weight {
+            let weighted_projection = gr.weighted_undirected_projection(_w);
+            let inner = weighted_projection.as_ref();
             let result = fnx_algorithms::shortest_path_weighted(inner, &s, &t, _w);
             match result.path {
                 Some(path) => {
@@ -1135,10 +1309,11 @@ pub fn dijkstra_path(
     validate_node(&gr, &s, source)?;
     validate_node(&gr, &t, target)?;
 
-    let result = if let Some(inner) = gr.digraph() {
-        fnx_algorithms::shortest_path_weighted_directed(inner, &s, &t, weight)
+    let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
+        fnx_algorithms::shortest_path_weighted_directed(weighted_projection.as_ref(), &s, &t, weight)
     } else {
-        fnx_algorithms::shortest_path_weighted(gr.undirected(), &s, &t, weight)
+        let weighted_projection = gr.weighted_undirected_projection(weight);
+        fnx_algorithms::shortest_path_weighted(weighted_projection.as_ref(), &s, &t, weight)
     };
     match result.path {
         Some(p) => Ok(p.iter().map(|n| gr.py_node_key(py, n)).collect()),
@@ -1168,10 +1343,11 @@ pub fn bellman_ford_path(
     validate_node(&gr, &s, source)?;
     validate_node(&gr, &t, target)?;
 
-    let result = if let Some(inner) = gr.digraph() {
-        fnx_algorithms::bellman_ford_shortest_paths_directed(inner, &s, weight)
+    let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
+        fnx_algorithms::bellman_ford_shortest_paths_directed(weighted_projection.as_ref(), &s, weight)
     } else {
-        fnx_algorithms::bellman_ford_shortest_paths(gr.undirected(), &s, weight)
+        let weighted_projection = gr.weighted_undirected_projection(weight);
+        fnx_algorithms::bellman_ford_shortest_paths(weighted_projection.as_ref(), &s, weight)
     };
     if result.negative_cycle_detected {
         return Err(crate::NetworkXUnbounded::new_err(
@@ -1235,10 +1411,15 @@ pub fn multi_source_dijkstra(
     }
     let source_refs: Vec<&str> = source_strs.iter().map(String::as_str).collect();
 
-    let result = if let Some(inner) = gr.digraph() {
-        fnx_algorithms::multi_source_dijkstra_directed(inner, &source_refs, weight)
+    let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
+        fnx_algorithms::multi_source_dijkstra_directed(
+            weighted_projection.as_ref(),
+            &source_refs,
+            weight,
+        )
     } else {
-        fnx_algorithms::multi_source_dijkstra(gr.undirected(), &source_refs, weight)
+        let weighted_projection = gr.weighted_undirected_projection(weight);
+        fnx_algorithms::multi_source_dijkstra(weighted_projection.as_ref(), &source_refs, weight)
     };
 
     let dist_dict = PyDict::new(py);

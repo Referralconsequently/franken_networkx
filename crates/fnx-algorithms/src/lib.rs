@@ -28187,3 +28187,20 @@ fn test_betweenness_normalization_bug() {
         b_score
     );
 }
+
+#[cfg(test)]
+mod test_dijkstra_bug {
+    use super::*;
+    use fnx_classes::digraph::DiGraph;
+
+    #[test]
+    fn test_directed_multi() {
+        let mut g = DiGraph::strict();
+        g.add_edge("a", "b").unwrap();
+        g.add_edge("b", "c").unwrap();
+        println!("successors of b: {:?}", g.successors("b"));
+        let res = multi_source_dijkstra_directed(&g, &["b"], "weight");
+        println!("dists: {:?}", res.distances);
+        assert!(false); // force fail
+    }
+}
