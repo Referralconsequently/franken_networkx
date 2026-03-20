@@ -46,6 +46,34 @@ pub(crate) enum GraphRef<'py> {
     },
 }
 
+enum WeightedGraphProjection<'a> {
+    Borrowed(&'a fnx_classes::Graph),
+    Owned(fnx_classes::Graph),
+}
+
+impl WeightedGraphProjection<'_> {
+    fn as_ref(&self) -> &fnx_classes::Graph {
+        match self {
+            Self::Borrowed(graph) => graph,
+            Self::Owned(graph) => graph,
+        }
+    }
+}
+
+enum WeightedDiGraphProjection<'a> {
+    Borrowed(&'a fnx_classes::digraph::DiGraph),
+    Owned(fnx_classes::digraph::DiGraph),
+}
+
+impl WeightedDiGraphProjection<'_> {
+    fn as_ref(&self) -> &fnx_classes::digraph::DiGraph {
+        match self {
+            Self::Borrowed(graph) => graph,
+            Self::Owned(graph) => graph,
+        }
+    }
+}
+
 impl<'py> GraphRef<'py> {
     /// Get a reference to the undirected graph (for algorithm dispatch).
     pub(crate) fn undirected(&self) -> &fnx_classes::Graph {
@@ -141,6 +169,35 @@ impl<'py> GraphRef<'py> {
             }
         }
     }
+
+    fn weighted_undirected_projection(&self, weight_attr: &str) -> WeightedGraphProjection<'_> {
+        match self {
+            GraphRef::Undirected(pg) => WeightedGraphProjection::Borrowed(&pg.inner),
+            GraphRef::Directed { undirected, .. } => WeightedGraphProjection::Borrowed(undirected),
+            GraphRef::MultiUndirected { mg, .. } => {
+                WeightedGraphProjection::Owned(multigraph_to_weighted_simple_graph(
+                    &mg.inner,
+                    weight_attr,
+                ))
+            }
+            GraphRef::MultiDirected { .. } => {
+                WeightedGraphProjection::Borrowed(self.undirected())
+            }
+        }
+    }
+
+    fn weighted_digraph_projection(
+        &self,
+        weight_attr: &str,
+    ) -> Option<WeightedDiGraphProjection<'_>> {
+        match self {
+            GraphRef::Directed { dg, .. } => Some(WeightedDiGraphProjection::Borrowed(&dg.inner)),
+            GraphRef::MultiDirected { mdg, .. } => Some(WeightedDiGraphProjection::Owned(
+                multidigraph_to_weighted_simple_digraph(&mdg.inner, weight_attr),
+            )),
+            _ => None,
+        }
+    }
 }
 
 /// Extract a `PyGraph`, `PyDiGraph`, `PyMultiGraph`, or `PyMultiDiGraph` from
@@ -194,6 +251,55 @@ fn multigraph_to_simple_graph(mg: &fnx_classes::MultiGraph) -> fnx_classes::Grap
     g
 }
 
+fn projected_weight(attrs: &AttrMap, weight_attr: &str) -> f64 {
+    attrs.get(weight_attr)
+        .and_then(|raw| raw.parse::<f64>().ok())
+        .filter(|weight| weight.is_finite())
+        .unwrap_or(1.0)
+}
+
+/// Convert a MultiGraph to a simple Graph by choosing the minimum-weight
+/// parallel edge for each node pair, matching NetworkX shortest-path semantics.
+fn multigraph_to_weighted_simple_graph(
+    mg: &fnx_classes::MultiGraph,
+    weight_attr: &str,
+) -> fnx_classes::Graph {
+    let mut g = fnx_classes::Graph::strict();
+    let mut selected = HashMap::<(String, String), (f64, usize)>::new();
+
+    for node in mg.nodes_ordered() {
+        let attrs = mg.node_attrs(node).cloned().unwrap_or_default();
+        g.add_node_with_attrs(node.to_owned(), attrs);
+    }
+
+    for edge in mg.edges_ordered() {
+        let pair = (edge.left.clone(), edge.right.clone());
+        let candidate_weight = projected_weight(&edge.attrs, weight_attr);
+        match selected.get_mut(&pair) {
+            Some((best_weight, best_key)) if candidate_weight < *best_weight => {
+                *best_weight = candidate_weight;
+                *best_key = edge.key;
+            }
+            None => {
+                selected.insert(pair, (candidate_weight, edge.key));
+            }
+            _ => {}
+        }
+    }
+
+    for edge in mg.edges_ordered() {
+        let pair = (edge.left.clone(), edge.right.clone());
+        if selected
+            .get(&pair)
+            .is_some_and(|(_, selected_key)| *selected_key == edge.key)
+        {
+            let _ = g.add_edge_with_attrs(edge.left, edge.right, edge.attrs);
+        }
+    }
+
+    g
+}
+
 /// Convert a MultiDiGraph to a simple DiGraph by collapsing parallel edges.
 fn multidigraph_to_simple_digraph(
     mdg: &fnx_classes::digraph::MultiDiGraph,
@@ -208,6 +314,48 @@ fn multidigraph_to_simple_digraph(
             let _ = dg.add_edge_with_attrs(edge.source, edge.target, edge.attrs);
         }
     }
+    dg
+}
+
+/// Convert a MultiDiGraph to a simple DiGraph by choosing the minimum-weight
+/// parallel edge for each directed edge, matching NetworkX shortest-path semantics.
+fn multidigraph_to_weighted_simple_digraph(
+    mdg: &fnx_classes::digraph::MultiDiGraph,
+    weight_attr: &str,
+) -> fnx_classes::digraph::DiGraph {
+    let mut dg = fnx_classes::digraph::DiGraph::strict();
+    let mut selected = HashMap::<(String, String), (f64, usize)>::new();
+
+    for node in mdg.nodes_ordered() {
+        let attrs = mdg.node_attrs(node).cloned().unwrap_or_default();
+        dg.add_node_with_attrs(node.to_owned(), attrs);
+    }
+
+    for edge in mdg.edges_ordered() {
+        let pair = (edge.source.clone(), edge.target.clone());
+        let candidate_weight = projected_weight(&edge.attrs, weight_attr);
+        match selected.get_mut(&pair) {
+            Some((best_weight, best_key)) if candidate_weight < *best_weight => {
+                *best_weight = candidate_weight;
+                *best_key = edge.key;
+            }
+            None => {
+                selected.insert(pair, (candidate_weight, edge.key));
+            }
+            _ => {}
+        }
+    }
+
+    for edge in mdg.edges_ordered() {
+        let pair = (edge.source.clone(), edge.target.clone());
+        if selected
+            .get(&pair)
+            .is_some_and(|(_, selected_key)| *selected_key == edge.key)
+        {
+            let _ = dg.add_edge_with_attrs(edge.source, edge.target, edge.attrs);
+        }
+    }
+
     dg
 }
 
