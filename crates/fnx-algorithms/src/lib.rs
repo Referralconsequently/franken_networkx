@@ -752,6 +752,92 @@ pub fn shortest_path_unweighted(graph: &Graph, source: &str, target: &str) -> Sh
 }
 
 #[must_use]
+pub fn shortest_path_unweighted_directed(
+    digraph: &DiGraph,
+    source: &str,
+    target: &str,
+) -> ShortestPathResult {
+    if !digraph.has_node(source) || !digraph.has_node(target) {
+        return ShortestPathResult {
+            path: None,
+            witness: ComplexityWitness {
+                algorithm: "bfs_shortest_path_directed".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    if source == target {
+        return ShortestPathResult {
+            path: Some(vec![source.to_owned()]),
+            witness: ComplexityWitness {
+                algorithm: "bfs_shortest_path_directed".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: 1,
+                edges_scanned: 0,
+                queue_peak: 1,
+            },
+        };
+    }
+
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut predecessor: HashMap<&str, &str> = HashMap::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+
+    visited.insert(source);
+    queue.push_back(source);
+
+    let mut nodes_touched = 1;
+    let mut edges_scanned = 0;
+    let mut queue_peak = 1;
+
+    while let Some(current) = queue.pop_front() {
+        let Some(successors) = digraph.successors_iter(current) else {
+            continue;
+        };
+
+        for successor in successors {
+            edges_scanned += 1;
+            if !visited.insert(successor) {
+                continue;
+            }
+            predecessor.insert(successor, current);
+            queue.push_back(successor);
+            nodes_touched += 1;
+            queue_peak = queue_peak.max(queue.len());
+
+            if successor == target {
+                let path = rebuild_path(&predecessor, source, target);
+                return ShortestPathResult {
+                    path: Some(path),
+                    witness: ComplexityWitness {
+                        algorithm: "bfs_shortest_path_directed".to_owned(),
+                        complexity_claim: "O(|V| + |E|)".to_owned(),
+                        nodes_touched,
+                        edges_scanned,
+                        queue_peak,
+                    },
+                };
+            }
+        }
+    }
+
+    ShortestPathResult {
+        path: None,
+        witness: ComplexityWitness {
+            algorithm: "bfs_shortest_path_directed".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched,
+            edges_scanned,
+            queue_peak,
+        },
+    }
+}
+
+#[must_use]
 pub fn shortest_path_weighted(
     graph: &Graph,
     source: &str,
@@ -874,6 +960,110 @@ pub fn shortest_path_weighted(
 }
 
 #[must_use]
+pub fn shortest_path_weighted_directed(
+    digraph: &DiGraph,
+    source: &str,
+    target: &str,
+    weight_attr: &str,
+) -> ShortestPathResult {
+    if !digraph.has_node(source) || !digraph.has_node(target) {
+        return ShortestPathResult {
+            path: None,
+            witness: ComplexityWitness {
+                algorithm: "dijkstra_shortest_path_directed".to_owned(),
+                complexity_claim: "O(|E| log |V|)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    if source == target {
+        return ShortestPathResult {
+            path: Some(vec![source.to_owned()]),
+            witness: ComplexityWitness {
+                algorithm: "dijkstra_shortest_path_directed".to_owned(),
+                complexity_claim: "O(|E| log |V|)".to_owned(),
+                nodes_touched: 1,
+                edges_scanned: 0,
+                queue_peak: 1,
+            },
+        };
+    }
+
+    let ordered_nodes = digraph.nodes_ordered();
+    let mut distances: HashMap<&str, f64> = HashMap::new();
+    let mut predecessors: HashMap<&str, &str> = HashMap::new();
+    let mut pq = BinaryHeap::new();
+
+    distances.insert(source, 0.0);
+    pq.push(DijkstraState {
+        dist: 0.0,
+        node: source,
+    });
+
+    let mut nodes_touched = 1usize;
+    let mut edges_scanned = 0usize;
+    let mut queue_peak = 1usize;
+
+    while let Some(DijkstraState { dist: d, node: u }) = pq.pop() {
+        if d > *distances.get(u).unwrap_or(&f64::INFINITY) + DISTANCE_COMPARISON_EPSILON {
+            continue;
+        }
+
+        if u == target {
+            break;
+        }
+
+        if let Some(successors) = digraph.successors_iter(u) {
+            for v in successors {
+                edges_scanned += 1;
+                let weight = digraph_edge_weight_or_default(digraph, u, v, weight_attr);
+                let next_dist = d + weight;
+                let current_dist = *distances.get(v).unwrap_or(&f64::INFINITY);
+
+                if next_dist < current_dist - DISTANCE_COMPARISON_EPSILON {
+                    if distances.insert(v, next_dist).is_none() {
+                        nodes_touched += 1;
+                    }
+                    predecessors.insert(v, u);
+                    pq.push(DijkstraState {
+                        dist: next_dist,
+                        node: v,
+                    });
+                    queue_peak = queue_peak.max(pq.len());
+                }
+            }
+        }
+    }
+
+    let path = if distances.contains_key(target) {
+        let rebuilt_path = rebuild_path(&predecessors, source, target);
+        if rebuilt_path.first().map(String::as_str) == Some(source)
+            && rebuilt_path.last().map(String::as_str) == Some(target)
+        {
+            Some(rebuilt_path)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    ShortestPathResult {
+        path,
+        witness: ComplexityWitness {
+            algorithm: "dijkstra_shortest_path_directed".to_owned(),
+            complexity_claim: "O(|E| log |V|)".to_owned(),
+            nodes_touched,
+            edges_scanned,
+            queue_peak: queue_peak.max(ordered_nodes.len().min(queue_peak)),
+        },
+    }
+}
+
+#[must_use]
 pub fn multi_source_dijkstra(
     graph: &Graph,
     sources: &[&str],
@@ -890,15 +1080,15 @@ pub fn multi_source_dijkstra(
     let mut queue_peak = 0usize;
 
     for source_name in sources {
-        if let Some(s_idx) = graph.get_node_index(source_name) {
-            if distances[s_idx].is_infinite() {
-                distances[s_idx] = 0.0;
-                pq.push(DijkstraState {
-                    dist: 0.0,
-                    node: s_idx,
-                });
-                nodes_touched += 1;
-            }
+        if let Some(s_idx) = graph.get_node_index(source_name)
+            && distances[s_idx].is_infinite()
+        {
+            distances[s_idx] = 0.0;
+            pq.push(DijkstraState {
+                dist: 0.0,
+                node: s_idx,
+            });
+            nodes_touched += 1;
         }
     }
 
@@ -952,6 +1142,93 @@ pub fn multi_source_dijkstra(
         false,
         ComplexityWitness {
             algorithm: "multi_source_dijkstra".to_owned(),
+            complexity_claim: "O(|E| log |V|)".to_owned(),
+            nodes_touched,
+            edges_scanned,
+            queue_peak,
+        },
+    )
+}
+
+#[must_use]
+pub fn multi_source_dijkstra_directed(
+    digraph: &DiGraph,
+    sources: &[&str],
+    weight_attr: &str,
+) -> WeightedShortestPathsResult {
+    let ordered_nodes = digraph.nodes_ordered();
+    let n = ordered_nodes.len();
+    let mut distances = vec![f64::INFINITY; n];
+    let mut predecessors: Vec<Option<usize>> = vec![None; n];
+    let mut pq = BinaryHeap::new();
+
+    let mut nodes_touched = 0usize;
+    let mut edges_scanned = 0usize;
+    let mut queue_peak = 0usize;
+
+    for source_name in sources {
+        if let Some(s_idx) = digraph.get_node_index(source_name)
+            && distances[s_idx].is_infinite()
+        {
+            distances[s_idx] = 0.0;
+            pq.push(DijkstraState {
+                dist: 0.0,
+                node: s_idx,
+            });
+            nodes_touched += 1;
+        }
+    }
+
+    queue_peak = queue_peak.max(pq.len());
+
+    while let Some(DijkstraState { dist: d, node: u_idx }) = pq.pop() {
+        if d > distances[u_idx] {
+            continue;
+        }
+
+        if let Some(successors) = digraph.successors_iter(ordered_nodes[u_idx]) {
+            for v_name in successors {
+                edges_scanned += 1;
+                let v_idx = digraph.get_node_index(v_name).unwrap();
+                let edge_weight =
+                    digraph_edge_weight_or_default(digraph, ordered_nodes[u_idx], v_name, weight_attr);
+                let next_dist = d + edge_weight;
+
+                if next_dist < distances[v_idx] - DISTANCE_COMPARISON_EPSILON {
+                    if distances[v_idx].is_infinite() {
+                        nodes_touched += 1;
+                    }
+                    distances[v_idx] = next_dist;
+                    predecessors[v_idx] = Some(u_idx);
+                    pq.push(DijkstraState {
+                        dist: next_dist,
+                        node: v_idx,
+                    });
+                    queue_peak = queue_peak.max(pq.len());
+                }
+            }
+        }
+    }
+
+    let mut dist_map = HashMap::new();
+    let mut pred_map = HashMap::new();
+    for i in 0..n {
+        if !distances[i].is_infinite() {
+            dist_map.insert(ordered_nodes[i].to_owned(), distances[i]);
+            pred_map.insert(
+                ordered_nodes[i].to_owned(),
+                predecessors[i].map(|idx| ordered_nodes[idx].to_owned()),
+            );
+        }
+    }
+
+    weighted_paths_result(
+        &ordered_nodes,
+        dist_map,
+        pred_map,
+        false,
+        ComplexityWitness {
+            algorithm: "multi_source_dijkstra_directed".to_owned(),
             complexity_claim: "O(|E| log |V|)".to_owned(),
             nodes_touched,
             edges_scanned,
@@ -1043,6 +1320,85 @@ pub fn bellman_ford_shortest_paths(
         negative_cycle_detected,
         ComplexityWitness {
             algorithm: "bellman_ford_shortest_paths".to_owned(),
+            complexity_claim: "O(|V| * |E|)".to_owned(),
+            nodes_touched,
+            edges_scanned,
+            queue_peak,
+        },
+    )
+}
+
+#[must_use]
+pub fn bellman_ford_shortest_paths_directed(
+    digraph: &DiGraph,
+    source: &str,
+    weight_attr: &str,
+) -> WeightedShortestPathsResult {
+    if !digraph.has_node(source) {
+        return WeightedShortestPathsResult {
+            distances: Vec::new(),
+            predecessors: Vec::new(),
+            negative_cycle_detected: false,
+            witness: ComplexityWitness {
+                algorithm: "bellman_ford_shortest_paths_directed".to_owned(),
+                complexity_claim: "O(|V| * |E|)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let ordered_nodes = digraph.nodes_ordered();
+    let ordered_edges = directed_edges_in_iteration_order(digraph);
+    let mut distances = HashMap::<String, f64>::new();
+    let mut predecessors = HashMap::<String, Option<String>>::new();
+
+    distances.insert(source.to_owned(), 0.0);
+    predecessors.insert(source.to_owned(), None);
+
+    let mut nodes_touched = 1usize;
+    let mut edges_scanned = 0usize;
+    let mut queue_peak = 1usize;
+
+    for _ in 0..ordered_nodes.len().saturating_sub(1) {
+        let mut changed = false;
+        for (left, right) in &ordered_edges {
+            let edge_weight = signed_digraph_edge_weight_or_default(digraph, left, right, weight_attr);
+            edges_scanned += 1;
+            if relax_weighted_edge(
+                left,
+                right,
+                edge_weight,
+                &mut distances,
+                &mut predecessors,
+                &mut nodes_touched,
+            ) {
+                changed = true;
+            }
+        }
+        queue_peak = queue_peak.max(distances.len());
+        if !changed {
+            break;
+        }
+    }
+
+    let mut negative_cycle_detected = false;
+    for (left, right) in &ordered_edges {
+        let edge_weight = signed_digraph_edge_weight_or_default(digraph, left, right, weight_attr);
+        if can_relax_weighted_edge(left, right, edge_weight, &distances) {
+            negative_cycle_detected = true;
+            break;
+        }
+    }
+
+    weighted_paths_result(
+        &ordered_nodes,
+        distances,
+        predecessors,
+        negative_cycle_detected,
+        ComplexityWitness {
+            algorithm: "bellman_ford_shortest_paths_directed".to_owned(),
             complexity_claim: "O(|V| * |E|)".to_owned(),
             nodes_touched,
             edges_scanned,
@@ -3374,6 +3730,19 @@ fn undirected_edges_in_iteration_order(graph: &Graph) -> Vec<(String, String)> {
             edges.push((left.to_owned(), right.to_owned()));
         }
         seen_nodes.insert(left);
+    }
+    edges
+}
+
+fn directed_edges_in_iteration_order(digraph: &DiGraph) -> Vec<(String, String)> {
+    let mut edges = Vec::<(String, String)>::new();
+    for source in digraph.nodes_ordered() {
+        let Some(successors) = digraph.successors_iter(source) else {
+            continue;
+        };
+        for target in successors {
+            edges.push((source.to_owned(), target.to_owned()));
+        }
     }
     edges
 }

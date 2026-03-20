@@ -9,6 +9,7 @@ use crate::algorithms::{GraphRef, extract_graph};
 use crate::digraph::PyDiGraph;
 use fnx_readwrite::{DiReadWriteReport, EdgeListEngine, ReadWriteReport};
 use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
 
@@ -43,8 +44,15 @@ fn read_input(py: Python<'_>, source: &Bound<'_, PyAny>) -> PyResult<String> {
 fn write_output(py: Python<'_>, dest: &Bound<'_, PyAny>, content: &str) -> PyResult<()> {
     // Try file-like first (has .write())
     if let Ok(write_method) = dest.getattr("write") {
-        write_method.call1((content,))?;
-        return Ok(());
+        match write_method.call1((content,)) {
+            Ok(_) => return Ok(()),
+            Err(err) if err.is_instance_of::<pyo3::exceptions::PyTypeError>(py) => {
+                let bytes = PyBytes::new(py, content.as_bytes());
+                write_method.call1((bytes,))?;
+                return Ok(());
+            }
+            Err(err) => return Err(err),
+        }
     }
     // Otherwise treat as path
     let pathlib = py.import("pathlib")?;
@@ -171,7 +179,11 @@ fn write_edgelist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>)
         }
         _ => {
             if gr.is_directed() {
-                let inner = gr.digraph().unwrap();
+                let inner = gr.digraph().ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "expected directed graph backend for directed graph value",
+                    )
+                })?;
                 py.allow_threads(|| engine.write_digraph_edgelist(inner))
                     .map_err(rw_error_to_py)?
             } else {
@@ -217,7 +229,11 @@ fn write_adjlist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) 
         }
         _ => {
             if gr.is_directed() {
-                let inner = gr.digraph().unwrap();
+                let inner = gr.digraph().ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "expected directed graph backend for directed graph value",
+                    )
+                })?;
                 py.allow_threads(|| engine.write_digraph_adjlist(inner))
                     .map_err(rw_error_to_py)?
             } else {
@@ -252,7 +268,11 @@ fn node_link_data(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         }
         _ => {
             if gr.is_directed() {
-                let inner = gr.digraph().unwrap();
+                let inner = gr.digraph().ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "expected directed graph backend for directed graph value",
+                    )
+                })?;
                 py.allow_threads(|| engine.write_digraph_json_graph(inner))
                     .map_err(rw_error_to_py)?
             } else {
@@ -329,7 +349,11 @@ fn write_graphml(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) 
         }
         _ => {
             if gr.is_directed() {
-                let inner = gr.digraph().unwrap();
+                let inner = gr.digraph().ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err(
+                        "expected directed graph backend for directed graph value",
+                    )
+                })?;
                 py.allow_threads(|| engine.write_digraph_graphml(inner))
                     .map_err(rw_error_to_py)?
             } else {

@@ -1,6 +1,7 @@
 """Tests for I/O functions: read/write_edgelist, read/write_adjlist,
 read/write_graphml, node_link_data/graph."""
 
+import io
 import os
 import tempfile
 
@@ -102,6 +103,14 @@ class TestEdgelistIO:
         finally:
             os.unlink(path)
 
+    def test_binary_file_like_round_trip(self, triangle):
+        buffer = io.BytesIO()
+        fnx.write_edgelist(triangle, buffer)
+        buffer.seek(0)
+        H = fnx.read_edgelist(buffer)
+        assert H.number_of_nodes() == 3
+        assert H.number_of_edges() == 3
+
 
 # ---------------------------------------------------------------------------
 # read/write_adjlist
@@ -149,6 +158,14 @@ class TestAdjlistIO:
             assert H.number_of_nodes() == 100
         finally:
             os.unlink(path)
+
+    def test_binary_file_like_round_trip(self, triangle):
+        buffer = io.BytesIO()
+        fnx.write_adjlist(triangle, buffer)
+        buffer.seek(0)
+        H = fnx.read_adjlist(buffer)
+        assert H.number_of_nodes() == 3
+        assert H.number_of_edges() == 3
 
 
 # ---------------------------------------------------------------------------
@@ -242,3 +259,10 @@ class TestGraphMLIO:
         finally:
             os.unlink(path)
 
+    def test_binary_file_like_round_trip(self, triangle):
+        buffer = io.BytesIO()
+        fnx.write_graphml(triangle, buffer)
+        buffer.seek(0)
+        H = fnx.read_graphml(buffer)
+        assert H.number_of_nodes() == 3
+        assert H.number_of_edges() == 3
