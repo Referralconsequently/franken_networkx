@@ -147,7 +147,7 @@ impl GraphConverter {
         let mut graph = Graph::new(self.mode);
         let mut warnings = Vec::new();
 
-        self.from_edge_list_into(&mut graph, &mut warnings, payload)?;
+        self.populate_from_edge_list(&mut graph, &mut warnings, payload)?;
 
         self.record(
             "convert_edge_list",
@@ -179,7 +179,7 @@ impl GraphConverter {
         let mut graph = DiGraph::new(self.mode);
         let mut warnings = Vec::new();
 
-        self.from_edge_list_into(&mut graph, &mut warnings, payload)?;
+        self.populate_from_edge_list(&mut graph, &mut warnings, payload)?;
 
         self.record(
             "convert_edge_list",
@@ -195,7 +195,7 @@ impl GraphConverter {
         })
     }
 
-    fn from_edge_list_into<G>(
+    fn populate_from_edge_list<G>(
         &mut self,
         graph: &mut G,
         warnings: &mut Vec<String>,
@@ -279,7 +279,7 @@ impl GraphConverter {
         let mut graph = Graph::new(self.mode);
         let mut warnings = Vec::new();
 
-        self.from_adjacency_into(&mut graph, &mut warnings, payload)?;
+        self.populate_from_adjacency(&mut graph, &mut warnings, payload)?;
 
         self.record(
             "convert_adjacency",
@@ -311,7 +311,7 @@ impl GraphConverter {
         let mut graph = DiGraph::new(self.mode);
         let mut warnings = Vec::new();
 
-        self.from_adjacency_into(&mut graph, &mut warnings, payload)?;
+        self.populate_from_adjacency(&mut graph, &mut warnings, payload)?;
 
         self.record(
             "convert_adjacency",
@@ -327,7 +327,7 @@ impl GraphConverter {
         })
     }
 
-    fn from_adjacency_into<G>(
+    fn populate_from_adjacency<G>(
         &mut self,
         graph: &mut G,
         warnings: &mut Vec<String>,
