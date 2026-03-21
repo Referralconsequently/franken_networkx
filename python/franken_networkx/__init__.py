@@ -1499,6 +1499,221 @@ def fiedler_vector(G, weight='weight', normalized=False):
     return eigenvectors[:, 1]
 
 
+# ---------------------------------------------------------------------------
+# Additional matrix representations
+# ---------------------------------------------------------------------------
+
+
+def incidence_matrix(G, nodelist=None, edgelist=None, oriented=False, weight=None):
+    """Return the incidence matrix of *G* as a SciPy sparse array.
+
+    Parameters
+    ----------
+    G : Graph
+    nodelist : list, optional
+    edgelist : list, optional
+    oriented : bool, optional
+        If True, use +1/-1 for edge endpoints. Default False (uses 1).
+    weight : str or None, optional
+
+    Returns
+    -------
+    scipy.sparse array
+        Shape (n_nodes, n_edges).
+    """
+    import numpy as np
+    import scipy.sparse
+
+    if nodelist is None:
+        nodelist = list(G.nodes())
+    if edgelist is None:
+        edgelist = list(G.edges())
+
+    node_index = {n: i for i, n in enumerate(nodelist)}
+    n_nodes = len(nodelist)
+    n_edges = len(edgelist)
+
+    row, col, data = [], [], []
+    for j, (u, v) in enumerate(edgelist):
+        if u in node_index:
+            row.append(node_index[u])
+            col.append(j)
+            data.append(1 if not oriented else -1)
+        if v in node_index:
+            row.append(node_index[v])
+            col.append(j)
+            data.append(1)
+
+    return scipy.sparse.coo_array(
+        (np.array(data, dtype=float), (np.array(row), np.array(col))),
+        shape=(n_nodes, n_edges),
+    ).tocsc()
+
+
+# ---------------------------------------------------------------------------
+# Social network datasets (hardcoded classic graphs)
+# ---------------------------------------------------------------------------
+
+
+def karate_club_graph():
+    """Return Zachary's Karate Club graph (34 nodes, 78 edges).
+
+    A classic social network dataset representing friendships between
+    members of a university karate club.
+    """
+    G = Graph()
+    # Zachary (1977) edge list
+    edges = [
+        (0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (0, 6), (0, 7), (0, 8),
+        (0, 10), (0, 11), (0, 12), (0, 13), (0, 17), (0, 19), (0, 21), (0, 31),
+        (1, 2), (1, 3), (1, 7), (1, 13), (1, 17), (1, 19), (1, 21), (1, 30),
+        (2, 3), (2, 7), (2, 8), (2, 9), (2, 13), (2, 27), (2, 28), (2, 32),
+        (3, 7), (3, 12), (3, 13), (4, 6), (4, 10), (5, 6), (5, 10), (5, 16),
+        (6, 16), (8, 30), (8, 32), (8, 33), (9, 33), (13, 33), (14, 32),
+        (14, 33), (15, 32), (15, 33), (18, 32), (18, 33), (19, 33), (20, 32),
+        (20, 33), (22, 32), (22, 33), (23, 25), (23, 27), (23, 29), (23, 32),
+        (23, 33), (24, 25), (24, 27), (24, 31), (25, 31), (26, 29), (26, 33),
+        (27, 33), (28, 31), (28, 33), (29, 32), (29, 33), (30, 32), (30, 33),
+        (31, 32), (31, 33), (32, 33),
+    ]
+    G.add_edges_from([(u, v) for u, v in edges])
+    return G
+
+
+def florentine_families_graph():
+    """Return the Florentine families marriage graph (15 nodes, 20 edges).
+
+    A classic social network of marriage alliances among Renaissance
+    Florentine families.
+    """
+    G = Graph()
+    edges = [
+        ("Acciaiuoli", "Medici"), ("Albizzi", "Ginori"), ("Albizzi", "Guadagni"),
+        ("Albizzi", "Medici"), ("Barbadori", "Castellani"), ("Barbadori", "Medici"),
+        ("Bischeri", "Guadagni"), ("Bischeri", "Peruzzi"), ("Bischeri", "Strozzi"),
+        ("Castellani", "Peruzzi"), ("Castellani", "Strozzi"),
+        ("Ginori", "Medici"), ("Guadagni", "Lamberteschi"),
+        ("Guadagni", "Tornabuoni"), ("Lamberteschi", "Medici" if False else "Guadagni"),
+        ("Medici", "Ridolfi"), ("Medici", "Salviati"), ("Medici", "Tornabuoni"),
+        ("Peruzzi", "Strozzi"), ("Ridolfi", "Strozzi"), ("Ridolfi", "Tornabuoni"),
+        ("Salviati", "Pazzi"),
+    ]
+    G.add_edges_from(edges)
+    # Add the Pucci isolate
+    G.add_node("Pucci")
+    return G
+
+
+# ---------------------------------------------------------------------------
+# Community graph generators
+# ---------------------------------------------------------------------------
+
+
+def caveman_graph(l, k):
+    """Return a caveman graph of *l* cliques of size *k*.
+
+    Parameters
+    ----------
+    l : int
+        Number of cliques.
+    k : int
+        Size of each clique.
+
+    Returns
+    -------
+    Graph
+    """
+    G = Graph()
+    for i in range(l):
+        base = i * k
+        for u in range(k):
+            for v in range(u + 1, k):
+                G.add_edge(base + u, base + v)
+    return G
+
+
+def connected_caveman_graph(l, k):
+    """Return a connected caveman graph.
+
+    Like ``caveman_graph`` but with one edge rewired per clique to
+    connect adjacent cliques in a ring.
+
+    Parameters
+    ----------
+    l : int
+        Number of cliques.
+    k : int
+        Size of each clique.
+
+    Returns
+    -------
+    Graph
+    """
+    G = caveman_graph(l, k)
+    for i in range(l):
+        # Remove one internal edge and add a bridge to the next clique
+        base = i * k
+        next_base = ((i + 1) % l) * k
+        # Connect the last node of this clique to the first of the next
+        G.add_edge(base + k - 1, next_base)
+    return G
+
+
+def random_tree(n, seed=None):
+    """Return a uniformly random labeled tree on *n* nodes via Prüfer sequence.
+
+    Parameters
+    ----------
+    n : int
+        Number of nodes.
+    seed : int or None, optional
+
+    Returns
+    -------
+    Graph
+    """
+    import random as _random
+
+    if n <= 0:
+        return Graph()
+    if n == 1:
+        G = Graph()
+        G.add_node(0)
+        return G
+    if n == 2:
+        G = Graph()
+        G.add_edge(0, 1)
+        return G
+
+    rng = _random.Random(seed)
+    # Generate random Prüfer sequence of length n-2
+    prufer = [rng.randint(0, n - 1) for _ in range(n - 2)]
+
+    # Decode Prüfer sequence to tree edges
+    degree = [1] * n
+    for i in prufer:
+        degree[i] += 1
+
+    G = Graph()
+    for i in range(n):
+        G.add_node(i)
+
+    for i in prufer:
+        for j in range(n):
+            if degree[j] == 1:
+                G.add_edge(i, j)
+                degree[i] -= 1
+                degree[j] -= 1
+                break
+
+    # Connect the last two nodes with degree 1
+    last_two = [j for j in range(n) if degree[j] == 1]
+    if len(last_two) == 2:
+        G.add_edge(last_two[0], last_two[1])
+
+    return G
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -2296,6 +2511,12 @@ __all__ = [
     "adjacency_spectrum",
     "algebraic_connectivity",
     "fiedler_vector",
+    "incidence_matrix",
+    "karate_club_graph",
+    "florentine_families_graph",
+    "caveman_graph",
+    "connected_caveman_graph",
+    "random_tree",
     # Algorithms — graph operators
     "union",
     "intersection",
