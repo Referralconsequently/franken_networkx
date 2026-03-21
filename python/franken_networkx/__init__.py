@@ -1181,6 +1181,194 @@ def stochastic_graph(G, copy=True, weight='weight'):
     return H
 
 
+# ---------------------------------------------------------------------------
+# Graph structural algorithms — pure Python over Rust primitives
+# ---------------------------------------------------------------------------
+
+
+def ego_graph(G, n, radius=1, center=True, undirected=False):
+    """Return the ego graph of node *n* within *radius* hops.
+
+    Parameters
+    ----------
+    G : Graph or DiGraph
+    n : node
+        Center node.
+    radius : int, optional
+        Maximum distance from *n*. Default 1.
+    center : bool, optional
+        If True (default), include *n* in the subgraph.
+    undirected : bool, optional
+        If True, use undirected distances even for directed graphs.
+    """
+    nodes = {n} if center else set()
+    frontier = {n}
+    for _ in range(radius):
+        next_frontier = set()
+        for node in frontier:
+            for nbr in G.neighbors(node):
+                if nbr not in nodes and nbr not in frontier:
+                    next_frontier.add(nbr)
+        nodes.update(frontier)
+        nodes.update(next_frontier)
+        frontier = next_frontier
+        if not frontier:
+            break
+    if not center:
+        nodes.discard(n)
+    return G.subgraph(nodes)
+
+
+def k_core(G, k=None, core_number=None):
+    """Return the k-core of *G* (maximal subgraph with minimum degree >= k).
+
+    Parameters
+    ----------
+    G : Graph
+    k : int, optional
+        Core number. Default is the maximum core number.
+    core_number : dict, optional
+        Precomputed core numbers. If None, computed automatically.
+    """
+    if core_number is None:
+        from franken_networkx._fnx import core_number as compute_core_number
+        core_number = compute_core_number(G)
+    if k is None:
+        k = max(core_number.values()) if core_number else 0
+    nodes = [n for n, c in core_number.items() if c >= k]
+    return G.subgraph(nodes)
+
+
+def k_shell(G, k=None, core_number=None):
+    """Return the k-shell of *G* (nodes with core number exactly k)."""
+    if core_number is None:
+        from franken_networkx._fnx import core_number as compute_core_number
+        core_number = compute_core_number(G)
+    if k is None:
+        k = max(core_number.values()) if core_number else 0
+    nodes = [n for n, c in core_number.items() if c == k]
+    return G.subgraph(nodes)
+
+
+def k_crust(G, k=None, core_number=None):
+    """Return the k-crust of *G* (nodes with core number <= k)."""
+    if core_number is None:
+        from franken_networkx._fnx import core_number as compute_core_number
+        core_number = compute_core_number(G)
+    if k is None:
+        k = max(core_number.values()) if core_number else 0
+    nodes = [n for n, c in core_number.items() if c <= k]
+    return G.subgraph(nodes)
+
+
+def k_corona(G, k, core_number=None):
+    """Return the k-corona of *G* (k-core nodes with exactly k neighbors in k-core)."""
+    if core_number is None:
+        from franken_networkx._fnx import core_number as compute_core_number
+        core_number = compute_core_number(G)
+    core_nodes = {n for n, c in core_number.items() if c >= k}
+    corona_nodes = []
+    for n in core_nodes:
+        if core_number[n] == k:
+            nbrs_in_core = sum(1 for nb in G.neighbors(n) if nb in core_nodes)
+            if nbrs_in_core == k:
+                corona_nodes.append(n)
+    return G.subgraph(corona_nodes)
+
+
+def line_graph(G):
+    """Return the line graph of *G*.
+
+    The line graph L(G) has a node for each edge in G. Two nodes in L(G)
+    are adjacent iff the corresponding edges in G share an endpoint.
+    """
+    L = Graph()
+    edges = list(G.edges())
+
+    for e in edges:
+        L.add_node(e)
+
+    for i in range(len(edges)):
+        for j in range(i + 1, len(edges)):
+            u1, v1 = edges[i]
+            u2, v2 = edges[j]
+            if u1 == u2 or u1 == v2 or v1 == u2 or v1 == v2:
+                L.add_edge(edges[i], edges[j])
+
+    return L
+
+
+def power(G, k):
+    """Return the k-th power of *G*.
+
+    The k-th power G^k has the same nodes as G. Two nodes u, v are
+    adjacent in G^k iff their shortest path distance in G is <= k.
+    """
+    H = G.__class__()
+    for n in G.nodes():
+        H.add_node(n)
+
+    nodes = list(G.nodes())
+    for u in nodes:
+        # BFS to find all nodes within distance k
+        visited = {u: 0}
+        frontier = [u]
+        for dist in range(1, k + 1):
+            next_frontier = []
+            for node in frontier:
+                for nbr in G.neighbors(node):
+                    if nbr not in visited:
+                        visited[nbr] = dist
+                        next_frontier.append(nbr)
+                        if nbr != u:
+                            H.add_edge(u, nbr)
+            frontier = next_frontier
+            if not frontier:
+                break
+
+    return H
+
+
+def disjoint_union(G, H):
+    """Return the disjoint union of *G* and *H*.
+
+    Nodes are relabeled to avoid collisions: G's nodes become ``(0, n)``
+    and H's nodes become ``(1, n)``.
+    """
+    result = Graph()
+    for n in G.nodes():
+        result.add_node((0, n))
+    for n in H.nodes():
+        result.add_node((1, n))
+    for u, v in G.edges():
+        result.add_edge((0, u), (0, v))
+    for u, v in H.edges():
+        result.add_edge((1, u), (1, v))
+    return result
+
+
+def compose_all(graphs):
+    """Return the composition of all graphs in the iterable."""
+    graphs = list(graphs)
+    if not graphs:
+        return Graph()
+    result = graphs[0].copy()
+    for g in graphs[1:]:
+        result = compose(result, g)
+    return result
+
+
+def union_all(graphs):
+    """Return the union of all graphs in the iterable."""
+    graphs = list(graphs)
+    if not graphs:
+        return Graph()
+    result = graphs[0].copy()
+    for g in graphs[1:]:
+        result = union(result, g)
+    return result
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -1961,6 +2149,16 @@ __all__ = [
     "local_bridges",
     "minimum_edge_cut",
     "stochastic_graph",
+    "ego_graph",
+    "k_core",
+    "k_shell",
+    "k_crust",
+    "k_corona",
+    "line_graph",
+    "power",
+    "disjoint_union",
+    "compose_all",
+    "union_all",
     # Algorithms — graph operators
     "union",
     "intersection",
