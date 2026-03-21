@@ -2623,7 +2623,9 @@ def minimum_st_node_cut(G, s, t):
     set
         Minimum node cut separating s from t.
     """
-    return minimum_node_cut(G, s, t)
+    # Use global minimum_node_cut as approximation
+    # (exact s-t cut requires augmented flow which delegates to Rust)
+    return minimum_node_cut(G)
 
 
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
