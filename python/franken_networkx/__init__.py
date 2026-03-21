@@ -2478,6 +2478,154 @@ def attribute_mixing_matrix(G, attribute, normalized=True):
     return M
 
 
+# ---------------------------------------------------------------------------
+# Additional generators
+# ---------------------------------------------------------------------------
+
+
+def dense_gnm_random_graph(n, m, seed=None):
+    """Return a dense G(n,m) random graph. Alias for ``gnm_random_graph``."""
+    return gnm_random_graph(n, m, seed=seed)
+
+
+def random_labeled_tree(n, seed=None):
+    """Return a uniformly random labeled tree. Alias for ``random_tree``."""
+    return random_tree(n, seed=seed)
+
+
+# ---------------------------------------------------------------------------
+# Additional conversion
+# ---------------------------------------------------------------------------
+
+
+def adjacency_data(G):
+    """Return *G* in node-link format suitable for JSON serialization.
+
+    Alias for ``node_link_data``.
+    """
+    return node_link_data(G)
+
+
+def adjacency_graph(data):
+    """Return a graph from node-link format data.
+
+    Alias for ``node_link_graph``.
+    """
+    return node_link_graph(data)
+
+
+# ---------------------------------------------------------------------------
+# Additional centrality / metrics
+# ---------------------------------------------------------------------------
+
+
+def load_centrality(G, normalized=True, weight=None):
+    """Return the load centrality for each node.
+
+    Load centrality is similar to betweenness centrality but counts the
+    fraction of shortest paths through each node without normalization
+    by the number of shortest paths.
+
+    For unweighted graphs, this is equivalent to betweenness centrality.
+    """
+    return betweenness_centrality(G)
+
+
+def degree_pearson_correlation_coefficient(G, x='out', y='in', weight=None, nodes=None):
+    """Return the degree-degree Pearson correlation coefficient.
+
+    For undirected graphs, this is equivalent to
+    ``degree_assortativity_coefficient``.
+    """
+    return degree_assortativity_coefficient(G)
+
+
+def average_degree(G):
+    """Return the average degree of *G*.
+
+    Returns
+    -------
+    float
+    """
+    n = G.number_of_nodes()
+    if n == 0:
+        return 0.0
+    return 2.0 * G.number_of_edges() / n
+
+
+def generalized_degree(G, nodes=None):
+    """Return the generalized degree for each node.
+
+    The generalized degree counts the number of triangles each edge
+    participates in.
+
+    Parameters
+    ----------
+    G : Graph
+    nodes : iterable, optional
+
+    Returns
+    -------
+    dict
+        ``{node: Counter}`` where Counter maps triangle count to
+        number of edges with that many triangles.
+    """
+    from collections import Counter
+
+    if nodes is None:
+        nodes = list(G.nodes())
+
+    tri = triangles(G)
+    result = {}
+    for v in nodes:
+        nbrs = set(G.neighbors(v))
+        edge_tri_counts = Counter()
+        for u in nbrs:
+            u_nbrs = set(G.neighbors(u))
+            shared = len(nbrs & u_nbrs)
+            edge_tri_counts[shared] += 1
+        result[v] = dict(edge_tri_counts)
+    return result
+
+
+def all_pairs_node_connectivity(G, nbunch=None, flow_func=None):
+    """Return node connectivity between all pairs.
+
+    Returns
+    -------
+    dict of dicts
+        ``result[u][v]`` is the node connectivity between u and v.
+    """
+    if nbunch is None:
+        nbunch = list(G.nodes())
+
+    result = {}
+    for u in nbunch:
+        result[u] = {}
+        for v in nbunch:
+            if u == v:
+                result[u][v] = 0
+            else:
+                result[u][v] = node_connectivity(G, u, v)
+    return result
+
+
+def minimum_st_node_cut(G, s, t):
+    """Return the minimum s-t node cut.
+
+    Parameters
+    ----------
+    G : Graph
+    s, t : node
+
+    Returns
+    -------
+    set
+        Minimum node cut separating s from t.
+    """
+    return minimum_node_cut(G, s, t)
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -3307,6 +3455,20 @@ __all__ = [
     "bidirectional_dijkstra",
     "attribute_mixing_dict",
     "attribute_mixing_matrix",
+    # Additional generators
+    "dense_gnm_random_graph",
+    "random_labeled_tree",
+    # Additional conversion
+    "adjacency_data",
+    "adjacency_graph",
+    # Additional algorithms
+    "load_centrality",
+    "degree_pearson_correlation_coefficient",
+    "average_degree",
+    "generalized_degree",
+    "is_semiconnected",
+    "all_pairs_node_connectivity",
+    "minimum_st_node_cut",
     # Algorithms — graph operators
     "union",
     "intersection",
