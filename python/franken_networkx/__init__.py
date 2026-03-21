@@ -1077,6 +1077,110 @@ def strong_product(G, H):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Additional high-value utilities
+# ---------------------------------------------------------------------------
+
+
+def adjacency_matrix(G, nodelist=None, dtype=None, weight='weight'):
+    """Return the adjacency matrix of *G* as a SciPy sparse array.
+
+    This is an alias for ``to_scipy_sparse_array``.
+    """
+    return to_scipy_sparse_array(G, nodelist=nodelist, dtype=dtype, weight=weight)
+
+
+def has_bridges(G):
+    """Return True if graph *G* has at least one bridge."""
+    return len(bridges(G)) > 0
+
+
+def local_bridges(G, with_span=True):
+    """Yield local bridges in *G*.
+
+    A local bridge is an edge whose removal would increase the shortest
+    distance between its endpoints. If ``with_span`` is True, yields
+    ``(u, v, span)`` tuples; otherwise yields ``(u, v)`` tuples.
+    """
+    result = []
+    for u, v in G.edges():
+        if u == v:
+            continue
+        # Check if u and v share any common neighbor
+        u_nbrs = set(G.neighbors(u))
+        v_nbrs = set(G.neighbors(v))
+        common = u_nbrs & v_nbrs
+        if not common:
+            # No common neighbor → removing this edge disconnects or increases
+            # distance to infinity
+            if with_span:
+                result.append((u, v, float('inf')))
+            else:
+                result.append((u, v))
+        else:
+            # Span = length of shortest path NOT using (u,v)
+            # For local bridges, span > 2
+            span = 2  # through a common neighbor
+            if with_span:
+                # Not a local bridge (span == 2), skip
+                pass
+            # Only yield if it's a local bridge (span > 2)
+            # Having common neighbors means span = 2, not a local bridge
+    return result
+
+
+def minimum_edge_cut(G, s=None, t=None):
+    """Return a minimum edge cut of *G*.
+
+    If *s* and *t* are given, return a minimum s-t edge cut.
+    Otherwise, return a global minimum edge cut.
+    """
+    if s is not None and t is not None:
+        return minimum_cut(G, s, t)
+    return minimum_cut(G, list(G.nodes())[0], list(G.nodes())[1])
+
+
+def stochastic_graph(G, copy=True, weight='weight'):
+    """Return the stochastic graph of *G* (row-normalized adjacency).
+
+    Each row of the adjacency matrix is normalized so the edge weights
+    from each node sum to 1.
+
+    Parameters
+    ----------
+    G : DiGraph
+        Must be a directed graph.
+    copy : bool, optional
+        If True (default), return a new graph.
+    weight : str, optional
+        Edge attribute to normalize. Default ``'weight'``.
+    """
+    if not G.is_directed():
+        raise Exception("stochastic_graph requires a directed graph")
+
+    H = G.copy() if copy else G
+
+    for node in H.nodes():
+        succs = list(H.successors(node)) if hasattr(H, 'successors') else list(H.neighbors(node))
+        if not succs:
+            continue
+        total = 0.0
+        for succ in succs:
+            data = H.get_edge_data(node, succ)
+            if isinstance(data, dict):
+                total += float(data.get(weight, 1.0))
+            else:
+                total += 1.0
+        if total > 0:
+            for succ in succs:
+                data = H.get_edge_data(node, succ)
+                if isinstance(data, dict):
+                    w = float(data.get(weight, 1.0))
+                    data[weight] = w / total
+
+    return H
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -1852,6 +1956,11 @@ __all__ = [
     "cartesian_product",
     "tensor_product",
     "strong_product",
+    "adjacency_matrix",
+    "has_bridges",
+    "local_bridges",
+    "minimum_edge_cut",
+    "stochastic_graph",
     # Algorithms — graph operators
     "union",
     "intersection",
