@@ -688,6 +688,103 @@ def hopcroft_karp_matching(G, top_nodes=None):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Community detection — additional algorithms
+# ---------------------------------------------------------------------------
+
+
+def girvan_newman(G, most_valuable_edge=None):
+    """Find communities by iteratively removing the most-connected edge.
+
+    Yields partitions of the graph as a generator of tuples of sets.
+    Each partition has one more community than the previous.
+
+    Parameters
+    ----------
+    G : Graph
+        The input graph.
+    most_valuable_edge : callable, optional
+        Function that takes a graph and returns the edge to remove.
+        Default uses the edge with highest betweenness centrality.
+
+    Yields
+    ------
+    tuple of frozensets
+        Each yield is a partition of the graph into communities.
+    """
+    if G.number_of_nodes() == 0:
+        yield ()
+        return
+
+    H = G.copy()
+
+    if most_valuable_edge is None:
+        def most_valuable_edge(graph):
+            ebc = edge_betweenness_centrality(graph)
+            return max(ebc, key=ebc.get)
+
+    prev_num_components = number_connected_components(H)
+
+    while H.number_of_edges() > 0:
+        edge = most_valuable_edge(H)
+        H.remove_edge(*edge)
+        new_num = number_connected_components(H)
+        if new_num > prev_num_components:
+            components = connected_components(H)
+            yield tuple(frozenset(c) for c in components)
+            prev_num_components = new_num
+
+
+def k_clique_communities(G, k):
+    """Find k-clique communities using the clique percolation method.
+
+    A k-clique community is the union of all cliques of size k that can
+    be reached through adjacent (sharing k-1 nodes) k-cliques.
+
+    Parameters
+    ----------
+    G : Graph
+        The input graph.
+    k : int
+        Size of the smallest clique.
+
+    Yields
+    ------
+    frozenset
+        Each yielded set is a k-clique community.
+    """
+    if k < 2:
+        raise ValueError("k must be >= 2")
+
+    cliques = [frozenset(c) for c in find_cliques(G) if len(c) >= k]
+
+    # Build adjacency between k-cliques (share k-1 nodes)
+    clique_graph = {}
+    for i, c1 in enumerate(cliques):
+        clique_graph[i] = set()
+        for j, c2 in enumerate(cliques):
+            if i != j and len(c1 & c2) >= k - 1:
+                clique_graph[i].add(j)
+
+    # Find connected components in the clique graph
+    visited = set()
+    for start in range(len(cliques)):
+        if start in visited:
+            continue
+        component = set()
+        queue = [start]
+        while queue:
+            node = queue.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            component.add(node)
+            queue.extend(clique_graph.get(node, set()) - visited)
+        # Union all cliques in this component
+        community = frozenset().union(*(cliques[i] for i in component))
+        yield community
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -1443,6 +1540,8 @@ __all__ = [
     "modularity",
     "label_propagation_communities",
     "greedy_modularity_communities",
+    "girvan_newman",
+    "k_clique_communities",
     # Algorithms — graph operators
     "union",
     "intersection",
