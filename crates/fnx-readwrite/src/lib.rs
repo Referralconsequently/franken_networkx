@@ -1262,6 +1262,282 @@ impl EdgeListEngine {
         Ok(())
     }
 
+    // -----------------------------------------------------------------------
+    // GML (Graph Modelling Language)
+    // -----------------------------------------------------------------------
+
+    /// Write an undirected graph to GML format.
+    pub fn write_gml(&mut self, graph: &Graph) -> Result<String, ReadWriteError> {
+        self.write_gml_impl(graph, false)
+    }
+
+    /// Write a directed graph to GML format.
+    pub fn write_digraph_gml(&mut self, graph: &DiGraph) -> Result<String, ReadWriteError> {
+        self.write_gml_impl(graph, true)
+    }
+
+    fn write_gml_impl(
+        &mut self,
+        graph: &dyn GraphLikeRead,
+        directed: bool,
+    ) -> Result<String, ReadWriteError> {
+        let mut out = String::new();
+        out.push_str("graph [\n");
+        out.push_str(&format!(
+            "  directed {}\n",
+            if directed { 1 } else { 0 }
+        ));
+
+        // Build node-name → id map (use integer label if parseable, otherwise assign sequentially)
+        let mut label_to_id: BTreeMap<String, i64> = BTreeMap::new();
+        let mut next_id: i64 = 0;
+        for node_name in graph.nodes_ordered() {
+            let id = node_name.parse::<i64>().unwrap_or_else(|_| {
+                let assigned = next_id;
+                next_id += 1;
+                assigned
+            });
+            // Ensure sequential IDs don't collide with parsed integer IDs
+            if node_name.parse::<i64>().is_ok() {
+                next_id = next_id.max(id + 1);
+            }
+            label_to_id.insert(node_name.to_owned(), id);
+        }
+
+        for node_name in graph.nodes_ordered() {
+            out.push_str("  node [\n");
+            let id = label_to_id[node_name];
+            out.push_str(&format!("    id {id}\n"));
+            out.push_str(&format!("    label \"{}\"\n", gml_escape(node_name)));
+            if let Some(attrs) = graph.node_attrs(node_name) {
+                for (key, value) in attrs {
+                    out.push_str(&format!(
+                        "    {} {}\n",
+                        key,
+                        gml_value_str(value)
+                    ));
+                }
+            }
+            out.push_str("  ]\n");
+        }
+
+        for edge in graph.edges_ordered() {
+            out.push_str("  edge [\n");
+            let src_id = label_to_id.get(&edge.left).copied().unwrap_or(0);
+            let tgt_id = label_to_id.get(&edge.right).copied().unwrap_or(0);
+            out.push_str(&format!("    source {src_id}\n"));
+            out.push_str(&format!("    target {tgt_id}\n"));
+            for (key, value) in &edge.attrs {
+                out.push_str(&format!(
+                    "    {} {}\n",
+                    key,
+                    gml_value_str(value)
+                ));
+            }
+            out.push_str("  ]\n");
+        }
+
+        out.push_str("]\n");
+
+        self.record(
+            "write_gml",
+            DecisionAction::Allow,
+            "gml write completed",
+            0.04,
+        );
+        Ok(out)
+    }
+
+    /// Read a GML string into an undirected graph.
+    pub fn read_gml(&mut self, input: &str) -> Result<ReadWriteReport, ReadWriteError> {
+        let mut graph = Graph::new(self.mode);
+        let mut warnings = Vec::new();
+        let is_directed = self.read_gml_into(&mut graph, &mut warnings, input)?;
+        if is_directed {
+            warnings.push("GML declares directed=1 but read into undirected Graph".to_owned());
+        }
+        self.record("read_gml", DecisionAction::Allow, "gml parse completed", 0.04);
+        Ok(ReadWriteReport { graph, warnings })
+    }
+
+    /// Read a GML string into a directed graph.
+    pub fn read_digraph_gml(
+        &mut self,
+        input: &str,
+    ) -> Result<DiReadWriteReport, ReadWriteError> {
+        let mut graph = DiGraph::new(self.mode);
+        let mut warnings = Vec::new();
+        let _ = self.read_gml_into(&mut graph, &mut warnings, input)?;
+        self.record("read_gml", DecisionAction::Allow, "digraph gml parse completed", 0.04);
+        Ok(DiReadWriteReport { graph, warnings })
+    }
+
+    /// Parse GML into a generic graph. Returns whether directed=1 was declared.
+    fn read_gml_into<G>(
+        &mut self,
+        graph: &mut G,
+        warnings: &mut Vec<String>,
+        input: &str,
+    ) -> Result<bool, ReadWriteError>
+    where
+        G: GraphLike,
+    {
+        let mut directed = false;
+        let mut id_to_label: BTreeMap<i64, String> = BTreeMap::new();
+        let mut node_attrs_pending: BTreeMap<i64, AttrMap> = BTreeMap::new();
+
+        // Simple GML token parser
+        let tokens = gml_tokenize(input);
+        let mut pos = 0;
+
+        // Skip to "graph ["
+        while pos < tokens.len() {
+            if tokens[pos] == "graph" && pos + 1 < tokens.len() && tokens[pos + 1] == "[" {
+                pos += 2;
+                break;
+            }
+            pos += 1;
+        }
+
+        while pos < tokens.len() {
+            let token = &tokens[pos];
+            match token.as_str() {
+                "directed" if pos + 1 < tokens.len() => {
+                    directed = tokens[pos + 1] == "1";
+                    pos += 2;
+                }
+                "node" if pos + 1 < tokens.len() && tokens[pos + 1] == "[" => {
+                    pos += 2;
+                    let (id, label, attrs, new_pos) = self.parse_gml_node(&tokens, pos, warnings)?;
+                    let node_label = label.unwrap_or_else(|| id.to_string());
+                    id_to_label.insert(id, node_label.clone());
+                    let _ = graph.add_node(node_label);
+                    if !attrs.is_empty() {
+                        node_attrs_pending.insert(id, attrs);
+                    }
+                    pos = new_pos;
+                }
+                "edge" if pos + 1 < tokens.len() && tokens[pos + 1] == "[" => {
+                    pos += 2;
+                    let (source, target, attrs, new_pos) =
+                        self.parse_gml_edge(&tokens, pos, warnings)?;
+                    let source_label = id_to_label
+                        .get(&source)
+                        .cloned()
+                        .unwrap_or_else(|| source.to_string());
+                    let target_label = id_to_label
+                        .get(&target)
+                        .cloned()
+                        .unwrap_or_else(|| target.to_string());
+                    // Ensure nodes exist
+                    if !id_to_label.contains_key(&source) {
+                        let _ = graph.add_node(source_label.clone());
+                        id_to_label.insert(source, source_label.clone());
+                    }
+                    if !id_to_label.contains_key(&target) {
+                        let _ = graph.add_node(target_label.clone());
+                        id_to_label.insert(target, target_label.clone());
+                    }
+                    let _ = graph.add_edge_with_attrs(source_label, target_label, attrs);
+                    pos = new_pos;
+                }
+                "]" => break,
+                _ => {
+                    pos += 1;
+                }
+            }
+        }
+
+        // Apply node attributes
+        for (id, attrs) in node_attrs_pending {
+            if let Some(label) = id_to_label.get(&id) {
+                graph.add_node_with_attrs(label.clone(), attrs);
+            }
+        }
+
+        Ok(directed)
+    }
+
+    fn parse_gml_node(
+        &self,
+        tokens: &[String],
+        mut pos: usize,
+        _warnings: &mut Vec<String>,
+    ) -> Result<(i64, Option<String>, AttrMap, usize), ReadWriteError> {
+        let mut id: i64 = 0;
+        let mut label: Option<String> = None;
+        let mut attrs = AttrMap::new();
+
+        while pos < tokens.len() {
+            match tokens[pos].as_str() {
+                "]" => {
+                    pos += 1;
+                    return Ok((id, label, attrs, pos));
+                }
+                "id" if pos + 1 < tokens.len() => {
+                    id = tokens[pos + 1].parse::<i64>().unwrap_or(0);
+                    pos += 2;
+                }
+                "label" if pos + 1 < tokens.len() => {
+                    label = Some(gml_unescape(&tokens[pos + 1]));
+                    pos += 2;
+                }
+                key => {
+                    if pos + 1 < tokens.len() && tokens[pos + 1] != "[" && tokens[pos + 1] != "]" {
+                        attrs.insert(
+                            key.to_owned(),
+                            gml_unescape(&tokens[pos + 1]),
+                        );
+                        pos += 2;
+                    } else {
+                        pos += 1;
+                    }
+                }
+            }
+        }
+        Ok((id, label, attrs, pos))
+    }
+
+    fn parse_gml_edge(
+        &self,
+        tokens: &[String],
+        mut pos: usize,
+        _warnings: &mut Vec<String>,
+    ) -> Result<(i64, i64, AttrMap, usize), ReadWriteError> {
+        let mut source: i64 = 0;
+        let mut target: i64 = 0;
+        let mut attrs = AttrMap::new();
+
+        while pos < tokens.len() {
+            match tokens[pos].as_str() {
+                "]" => {
+                    pos += 1;
+                    return Ok((source, target, attrs, pos));
+                }
+                "source" if pos + 1 < tokens.len() => {
+                    source = tokens[pos + 1].parse::<i64>().unwrap_or(0);
+                    pos += 2;
+                }
+                "target" if pos + 1 < tokens.len() => {
+                    target = tokens[pos + 1].parse::<i64>().unwrap_or(0);
+                    pos += 2;
+                }
+                key => {
+                    if pos + 1 < tokens.len() && tokens[pos + 1] != "[" && tokens[pos + 1] != "]" {
+                        attrs.insert(
+                            key.to_owned(),
+                            gml_unescape(&tokens[pos + 1]),
+                        );
+                        pos += 2;
+                    } else {
+                        pos += 1;
+                    }
+                }
+            }
+        }
+        Ok((source, target, attrs, pos))
+    }
+
     fn record(
         &mut self,
         operation: &'static str,
@@ -1287,6 +1563,94 @@ impl EdgeListEngine {
             }],
         });
     }
+}
+
+// ---------------------------------------------------------------------------
+// GML helpers
+// ---------------------------------------------------------------------------
+
+/// Tokenize a GML string into a flat list of tokens.
+/// Handles quoted strings, brackets, and whitespace-separated values.
+fn gml_tokenize(input: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut chars = input.chars().peekable();
+
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            ' ' | '\t' | '\n' | '\r' => {
+                chars.next();
+            }
+            '#' => {
+                // Skip comment to end of line
+                while let Some(&c) = chars.peek() {
+                    chars.next();
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            }
+            '[' | ']' => {
+                tokens.push(ch.to_string());
+                chars.next();
+            }
+            '"' => {
+                chars.next(); // consume opening quote
+                let mut s = String::new();
+                while let Some(&c) = chars.peek() {
+                    chars.next();
+                    if c == '"' {
+                        break;
+                    }
+                    if c == '\\' {
+                        if let Some(&escaped) = chars.peek() {
+                            chars.next();
+                            s.push(escaped);
+                        }
+                    } else {
+                        s.push(c);
+                    }
+                }
+                tokens.push(s);
+            }
+            _ => {
+                let mut word = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_whitespace() || c == '[' || c == ']' || c == '"' {
+                        break;
+                    }
+                    word.push(c);
+                    chars.next();
+                }
+                if !word.is_empty() {
+                    tokens.push(word);
+                }
+            }
+        }
+    }
+
+    tokens
+}
+
+/// Escape a string for GML output (wrap in quotes).
+fn gml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Format a value for GML: try numeric, otherwise quote it.
+fn gml_value_str(value: &str) -> String {
+    if value.parse::<i64>().is_ok() {
+        value.to_owned()
+    } else if value.parse::<f64>().is_ok() {
+        value.to_owned()
+    } else {
+        format!("\"{}\"", gml_escape(value))
+    }
+}
+
+/// Remove surrounding quotes from a GML token.
+fn gml_unescape(s: &str) -> String {
+    let trimmed = s.trim_matches('"');
+    trimmed.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 trait GraphLikeRead {

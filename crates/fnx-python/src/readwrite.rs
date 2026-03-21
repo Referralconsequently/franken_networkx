@@ -367,6 +367,63 @@ fn write_graphml(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) 
 }
 
 // ---------------------------------------------------------------------------
+// GML
+// ---------------------------------------------------------------------------
+
+#[pyfunction]
+#[pyo3(signature = (path,))]
+fn read_gml(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let input = read_input(py, path)?;
+    let mut engine = EdgeListEngine::hardened();
+
+    // Auto-detect directed from content
+    if input.contains("directed 1") {
+        let report = py
+            .allow_threads(|| engine.read_digraph_gml(&input))
+            .map_err(rw_error_to_py)?;
+        Ok(di_report_to_pydigraph(py, report)?.into_pyobject(py)?.into_any().unbind())
+    } else {
+        let report = py
+            .allow_threads(|| engine.read_gml(&input))
+            .map_err(rw_error_to_py)?;
+        Ok(report_to_pygraph(py, report)?.into_pyobject(py)?.into_any().unbind())
+    }
+}
+
+#[pyfunction]
+#[pyo3(signature = (g, path))]
+fn write_gml(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
+    let gr = extract_graph(g)?;
+    let mut engine = EdgeListEngine::hardened();
+    let content = match &gr {
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| engine.write_gml(inner))
+                .map_err(rw_error_to_py)?
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| engine.write_digraph_gml(inner))
+                .map_err(rw_error_to_py)?
+        }
+        _ => {
+            if gr.is_directed() {
+                let inner = gr.digraph().ok_or_else(|| {
+                    pyo3::exceptions::PyTypeError::new_err("expected directed graph")
+                })?;
+                py.allow_threads(|| engine.write_digraph_gml(inner))
+                    .map_err(rw_error_to_py)?
+            } else {
+                let inner = gr.undirected();
+                py.allow_threads(|| engine.write_gml(inner))
+                    .map_err(rw_error_to_py)?
+            }
+        }
+    };
+    write_output(py, path, &content)
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -379,5 +436,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(node_link_graph, m)?)?;
     m.add_function(wrap_pyfunction!(read_graphml, m)?)?;
     m.add_function(wrap_pyfunction!(write_graphml, m)?)?;
+    m.add_function(wrap_pyfunction!(read_gml, m)?)?;
+    m.add_function(wrap_pyfunction!(write_gml, m)?)?;
     Ok(())
 }

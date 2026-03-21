@@ -565,6 +565,8 @@ from franken_networkx._fnx import (
     write_adjlist,
     write_edgelist,
     write_graphml,
+    read_gml,
+    write_gml,
 )
 
 
@@ -1514,6 +1516,8 @@ __all__ = [
     "write_adjlist",
     "write_edgelist",
     "write_graphml",
+    "read_gml",
+    "write_gml",
     # Drawing
     "draw",
     "draw_circular",
