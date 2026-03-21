@@ -1424,8 +1424,14 @@ mod tests {
 
         assert_eq!(g.edge_count(), 1);
         let attrs = g.edge_attrs("a", "b").unwrap();
-        assert_eq!(attrs.get("weight"), Some(&CgseValue::String("1".to_owned())));
-        assert_eq!(attrs.get("color"), Some(&CgseValue::String("red".to_owned())));
+        assert_eq!(
+            attrs.get("weight"),
+            Some(&CgseValue::String("1".to_owned()))
+        );
+        assert_eq!(
+            attrs.get("color"),
+            Some(&CgseValue::String("red".to_owned()))
+        );
     }
 
     #[test]

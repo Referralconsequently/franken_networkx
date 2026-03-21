@@ -242,7 +242,10 @@ fn bench_max_flow(c: &mut Criterion) {
             BenchmarkId::new("parallel_paths", &label),
             &label,
             |b, _| {
-                b.iter(|| max_flow_edmonds_karp(&g, "s", "t", "capacity").expect("flow algorithm should succeed"));
+                b.iter(|| {
+                    max_flow_edmonds_karp(&g, "s", "t", "capacity")
+                        .expect("flow algorithm should succeed")
+                });
             },
         );
     }
@@ -258,7 +261,10 @@ fn bench_minimum_cut(c: &mut Criterion) {
             BenchmarkId::new("parallel_paths", &label),
             &label,
             |b, _| {
-                b.iter(|| minimum_cut_edmonds_karp(&g, "s", "t", "capacity").expect("flow algorithm should succeed"));
+                b.iter(|| {
+                    minimum_cut_edmonds_karp(&g, "s", "t", "capacity")
+                        .expect("flow algorithm should succeed")
+                });
             },
         );
     }

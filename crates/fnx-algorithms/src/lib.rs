@@ -2776,7 +2776,6 @@ pub fn min_weight_matching(graph: &Graph, weight_attr: &str) -> WeightedMatching
     }
 }
 
-#[must_use]
 pub fn max_flow_edmonds_karp(
     graph: &Graph,
     source: &str,
@@ -2791,7 +2790,6 @@ pub fn max_flow_edmonds_karp(
     })
 }
 
-#[must_use]
 pub fn max_flow_edmonds_karp_directed(
     digraph: &DiGraph,
     source: &str,
@@ -2806,7 +2804,6 @@ pub fn max_flow_edmonds_karp_directed(
     })
 }
 
-#[must_use]
 pub fn minimum_cut_edmonds_karp(
     graph: &Graph,
     source: &str,
@@ -2816,7 +2813,6 @@ pub fn minimum_cut_edmonds_karp(
     compute_minimum_cut_edmonds_karp(graph, source, sink, capacity_attr)
 }
 
-#[must_use]
 pub fn minimum_cut_edmonds_karp_directed(
     digraph: &DiGraph,
     source: &str,
@@ -2826,7 +2822,6 @@ pub fn minimum_cut_edmonds_karp_directed(
     compute_minimum_cut_edmonds_karp(digraph, source, sink, capacity_attr)
 }
 
-#[must_use]
 pub fn minimum_st_edge_cut_edmonds_karp(
     graph: &Graph,
     source: &str,
@@ -2877,7 +2872,6 @@ pub fn minimum_st_edge_cut_edmonds_karp(
     })
 }
 
-#[must_use]
 pub fn edge_connectivity_edmonds_karp(
     graph: &Graph,
     source: &str,
@@ -2996,8 +2990,7 @@ pub fn global_edge_connectivity_edmonds_karp_directed(
 
     for (index, &source) in nodes.iter().enumerate() {
         let target = nodes.get(index + 1).copied().unwrap_or(nodes[0]);
-        if let Ok(cut) = minimum_cut_edmonds_karp_directed(digraph, source, target, capacity_attr)
-        {
+        if let Ok(cut) = minimum_cut_edmonds_karp_directed(digraph, source, target, capacity_attr) {
             best_value = best_value.min(cut.value);
             nodes_touched += cut.witness.nodes_touched;
             edges_scanned += cut.witness.edges_scanned;
@@ -19481,7 +19474,8 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let result = max_flow_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let result = max_flow_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((result.value - 5.0).abs() <= 1e-12);
         assert_eq!(
             result.flows,
@@ -19535,8 +19529,10 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let left = max_flow_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
-        let right = max_flow_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let left = max_flow_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
+        let right = max_flow_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((left.value - right.value).abs() <= 1e-12);
         assert_eq!(left.witness, right.witness);
     }
@@ -19568,7 +19564,8 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let result = max_flow_edmonds_karp_directed(&digraph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let result = max_flow_edmonds_karp_directed(&digraph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((result.value - 5.0).abs() <= 1e-12);
         assert_eq!(
             result.flows,
@@ -19613,7 +19610,8 @@ mod tests {
             .add_edge_with_attrs("a", "t", attrs([("capacity", "5")]))
             .expect("edge add should succeed");
 
-        let result = max_flow_edmonds_karp_directed(&digraph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let result = max_flow_edmonds_karp_directed(&digraph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((result.value - 0.0).abs() <= 1e-12);
         assert!(result.flows.is_empty());
     }
@@ -19637,7 +19635,8 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let result = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let result = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((result.value - 5.0).abs() <= 1e-12);
         assert_eq!(
             result.source_partition,
@@ -19666,8 +19665,10 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let left = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
-        let right = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let left = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
+        let right = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert_eq!(left, right);
     }
 
@@ -19690,7 +19691,8 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let result = minimum_cut_edmonds_karp_directed(&digraph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let result = minimum_cut_edmonds_karp_directed(&digraph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((result.value - 5.0).abs() <= 1e-12);
         assert_eq!(
             result.source_partition,
@@ -19727,7 +19729,8 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let result = minimum_st_edge_cut_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let result = minimum_st_edge_cut_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((result.value - 5.0).abs() <= 1e-12);
         assert_eq!(
             result.cut_edges,
@@ -19763,8 +19766,10 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let left = minimum_st_edge_cut_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
-        let right = minimum_st_edge_cut_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let left = minimum_st_edge_cut_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
+        let right = minimum_st_edge_cut_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert_eq!(left, right);
     }
 
@@ -19787,8 +19792,10 @@ mod tests {
             .add_edge_with_attrs("b", "t", attrs([("capacity", "3")]))
             .expect("edge add should succeed");
 
-        let cut = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
-        let connectivity = edge_connectivity_edmonds_karp(&graph, "s", "t", "capacity").expect("flow algorithm should succeed");
+        let cut = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
+        let connectivity = edge_connectivity_edmonds_karp(&graph, "s", "t", "capacity")
+            .expect("flow algorithm should succeed");
         assert!((connectivity.value - cut.value).abs() <= 1e-12);
         assert_eq!(
             connectivity.witness.algorithm,
@@ -20438,11 +20445,7 @@ mod tests {
             ("d", "f", "7"),
         ] {
             forward
-                .add_edge_with_attrs(
-                    left,
-                    right,
-                    single_attr("weight", weight),
-                )
+                .add_edge_with_attrs(left, right, single_attr("weight", weight))
                 .expect("edge add should succeed");
         }
         let _ = forward.add_node("noise");
@@ -20457,11 +20460,7 @@ mod tests {
             ("a", "b", "8"),
         ] {
             reverse
-                .add_edge_with_attrs(
-                    left,
-                    right,
-                    single_attr("weight", weight),
-                )
+                .add_edge_with_attrs(left, right, single_attr("weight", weight))
                 .expect("edge add should succeed");
         }
         let _ = reverse.add_node("noise");
@@ -24893,10 +24892,7 @@ mod tests {
         g.add_edge_with_attrs(
             "a",
             "b",
-            attrs([
-                ("weight", "4.0"),
-                ("partition", "EdgePartition.INCLUDED"),
-            ]),
+            attrs([("weight", "4.0"), ("partition", "EdgePartition.INCLUDED")]),
         )
         .expect("edge add should succeed");
         g.add_edge_with_attrs("b", "c", attrs([("weight", "1.0")]))
@@ -24906,10 +24902,7 @@ mod tests {
         g.add_edge_with_attrs(
             "c",
             "d",
-            attrs([
-                ("weight", "2.0"),
-                ("partition", "EdgePartition.EXCLUDED"),
-            ]),
+            attrs([("weight", "2.0"), ("partition", "EdgePartition.EXCLUDED")]),
         )
         .expect("edge add should succeed");
         g.add_edge_with_attrs("b", "d", attrs([("weight", "5.0")]))
@@ -26563,9 +26556,9 @@ mod tests {
     #[test]
     fn test_floyd_warshall_weighted() {
         let mut g = Graph::strict();
-        let _ = g.add_edge_with_attrs("a", "b", [("weight".to_owned(), "2.0".to_owned())].into());
-        let _ = g.add_edge_with_attrs("b", "c", [("weight".to_owned(), "3.0".to_owned())].into());
-        let _ = g.add_edge_with_attrs("a", "c", [("weight".to_owned(), "10.0".to_owned())].into());
+        let _ = g.add_edge_with_attrs("a", "b", attrs([("weight", "2.0")]));
+        let _ = g.add_edge_with_attrs("b", "c", attrs([("weight", "3.0")]));
+        let _ = g.add_edge_with_attrs("a", "c", attrs([("weight", "10.0")]));
         let dists = floyd_warshall(&g, "weight");
         assert_eq!(dists["a"]["c"], 5.0); // a->b->c
     }

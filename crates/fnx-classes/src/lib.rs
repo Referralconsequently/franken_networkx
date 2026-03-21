@@ -434,10 +434,15 @@ impl Graph {
             return false;
         }
 
-        // 1. Remove node from its neighbors' adjacency lists.
+        // 1. Remove incident edges and clean up neighbors' adjacency lists.
         if let Some(neighbors) = self.adjacency.get(node) {
             let neighbor_names: Vec<String> = neighbors.iter().cloned().collect();
             for neighbor in neighbor_names {
+                // Remove the edge (node, neighbor) from the edges map.
+                // Undirected edges use EdgeKey which is canonicalized.
+                self.edges.shift_remove(&EdgeKeyRef::new(node, &neighbor));
+
+                // Remove node from neighbor's adjacency list.
                 if neighbor != node
                     && let Some(remote_neighbors) = self.adjacency.get_mut(&neighbor)
                 {
@@ -446,11 +451,7 @@ impl Graph {
             }
         }
 
-        // 2. Remove all incident edges from the edges map using retain (O(E)).
-        self.edges
-            .retain(|key, _| key.left != node && key.right != node);
-
-        // 3. Remove node from adjacency and nodes maps.
+        // 2. Remove node from adjacency and nodes maps.
         self.adjacency.shift_remove(node);
         self.nodes.shift_remove(node);
 
@@ -934,10 +935,14 @@ impl MultiGraph {
             return false;
         }
 
-        // 1. Remove node from its neighbors' adjacency lists.
+        // 1. Remove incident edges and clean up neighbors' adjacency lists.
         if let Some(neighbors) = self.adjacency.get(node) {
             let neighbor_names: Vec<String> = neighbors.keys().cloned().collect();
             for neighbor in neighbor_names {
+                let edge_key = EdgeKeyRef::new(node, &neighbor);
+                self.edges.shift_remove(&edge_key);
+                self.next_edge_key.shift_remove(&edge_key);
+
                 if neighbor != node
                     && let Some(remote_neighbors) = self.adjacency.get_mut(&neighbor)
                 {
@@ -946,13 +951,7 @@ impl MultiGraph {
             }
         }
 
-        // 2. Remove all incident edges from edges and next_edge_key maps using retain (O(E)).
-        self.edges
-            .retain(|key, _| key.left != node && key.right != node);
-        self.next_edge_key
-            .retain(|key, _| key.left != node && key.right != node);
-
-        // 3. Remove node from adjacency and nodes maps.
+        // 2. Remove node from adjacency and nodes maps.
         self.adjacency.shift_remove(node);
         self.nodes.shift_remove(node);
         self.revision = self.revision.saturating_add(1);
@@ -1251,8 +1250,14 @@ mod tests {
         let attrs = graph
             .edge_attrs("a", "b")
             .expect("edge attrs should be present");
-        assert_eq!(attrs.get("weight"), Some(&CgseValue::String("1".to_owned())));
-        assert_eq!(attrs.get("color"), Some(&CgseValue::String("blue".to_owned())));
+        assert_eq!(
+            attrs.get("weight"),
+            Some(&CgseValue::String("1".to_owned()))
+        );
+        assert_eq!(
+            attrs.get("color"),
+            Some(&CgseValue::String("blue".to_owned()))
+        );
         assert_eq!(graph.edge_count(), 1);
     }
 

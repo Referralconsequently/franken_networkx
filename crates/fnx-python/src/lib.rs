@@ -84,7 +84,6 @@ pub(crate) fn cgse_value_to_py(py: Python<'_>, val: &CgseValue) -> PyObject {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // PyGraph — the main graph class wrapping fnx_classes::Graph.
 // ---------------------------------------------------------------------------

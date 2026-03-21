@@ -2175,9 +2175,7 @@ pub fn maximum_flow(
                 })
             } else {
                 let inner = gr.undirected();
-                py.allow_threads(move || {
-                    fnx_algorithms::max_flow_edmonds_karp(inner, &s, &t, &cap)
-                })
+                py.allow_threads(move || fnx_algorithms::max_flow_edmonds_karp(inner, &s, &t, &cap))
             }
         }
     };
@@ -2224,11 +2222,9 @@ pub fn maximum_flow_value(
                 .map_err(flow_py_error)
             } else {
                 let inner = gr.undirected();
-                py.allow_threads(move || {
-                    fnx_algorithms::max_flow_edmonds_karp(inner, &s, &t, &cap)
-                })
-                .map(|result| result.value)
-                .map_err(flow_py_error)
+                py.allow_threads(move || fnx_algorithms::max_flow_edmonds_karp(inner, &s, &t, &cap))
+                    .map(|result| result.value)
+                    .map_err(flow_py_error)
             }
         }
     }
