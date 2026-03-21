@@ -2628,6 +2628,195 @@ def minimum_st_node_cut(G, s, t):
     return minimum_node_cut(G)
 
 
+# ---------------------------------------------------------------------------
+# Node/edge contraction
+# ---------------------------------------------------------------------------
+
+
+def contracted_nodes(G, u, v, self_loops=True, copy=True):
+    """Contract nodes *u* and *v* in *G*.
+
+    All edges to/from *v* are redirected to *u*, then *v* is removed.
+
+    Parameters
+    ----------
+    G : Graph
+    u, v : node
+    self_loops : bool, optional
+        If False, remove self-loops created by the contraction.
+    copy : bool, optional
+        If True (default), return a new graph.
+    """
+    H = G.copy() if copy else G
+    # Redirect v's edges to u
+    for nbr in list(H.neighbors(v)):
+        if nbr == v:
+            if self_loops:
+                H.add_edge(u, u)
+        elif nbr != u:
+            H.add_edge(u, nbr)
+        elif self_loops:
+            H.add_edge(u, u)
+    H.remove_node(v)
+    if not self_loops:
+        # Remove any self-loops on u
+        if H.has_edge(u, u):
+            H.remove_edge(u, u)
+    return H
+
+
+def contracted_edge(G, edge, self_loops=True, copy=True):
+    """Contract an edge in *G* by merging its endpoints.
+
+    Parameters
+    ----------
+    G : Graph
+    edge : tuple (u, v)
+    self_loops : bool, optional
+    copy : bool, optional
+    """
+    u, v = edge[:2]
+    return contracted_nodes(G, u, v, self_loops=self_loops, copy=copy)
+
+
+# ---------------------------------------------------------------------------
+# Global type predicates (function form)
+# ---------------------------------------------------------------------------
+
+
+def is_directed(G):
+    """Return True if *G* is a directed graph."""
+    return G.is_directed()
+
+
+# ---------------------------------------------------------------------------
+# Degree sequence generators
+# ---------------------------------------------------------------------------
+
+
+def configuration_model(deg_sequence, seed=None):
+    """Return a random graph with the given degree sequence.
+
+    Uses the configuration model: create stubs and pair them randomly.
+    May produce self-loops and multi-edges (returns a MultiGraph).
+
+    Parameters
+    ----------
+    deg_sequence : list of int
+        Degree sequence (must sum to even number).
+    seed : int or None, optional
+
+    Returns
+    -------
+    MultiGraph
+    """
+    import random as _random
+    rng = _random.Random(seed)
+
+    if sum(deg_sequence) % 2 != 0:
+        raise ValueError("Invalid degree sequence: sum must be even")
+
+    n = len(deg_sequence)
+    G = MultiGraph()
+    for i in range(n):
+        G.add_node(i)
+
+    stubs = []
+    for i, d in enumerate(deg_sequence):
+        stubs.extend([i] * d)
+
+    rng.shuffle(stubs)
+    for i in range(0, len(stubs) - 1, 2):
+        G.add_edge(stubs[i], stubs[i + 1])
+
+    return G
+
+
+def havel_hakimi_graph(deg_sequence):
+    """Return a simple graph with the given degree sequence using
+    the Havel-Hakimi algorithm.
+
+    Parameters
+    ----------
+    deg_sequence : list of int
+
+    Returns
+    -------
+    Graph
+    """
+    seq = sorted(enumerate(deg_sequence), key=lambda x: -x[1])
+    G = Graph()
+    for i in range(len(deg_sequence)):
+        G.add_node(i)
+
+    while seq:
+        seq.sort(key=lambda x: -x[1])
+        if seq[0][1] == 0:
+            break
+        node, degree = seq[0]
+        seq[0] = (node, 0)
+        if degree > len(seq) - 1:
+            raise ValueError("Non-graphical degree sequence")
+        for j in range(1, degree + 1):
+            target, target_deg = seq[j]
+            if target_deg <= 0:
+                raise ValueError("Non-graphical degree sequence")
+            G.add_edge(node, target)
+            seq[j] = (target, target_deg - 1)
+        seq = [(n, d) for n, d in seq if d > 0]
+
+    return G
+
+
+def degree_sequence_tree(deg_sequence):
+    """Return a tree with the given degree sequence, if possible.
+
+    Parameters
+    ----------
+    deg_sequence : list of int
+
+    Returns
+    -------
+    Graph
+        A tree with the given degree sequence.
+    """
+    if sum(deg_sequence) != 2 * (len(deg_sequence) - 1):
+        raise ValueError("Degree sequence does not sum to 2*(n-1)")
+    return havel_hakimi_graph(deg_sequence)
+
+
+def common_neighbor_centrality(G, ebunch=None):
+    """Return the Common Neighbor Centrality (Cannistraci-Hebb) index
+    for pairs of nodes.
+
+    Parameters
+    ----------
+    G : Graph
+    ebunch : iterable of (u, v) pairs, optional
+
+    Yields
+    ------
+    (u, v, score) tuples
+    """
+    if ebunch is None:
+        ebunch = non_edges(G)
+
+    for u, v in ebunch:
+        u_nbrs = set(G.neighbors(u))
+        v_nbrs = set(G.neighbors(v))
+        common = u_nbrs & v_nbrs
+        if not common:
+            yield (u, v, 0)
+            continue
+        # CNC: sum of (number of common neighbors of each common neighbor
+        # that are also common neighbors of u and v)
+        score = 0
+        for w in common:
+            w_nbrs = set(G.neighbors(w))
+            score += len(w_nbrs & common)
+        yield (u, v, score)
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -3471,6 +3660,13 @@ __all__ = [
     "is_semiconnected",
     "all_pairs_node_connectivity",
     "minimum_st_node_cut",
+    "contracted_nodes",
+    "contracted_edge",
+    "is_directed",
+    "configuration_model",
+    "havel_hakimi_graph",
+    "degree_sequence_tree",
+    "common_neighbor_centrality",
     # Algorithms — graph operators
     "union",
     "intersection",
