@@ -220,3 +220,22 @@ class TestIsomorphism:
         G1 = fnx.path_graph(5)
         G2 = fnx.complete_graph(5)
         assert not fnx.faster_could_be_isomorphic(G1, G2)
+
+
+class TestChordal:
+    def test_complete_is_chordal(self):
+        assert fnx.is_chordal(fnx.complete_graph(5))
+
+    def test_cycle_not_chordal(self):
+        assert not fnx.is_chordal(fnx.cycle_graph(5))
+
+    def test_tree_is_chordal(self):
+        assert fnx.is_chordal(fnx.path_graph(5))
+        assert fnx.is_chordal(fnx.star_graph(4))
+
+    @needs_nx
+    def test_matches_nx(self):
+        for g_fn, args in [(fnx.complete_graph, (6,)), (fnx.cycle_graph, (6,)), (fnx.path_graph, (4,))]:
+            g_fnx = g_fn(*args)
+            g_nx = getattr(nx, g_fn.__name__)(*args)
+            assert fnx.is_chordal(g_fnx) == nx.is_chordal(g_nx)
