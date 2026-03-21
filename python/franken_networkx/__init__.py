@@ -570,6 +570,124 @@ from franken_networkx._fnx import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Bipartite algorithms — pure Python wrappers over Rust primitives
+# ---------------------------------------------------------------------------
+
+
+def is_bipartite_node_set(G, nodes):
+    """Check whether *nodes* is one side of a valid bipartition of *G*.
+
+    Parameters
+    ----------
+    G : Graph
+        The input graph.
+    nodes : container
+        Candidate node set.
+
+    Returns
+    -------
+    bool
+        True if *nodes* forms one part of a bipartition.
+    """
+    if not is_bipartite(G):
+        return False
+    node_set = set(nodes)
+    top, bottom = bipartite_sets(G)
+    return node_set == set(top) or node_set == set(bottom)
+
+
+def projected_graph(B, nodes, multigraph=False):
+    """Return the projection of a bipartite graph onto one set of nodes.
+
+    Nodes from *nodes* are connected in the projection if they share a
+    common neighbor in the bipartite graph *B*.
+
+    Parameters
+    ----------
+    B : Graph
+        A bipartite graph.
+    nodes : container
+        Nodes to project onto.
+    multigraph : bool, optional
+        Ignored — present for API compatibility.
+
+    Returns
+    -------
+    G : Graph
+        The projected graph.
+    """
+    node_set = set(nodes)
+    G = Graph()
+    for n in node_set:
+        G.add_node(n)
+
+    for u in node_set:
+        nbrs_u = set(B.neighbors(u)) - node_set
+        for v in node_set:
+            if v <= u:
+                continue
+            nbrs_v = set(B.neighbors(v)) - node_set
+            if nbrs_u & nbrs_v:
+                G.add_edge(u, v)
+    return G
+
+
+def bipartite_density(B, nodes):
+    """Return the bipartite density of a bipartite graph *B*.
+
+    The bipartite density is ``|E| / (|top| * |bottom|)``.
+
+    Parameters
+    ----------
+    B : Graph
+        A bipartite graph.
+    nodes : container
+        Nodes in one of the two bipartite sets.
+
+    Returns
+    -------
+    float
+        The bipartite density.
+    """
+    top = set(nodes)
+    bottom = set(B.nodes()) - top
+    if not top or not bottom:
+        return 0.0
+    return B.number_of_edges() / (len(top) * len(bottom))
+
+
+def hopcroft_karp_matching(G, top_nodes=None):
+    """Return a maximum cardinality matching for a bipartite graph.
+
+    Uses the Hopcroft-Karp algorithm conceptually, but delegates to the
+    existing maximal matching implementation.
+
+    Parameters
+    ----------
+    G : Graph
+        A bipartite graph.
+    top_nodes : container, optional
+        The nodes in one bipartite set. If None, computed from bipartite_sets.
+
+    Returns
+    -------
+    dict
+        A mapping from each matched node to its partner.
+    """
+    if top_nodes is None:
+        top, _ = bipartite_sets(G)
+        top_nodes = top
+
+    # Use the existing max-weight matching (with unit weights = max cardinality)
+    matching_edges = max_weight_matching(G)
+    result = {}
+    for u, v in matching_edges:
+        result[u] = v
+        result[v] = u
+    return result
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -1207,6 +1325,10 @@ __all__ = [
     "radius",
     # Algorithms — tree, forest, bipartite, coloring, core
     "bipartite_sets",
+    "is_bipartite_node_set",
+    "projected_graph",
+    "bipartite_density",
+    "hopcroft_karp_matching",
     "core_number",
     "EdgePartition",
     "greedy_color",
