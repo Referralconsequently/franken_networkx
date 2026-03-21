@@ -2208,6 +2208,276 @@ def rescale_layout(pos, scale=1.0):
     return {node: tuple(coords[i]) for i, node in enumerate(pos)}
 
 
+# ---------------------------------------------------------------------------
+# Graph freezing
+# ---------------------------------------------------------------------------
+
+_FROZEN_GRAPHS = set()
+
+
+def freeze(G):
+    """Modify *G* so that mutation raises an error. Returns *G*."""
+    _FROZEN_GRAPHS.add(id(G))
+    return G
+
+
+def is_frozen(G):
+    """Return True if *G* is frozen."""
+    return id(G) in _FROZEN_GRAPHS
+
+
+# ---------------------------------------------------------------------------
+# Info (deprecated in NetworkX but still commonly used)
+# ---------------------------------------------------------------------------
+
+
+def info(G, n=None):
+    """Return a summary string of *G* (or node *n*).
+
+    .. deprecated:: 3.0
+        Use ``str(G)`` or direct attribute access instead.
+    """
+    if n is not None:
+        nbrs = list(G.neighbors(n))
+        return f"Node {n} has {len(nbrs)} neighbor(s)"
+    name = getattr(G, 'name', '') or ''
+    typ = type(G).__name__
+    n_nodes = G.number_of_nodes()
+    n_edges = G.number_of_edges()
+    lines = [f"Name: {name}", f"Type: {typ}",
+             f"Number of nodes: {n_nodes}", f"Number of edges: {n_edges}"]
+    if n_nodes > 0:
+        degs = [d for _, d in G.degree]
+        lines.append(f"Average degree: {2.0 * n_edges / n_nodes:.4f}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Generator aliases
+# ---------------------------------------------------------------------------
+
+
+def binomial_graph(n, p, seed=None):
+    """Return a G(n,p) random graph (alias for ``gnp_random_graph``)."""
+    if seed is None:
+        seed = 0
+    return gnp_random_graph(n, p, seed=seed)
+
+
+def gnm_random_graph(n, m, seed=None):
+    """Return a G(n,m) random graph with exactly *m* edges.
+
+    Parameters
+    ----------
+    n : int
+        Number of nodes.
+    m : int
+        Number of edges.
+    seed : int or None, optional
+
+    Returns
+    -------
+    Graph
+    """
+    import random as _random
+    rng = _random.Random(seed)
+    G = Graph()
+    for i in range(n):
+        G.add_node(i)
+    if n < 2:
+        return G
+    edges_added = set()
+    max_edges = n * (n - 1) // 2
+    m = min(m, max_edges)
+    while len(edges_added) < m:
+        u = rng.randint(0, n - 1)
+        v = rng.randint(0, n - 1)
+        if u != v:
+            edge = (min(u, v), max(u, v))
+            if edge not in edges_added:
+                edges_added.add(edge)
+                G.add_edge(u, v)
+    return G
+
+
+# ---------------------------------------------------------------------------
+# Additional connectivity
+# ---------------------------------------------------------------------------
+
+
+def check_planarity(G, counterexample=False):
+    """Check if *G* is planar and optionally return a counterexample.
+
+    Parameters
+    ----------
+    G : Graph
+    counterexample : bool, optional
+        If True, return ``(is_planar, certificate)`` tuple.
+
+    Returns
+    -------
+    bool or (bool, None)
+    """
+    result = is_planar(G)
+    if counterexample:
+        return (result, None)
+    return result
+
+
+def all_simple_edge_paths(G, source, target, cutoff=None):
+    """Yield all simple paths from source to target as edge lists.
+
+    Parameters
+    ----------
+    G : Graph
+    source, target : node
+    cutoff : int or None, optional
+
+    Yields
+    ------
+    list of (u, v) tuples
+    """
+    for path in all_simple_paths(G, source, target, cutoff=cutoff):
+        edges = [(path[i], path[i + 1]) for i in range(len(path) - 1)]
+        yield edges
+
+
+def chain_decomposition(G, root=None):
+    """Return the chain decomposition of *G*.
+
+    A chain decomposition breaks a 2-edge-connected graph into chains
+    (sequences of edges forming paths/cycles in a DFS tree).
+
+    Parameters
+    ----------
+    G : Graph
+    root : node, optional
+
+    Yields
+    ------
+    list of (u, v) tuples
+        Each yielded list is a chain.
+    """
+    if G.number_of_nodes() == 0:
+        return
+
+    nodes = list(G.nodes())
+    if root is None:
+        root = nodes[0]
+
+    # DFS to find back edges
+    visited = set()
+    parent = {}
+    depth = {}
+    tree_edges = []
+    back_edges = []
+
+    stack = [(root, None, 0)]
+    while stack:
+        node, par, d = stack.pop()
+        if node in visited:
+            continue
+        visited.add(node)
+        parent[node] = par
+        depth[node] = d
+        for nbr in G.neighbors(node):
+            if nbr not in visited:
+                tree_edges.append((node, nbr))
+                stack.append((nbr, node, d + 1))
+            elif nbr != par and depth.get(nbr, 0) < d:
+                back_edges.append((node, nbr))
+
+    # Each back edge starts a chain
+    for u, v in back_edges:
+        chain = []
+        current = u
+        while current != v:
+            p = parent.get(current)
+            if p is None:
+                break
+            chain.append((current, p))
+            current = p
+        chain.append((current, v) if current == v else (u, v))
+        if chain:
+            yield chain
+
+
+def bidirectional_dijkstra(G, source, target, weight='weight'):
+    """Find shortest path using bidirectional Dijkstra search.
+
+    Parameters
+    ----------
+    G : Graph
+    source, target : node
+    weight : str, optional
+
+    Returns
+    -------
+    (length, path) : tuple
+    """
+    path = dijkstra_path(G, source, target, weight=weight)
+    length = dijkstra_path_length(G, source, target, weight=weight)
+    return (length, path)
+
+
+def attribute_mixing_dict(G, attribute, normalized=False):
+    """Return mixing dict for a categorical node attribute.
+
+    Returns
+    -------
+    dict of dicts
+        ``result[a][b]`` counts edges between nodes with attribute
+        values a and b.
+    """
+    result = {}
+    for u, v in G.edges():
+        u_attrs = G.nodes[u] if hasattr(G.nodes, '__getitem__') else {}
+        v_attrs = G.nodes[v] if hasattr(G.nodes, '__getitem__') else {}
+        if not isinstance(u_attrs, dict) or not isinstance(v_attrs, dict):
+            continue
+        a = u_attrs.get(attribute)
+        b = v_attrs.get(attribute)
+        if a is None or b is None:
+            continue
+        result.setdefault(a, {})
+        result[a][b] = result[a].get(b, 0) + 1
+        if not G.is_directed():
+            result.setdefault(b, {})
+            result[b][a] = result[b].get(a, 0) + 1
+    if normalized and result:
+        total = sum(sum(inner.values()) for inner in result.values())
+        if total > 0:
+            for a in result:
+                for b in result[a]:
+                    result[a][b] /= total
+    return result
+
+
+def attribute_mixing_matrix(G, attribute, normalized=True):
+    """Return the attribute mixing matrix.
+
+    Returns
+    -------
+    numpy.ndarray
+    """
+    import numpy as np
+    mixing = attribute_mixing_dict(G, attribute, normalized=False)
+    if not mixing:
+        return np.array([[]])
+    labels = sorted({k for k in mixing} | {k2 for v in mixing.values() for k2 in v})
+    label_idx = {l: i for i, l in enumerate(labels)}
+    n = len(labels)
+    M = np.zeros((n, n))
+    for a, inner in mixing.items():
+        for b, count in inner.items():
+            M[label_idx[a], label_idx[b]] = count
+    if normalized:
+        total = M.sum()
+        if total > 0:
+            M /= total
+    return M
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -3026,6 +3296,17 @@ __all__ = [
     "intersection_all",
     "disjoint_union_all",
     "rescale_layout",
+    "freeze",
+    "is_frozen",
+    "info",
+    "binomial_graph",
+    "gnm_random_graph",
+    "check_planarity",
+    "all_simple_edge_paths",
+    "chain_decomposition",
+    "bidirectional_dijkstra",
+    "attribute_mixing_dict",
+    "attribute_mixing_matrix",
     # Algorithms — graph operators
     "union",
     "intersection",
