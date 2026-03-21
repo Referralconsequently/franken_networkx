@@ -551,12 +551,6 @@ impl GraphConverter {
 
 trait GraphLike {
     fn add_node(&mut self, node: String) -> bool;
-    fn add_edge_with_attrs(
-        &mut self,
-        source: String,
-        target: String,
-        attrs: AttrMap,
-    ) -> Result<bool, GraphError>;
     fn add_edge_with_key_and_attrs(
         &mut self,
         source: String,
@@ -569,15 +563,6 @@ trait GraphLike {
 impl GraphLike for Graph {
     fn add_node(&mut self, node: String) -> bool {
         self.add_node(node)
-    }
-    fn add_edge_with_attrs(
-        &mut self,
-        source: String,
-        target: String,
-        attrs: AttrMap,
-    ) -> Result<bool, GraphError> {
-        self.add_edge_with_attrs(source, target, attrs)
-            .map(|_| true)
     }
     fn add_edge_with_key_and_attrs(
         &mut self,
@@ -594,15 +579,6 @@ impl GraphLike for DiGraph {
     fn add_node(&mut self, node: String) -> bool {
         self.add_node(node)
     }
-    fn add_edge_with_attrs(
-        &mut self,
-        source: String,
-        target: String,
-        attrs: AttrMap,
-    ) -> Result<bool, GraphError> {
-        self.add_edge_with_attrs(source, target, attrs)
-            .map(|_| true)
-    }
     fn add_edge_with_key_and_attrs(
         &mut self,
         source: String,
@@ -617,15 +593,6 @@ impl GraphLike for DiGraph {
 impl GraphLike for MultiGraph {
     fn add_node(&mut self, node: String) -> bool {
         self.add_node(node)
-    }
-    fn add_edge_with_attrs(
-        &mut self,
-        source: String,
-        target: String,
-        attrs: AttrMap,
-    ) -> Result<bool, GraphError> {
-        self.add_edge_with_attrs(source, target, attrs)
-            .map(|_| true)
     }
     fn add_edge_with_key_and_attrs(
         &mut self,
@@ -644,15 +611,6 @@ impl GraphLike for MultiGraph {
 impl GraphLike for MultiDiGraph {
     fn add_node(&mut self, node: String) -> bool {
         self.add_node(node)
-    }
-    fn add_edge_with_attrs(
-        &mut self,
-        source: String,
-        target: String,
-        attrs: AttrMap,
-    ) -> Result<bool, GraphError> {
-        self.add_edge_with_attrs(source, target, attrs)
-            .map(|_| true)
     }
     fn add_edge_with_key_and_attrs(
         &mut self,
@@ -709,6 +667,7 @@ impl GraphConverter {
 mod tests {
     use super::{AdjacencyEntry, AdjacencyPayload, EdgeListPayload, EdgeRecord, GraphConverter};
     use fnx_classes::AttrMap;
+    use fnx_runtime::CgseValue;
     use std::collections::BTreeMap;
 
     #[test]
@@ -719,7 +678,8 @@ mod tests {
             edges: vec![EdgeRecord {
                 left: "a".to_owned(),
                 right: "b".to_owned(),
-                attrs: AttrMap::from([("weight".to_owned(), "1.0".to_owned())]),
+                key: None,
+                attrs: AttrMap::from([("weight".to_owned(), CgseValue::String("1.0".to_owned()))]),
             }],
         };
 
@@ -735,7 +695,8 @@ mod tests {
                 .edge_attrs("a", "b")
                 .unwrap()
                 .get("weight")
-                .unwrap(),
+                .unwrap()
+                .as_str(),
             "1.0"
         );
     }
@@ -748,7 +709,8 @@ mod tests {
             "a".to_owned(),
             vec![AdjacencyEntry {
                 to: "b".to_owned(),
-                attrs: AttrMap::from([("weight".to_owned(), "2.0".to_owned())]),
+                key: None,
+                attrs: AttrMap::from([("weight".to_owned(), CgseValue::String("2.0".to_owned()))]),
             }],
         );
         let payload = AdjacencyPayload { adjacency };
@@ -764,7 +726,8 @@ mod tests {
                 .edge_attrs("a", "b")
                 .unwrap()
                 .get("weight")
-                .unwrap(),
+                .unwrap()
+                .as_str(),
             "2.0"
         );
     }
@@ -777,6 +740,7 @@ mod tests {
             edges: vec![EdgeRecord {
                 left: "a".to_owned(),
                 right: "b".to_owned(),
+                key: None,
                 attrs: AttrMap::new(),
             }],
         };

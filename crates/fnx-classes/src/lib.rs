@@ -3,8 +3,8 @@
 pub mod digraph;
 
 use fnx_runtime::{
-    CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm, unix_time_ms,
-    CgseValue,
+    CgseValue, CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm,
+    unix_time_ms,
 };
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
@@ -447,7 +447,8 @@ impl Graph {
         }
 
         // 2. Remove all incident edges from the edges map using retain (O(E)).
-        self.edges.retain(|key, _| key.left != node && key.right != node);
+        self.edges
+            .retain(|key, _| key.left != node && key.right != node);
 
         // 3. Remove node from adjacency and nodes maps.
         self.adjacency.shift_remove(node);
@@ -946,8 +947,10 @@ impl MultiGraph {
         }
 
         // 2. Remove all incident edges from edges and next_edge_key maps using retain (O(E)).
-        self.edges.retain(|key, _| key.left != node && key.right != node);
-        self.next_edge_key.retain(|key, _| key.left != node && key.right != node);
+        self.edges
+            .retain(|key, _| key.left != node && key.right != node);
+        self.next_edge_key
+            .retain(|key, _| key.left != node && key.right != node);
 
         // 3. Remove node from adjacency and nodes maps.
         self.adjacency.shift_remove(node);
