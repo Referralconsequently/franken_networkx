@@ -870,72 +870,53 @@ pub fn shortest_path_weighted(
         };
     }
 
-    let nodes = graph.nodes_ordered();
-    let mut settled: HashSet<&str> = HashSet::new();
-    let mut predecessor: HashMap<&str, &str> = HashMap::new();
-    let mut distance: HashMap<&str, f64> = HashMap::new();
-    distance.insert(source, 0.0);
+    let mut predecessors: HashMap<&str, &str> = HashMap::new();
+    let mut distances: HashMap<&str, f64> = HashMap::new();
+    let mut pq = BinaryHeap::new();
+
+    distances.insert(source, 0.0);
+    pq.push(DijkstraState {
+        dist: 0.0,
+        node: source,
+    });
 
     let mut nodes_touched = 1usize;
     let mut edges_scanned = 0usize;
     let mut queue_peak = 1usize;
 
-    loop {
-        let mut current: Option<(&str, f64)> = None;
-        for &node in &nodes {
-            if settled.contains(node) {
-                continue;
-            }
-            let Some(&candidate_distance) = distance.get(node) else {
-                continue;
-            };
-            match current {
-                None => current = Some((node, candidate_distance)),
-                Some((_, best_distance)) if candidate_distance < best_distance => {
-                    current = Some((node, candidate_distance));
-                }
-                _ => {}
-            }
-        }
-
-        let Some((current_node, current_distance)) = current else {
-            break;
-        };
-
-        settled.insert(current_node);
-        if current_node == target {
-            break;
-        }
-
-        let Some(neighbors) = graph.neighbors_iter(current_node) else {
+    while let Some(DijkstraState { dist: d, node: u }) = pq.pop() {
+        if d > *distances.get(u).unwrap_or(&f64::INFINITY) + DISTANCE_COMPARISON_EPSILON {
             continue;
-        };
-        for neighbor in neighbors {
-            edges_scanned += 1;
-            if settled.contains(neighbor) {
-                continue;
-            }
-            let edge_weight = edge_weight_or_default(graph, current_node, neighbor, weight_attr);
-            let candidate_distance = current_distance + edge_weight;
-            let should_update = match distance.get(neighbor) {
-                Some(existing_distance) => {
-                    candidate_distance + DISTANCE_COMPARISON_EPSILON < *existing_distance
-                }
-                None => true,
-            };
-            if should_update {
-                if distance.insert(neighbor, candidate_distance).is_none() {
-                    nodes_touched += 1;
-                }
-                predecessor.insert(neighbor, current_node);
-            }
         }
 
-        queue_peak = queue_peak.max(distance.len().saturating_sub(settled.len()));
+        if u == target {
+            break;
+        }
+
+        if let Some(neighbors) = graph.neighbors_iter(u) {
+            for v in neighbors {
+                edges_scanned += 1;
+                let weight = edge_weight_or_default(graph, u, v, weight_attr);
+                let next_dist = d + weight;
+                let current_dist = *distances.get(v).unwrap_or(&f64::INFINITY);
+
+                if next_dist < current_dist - DISTANCE_COMPARISON_EPSILON {
+                    if distances.insert(v, next_dist).is_none() {
+                        nodes_touched += 1;
+                    }
+                    predecessors.insert(v, u);
+                    pq.push(DijkstraState {
+                        dist: next_dist,
+                        node: v,
+                    });
+                    queue_peak = queue_peak.max(pq.len());
+                }
+            }
+        }
     }
 
-    let path = if distance.contains_key(target) {
-        let rebuilt_path = rebuild_path(&predecessor, source, target);
+    let path = if distances.contains_key(target) {
+        let rebuilt_path = rebuild_path(&predecessors, source, target);
         if rebuilt_path.first().map(String::as_str) == Some(source)
             && rebuilt_path.last().map(String::as_str) == Some(target)
         {
@@ -951,7 +932,7 @@ pub fn shortest_path_weighted(
         path,
         witness: ComplexityWitness {
             algorithm: "dijkstra_shortest_path".to_owned(),
-            complexity_claim: "O(|V|^2 + |E|)".to_owned(),
+            complexity_claim: "O(|E| log |V|)".to_owned(),
             nodes_touched,
             edges_scanned,
             queue_peak,
@@ -1058,7 +1039,7 @@ pub fn shortest_path_weighted_directed(
             complexity_claim: "O(|E| log |V|)".to_owned(),
             nodes_touched,
             edges_scanned,
-            queue_peak: queue_peak.max(ordered_nodes.len().min(queue_peak)),
+            queue_peak,
         },
     }
 }
@@ -1762,47 +1743,37 @@ fn harmonic_centrality_generic<G: GraphView>(graph: &G) -> HarmonicCentralityRes
     let mut edges_scanned = 0usize;
     let mut queue_peak = 0usize;
 
-    for source in &nodes {
-        let mut queue: VecDeque<&str> = VecDeque::new();
-        let mut distance: HashMap<&str, usize> = HashMap::new();
-        queue.push_back(*source);
-        distance.insert(*source, 0usize);
+    for (s, source) in nodes.iter().enumerate() {
+        let mut queue: VecDeque<usize> = VecDeque::new();
+        let mut distances: Vec<Option<usize>> = vec![None; n];
+        queue.push_back(s);
+        distances[s] = Some(0usize);
         queue_peak = queue_peak.max(queue.len());
 
-        while let Some(current) = queue.pop_front() {
-            let current_distance = *distance.get(&current).unwrap_or(&0usize);
-            if let Some(neighbors) = graph.neighbors_iter(current) {
-                for neighbor in neighbors {
+        let mut reached_count = 0usize;
+        let mut harmonic = 0.0_f64;
+
+        while let Some(u) = queue.pop_front() {
+            reached_count += 1;
+            let d = distances[u].unwrap();
+            if d > 0 {
+                harmonic += 1.0 / (d as f64);
+            }
+
+            if let Some(neighbors) = graph.neighbors_iter(nodes[u]) {
+                for v_name in neighbors {
                     edges_scanned += 1;
-                    if distance.contains_key(neighbor) {
-                        continue;
+                    let v = graph.get_node_index(v_name).unwrap();
+                    if distances[v].is_none() {
+                        distances[v] = Some(d + 1);
+                        queue.push_back(v);
+                        queue_peak = queue_peak.max(queue.len());
                     }
-                    distance.insert(neighbor, current_distance + 1);
-                    queue.push_back(neighbor);
-                    queue_peak = queue_peak.max(queue.len());
                 }
             }
         }
 
-        nodes_touched += distance.len();
-        // Accumulate in canonical distance order so floating-point roundoff is replay-stable
-        // even when node insertion order differs.
-        let mut reachable_distances = distance
-            .iter()
-            .filter_map(|(target, shortest_path_distance)| {
-                if *target == *source || *shortest_path_distance == 0 {
-                    None
-                } else {
-                    Some(*shortest_path_distance)
-                }
-            })
-            .collect::<Vec<usize>>();
-        reachable_distances.sort_unstable();
-        let harmonic = reachable_distances
-            .into_iter()
-            .fold(0.0_f64, |sum, shortest_path_distance| {
-                sum + 1.0 / (shortest_path_distance as f64)
-            });
+        nodes_touched += reached_count;
         scores.push(CentralityScore {
             node: (*source).to_owned(),
             score: harmonic,

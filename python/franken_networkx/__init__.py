@@ -786,6 +786,297 @@ def k_clique_communities(G, k):
         yield community
 
 
+# ---------------------------------------------------------------------------
+# Graph attribute helpers (high-frequency NetworkX utilities)
+# ---------------------------------------------------------------------------
+
+
+def set_node_attributes(G, values, name=None):
+    """Set node attributes from a dictionary or scalar.
+
+    Parameters
+    ----------
+    G : Graph
+        The graph to modify.
+    values : dict or scalar
+        If a dict keyed by node, ``values[node]`` is the attribute value.
+        If a dict keyed by node mapping to dicts, each inner dict is merged
+        into the node's attributes. If a scalar, set it for all nodes.
+    name : str, optional
+        Attribute name. Required when *values* is a dict of scalars or a scalar.
+    """
+    if isinstance(values, dict):
+        if name is not None:
+            for node, val in values.items():
+                if hasattr(G.nodes, '__getitem__'):
+                    try:
+                        G.nodes[node][name] = val
+                    except (KeyError, TypeError):
+                        pass
+        else:
+            for node, attrs in values.items():
+                if isinstance(attrs, dict) and hasattr(G.nodes, '__getitem__'):
+                    try:
+                        G.nodes[node].update(attrs)
+                    except (KeyError, TypeError):
+                        pass
+    else:
+        if name is None:
+            raise ValueError("name is required when values is not a dictionary")
+        for node in G.nodes():
+            if hasattr(G.nodes, '__getitem__'):
+                try:
+                    G.nodes[node][name] = values
+                except (KeyError, TypeError):
+                    pass
+
+
+def get_node_attributes(G, name):
+    """Return a dictionary of node attributes keyed by node.
+
+    Parameters
+    ----------
+    G : Graph
+        The input graph.
+    name : str
+        Attribute name.
+
+    Returns
+    -------
+    dict
+        ``{node: value}`` for nodes that have the attribute.
+    """
+    result = {}
+    for node in G.nodes():
+        if hasattr(G.nodes, '__getitem__'):
+            attrs = G.nodes[node]
+            if isinstance(attrs, dict) and name in attrs:
+                result[node] = attrs[name]
+    return result
+
+
+def set_edge_attributes(G, values, name=None):
+    """Set edge attributes from a dictionary or scalar.
+
+    Parameters
+    ----------
+    G : Graph
+        The graph to modify.
+    values : dict or scalar
+        If a dict keyed by ``(u, v)``, sets the attribute per edge.
+        If a scalar, sets it for all edges.
+    name : str, optional
+        Attribute name. Required when *values* is a scalar.
+    """
+    if isinstance(values, dict):
+        if name is not None:
+            for (u, v), val in values.items():
+                data = G.get_edge_data(u, v)
+                if isinstance(data, dict):
+                    data[name] = val
+        else:
+            for (u, v), attrs in values.items():
+                if isinstance(attrs, dict):
+                    data = G.get_edge_data(u, v)
+                    if isinstance(data, dict):
+                        data.update(attrs)
+    else:
+        if name is None:
+            raise ValueError("name is required when values is not a dictionary")
+        for u, v in G.edges():
+            data = G.get_edge_data(u, v)
+            if isinstance(data, dict):
+                data[name] = values
+
+
+def get_edge_attributes(G, name):
+    """Return a dictionary of edge attributes keyed by ``(u, v)``.
+
+    Parameters
+    ----------
+    G : Graph
+        The input graph.
+    name : str
+        Attribute name.
+
+    Returns
+    -------
+    dict
+        ``{(u, v): value}`` for edges that have the attribute.
+    """
+    result = {}
+    for u, v, data in G.edges(data=True):
+        if isinstance(data, dict) and name in data:
+            result[(u, v)] = data[name]
+    return result
+
+
+def create_empty_copy(G, with_data=True):
+    """Return an empty copy of *G* (same nodes, no edges).
+
+    Parameters
+    ----------
+    G : Graph
+        The input graph.
+    with_data : bool, optional
+        If True (default), preserve node attributes.
+
+    Returns
+    -------
+    H : Graph
+        A graph with the same nodes but no edges.
+    """
+    H = G.__class__()
+    if with_data:
+        for node in G.nodes():
+            attrs = {}
+            if hasattr(G.nodes, '__getitem__'):
+                a = G.nodes[node]
+                if isinstance(a, dict):
+                    attrs = dict(a)
+            H.add_node(node, **attrs)
+    else:
+        for node in G.nodes():
+            H.add_node(node)
+    return H
+
+
+def number_of_selfloops(G):
+    """Return the number of self-loop edges in *G*."""
+    count = 0
+    for u, v in G.edges():
+        if u == v:
+            count += 1
+    return count
+
+
+def selfloop_edges(G, data=False):
+    """Return an iterator over self-loop edges.
+
+    Parameters
+    ----------
+    G : Graph
+        The input graph.
+    data : bool, optional
+        If True, yield ``(u, u, data_dict)`` tuples.
+
+    Returns
+    -------
+    list
+        Self-loop edges.
+    """
+    if data:
+        return [(u, v, d) for u, v, d in G.edges(data=True) if u == v]
+    return [(u, v) for u, v in G.edges() if u == v]
+
+
+def nodes_with_selfloops(G):
+    """Return nodes that have self-loops."""
+    return list({u for u, v in G.edges() if u == v})
+
+
+def all_neighbors(G, node):
+    """Return all neighbors of *node* in *G* (including predecessors for DiGraph).
+
+    For undirected graphs, equivalent to ``G.neighbors(node)``.
+    For directed graphs, returns the union of successors and predecessors.
+    """
+    if G.is_directed():
+        succs = set(G.successors(node)) if hasattr(G, 'successors') else set()
+        preds = set(G.predecessors(node)) if hasattr(G, 'predecessors') else set()
+        return list(succs | preds)
+    return list(G.neighbors(node))
+
+
+def add_path(G, nodes, **attr):
+    """Add a path of edges to *G*."""
+    node_list = list(nodes)
+    for i in range(len(node_list) - 1):
+        G.add_edge(node_list[i], node_list[i + 1], **attr)
+
+
+def add_cycle(G, nodes, **attr):
+    """Add a cycle of edges to *G*."""
+    node_list = list(nodes)
+    if len(node_list) < 2:
+        return
+    for i in range(len(node_list) - 1):
+        G.add_edge(node_list[i], node_list[i + 1], **attr)
+    G.add_edge(node_list[-1], node_list[0], **attr)
+
+
+def add_star(G, nodes, **attr):
+    """Add a star of edges to *G* (first node is the center)."""
+    node_list = list(nodes)
+    if len(node_list) < 2:
+        return
+    center = node_list[0]
+    for spoke in node_list[1:]:
+        G.add_edge(center, spoke, **attr)
+
+
+def cartesian_product(G, H):
+    """Return the Cartesian product of *G* and *H*.
+
+    The Cartesian product has node set ``V(G) x V(H)``. Two nodes
+    ``(u1, v1)`` and ``(u2, v2)`` are adjacent iff ``u1 == u2`` and
+    ``(v1, v2)`` is an edge in *H*, or ``v1 == v2`` and ``(u1, u2)``
+    is an edge in *G*.
+    """
+    result = Graph()
+    g_nodes = list(G.nodes())
+    h_nodes = list(H.nodes())
+
+    for u in g_nodes:
+        for v in h_nodes:
+            result.add_node((u, v))
+
+    for u in g_nodes:
+        for v1, v2 in H.edges():
+            result.add_edge((u, v1), (u, v2))
+
+    for v in h_nodes:
+        for u1, u2 in G.edges():
+            result.add_edge((u1, v), (u2, v))
+
+    return result
+
+
+def tensor_product(G, H):
+    """Return the tensor (categorical) product of *G* and *H*.
+
+    Two nodes ``(u1, v1)`` and ``(u2, v2)`` are adjacent iff
+    ``(u1, u2)`` is an edge in *G* AND ``(v1, v2)`` is an edge in *H*.
+    """
+    result = Graph()
+    g_nodes = list(G.nodes())
+    h_nodes = list(H.nodes())
+
+    for u in g_nodes:
+        for v in h_nodes:
+            result.add_node((u, v))
+
+    for u1, u2 in G.edges():
+        for v1, v2 in H.edges():
+            result.add_edge((u1, v1), (u2, v2))
+            result.add_edge((u1, v2), (u2, v1))
+
+    return result
+
+
+def strong_product(G, H):
+    """Return the strong product of *G* and *H*.
+
+    Union of Cartesian and tensor products.
+    """
+    result = cartesian_product(G, H)
+    for u1, u2 in G.edges():
+        for v1, v2 in H.edges():
+            result.add_edge((u1, v1), (u2, v2))
+            result.add_edge((u1, v2), (u2, v1))
+    return result
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
