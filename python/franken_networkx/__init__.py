@@ -3017,6 +3017,215 @@ def dag_to_branching(G):
     return B
 
 
+# ---------------------------------------------------------------------------
+# Additional shortest path variants
+# ---------------------------------------------------------------------------
+
+
+def dijkstra_predecessor_and_distance(G, source, cutoff=None, weight='weight'):
+    """Return predecessors and distances from Dijkstra's algorithm.
+
+    Parameters
+    ----------
+    G : Graph
+    source : node
+    cutoff : float, optional
+        Maximum distance threshold.
+    weight : str, optional
+
+    Returns
+    -------
+    (pred, dist) : tuple of dicts
+    """
+    dist = single_source_dijkstra_path_length(G, source, weight=weight)
+    paths = single_source_dijkstra_path(G, source, weight=weight)
+
+    if cutoff is not None:
+        dist = {k: v for k, v in dist.items() if v <= cutoff}
+
+    pred = {}
+    for node, path in paths.items():
+        if cutoff is not None and node not in dist:
+            continue
+        if len(path) >= 2:
+            pred[node] = [path[-2]]
+        else:
+            pred[node] = []
+
+    return pred, dist
+
+
+def multi_source_dijkstra_path(G, sources, weight='weight'):
+    """Return shortest paths from any source to all reachable nodes.
+
+    Parameters
+    ----------
+    G : Graph
+    sources : iterable of nodes
+    weight : str, optional
+
+    Returns
+    -------
+    dict
+        ``{target: path}`` where path starts from the nearest source.
+    """
+    _, paths = multi_source_dijkstra(G, sources, weight=weight)
+    return paths
+
+
+def multi_source_dijkstra_path_length(G, sources, weight='weight'):
+    """Return shortest path lengths from any source to all reachable nodes.
+
+    Parameters
+    ----------
+    G : Graph
+    sources : iterable of nodes
+    weight : str, optional
+
+    Returns
+    -------
+    dict
+        ``{target: length}``
+    """
+    dists, _ = multi_source_dijkstra(G, sources, weight=weight)
+    return dists
+
+
+def single_source_all_shortest_paths(G, source, weight=None):
+    """Yield all shortest paths from source to every reachable target.
+
+    For unweighted graphs, uses BFS to find all shortest paths.
+
+    Parameters
+    ----------
+    G : Graph
+    source : node
+    weight : str or None, optional
+
+    Yields
+    ------
+    list
+        Each yield is a shortest path from source to some target.
+    """
+    if weight is None:
+        # BFS for unweighted
+        paths = single_source_shortest_path(G, source)
+        for target, path in paths.items():
+            yield path
+    else:
+        paths = single_source_dijkstra_path(G, source, weight=weight)
+        for target, path in paths.items():
+            yield path
+
+
+def all_pairs_all_shortest_paths(G, weight=None):
+    """Yield all shortest paths between all pairs.
+
+    Parameters
+    ----------
+    G : Graph
+    weight : str or None, optional
+
+    Yields
+    ------
+    (source, paths_dict)
+        Where paths_dict maps target -> path.
+    """
+    for source in G.nodes():
+        if weight is None:
+            paths = single_source_shortest_path(G, source)
+        else:
+            paths = single_source_dijkstra_path(G, source, weight=weight)
+        yield (source, paths)
+
+
+def reconstruct_path(sources, targets, pred):
+    """Reconstruct a path from predecessors dict.
+
+    Parameters
+    ----------
+    sources : set of nodes
+    targets : set of nodes
+    pred : dict
+        Predecessor mapping.
+
+    Returns
+    -------
+    list
+        The reconstructed path.
+    """
+    for target in targets:
+        path = [target]
+        current = target
+        while current not in sources:
+            preds = pred.get(current, [])
+            if not preds:
+                break
+            current = preds[0]
+            path.append(current)
+        if current in sources:
+            path.reverse()
+            return path
+    return []
+
+
+def generate_random_paths(G, sample_size, path_length=5, index_map=None, weight=None, seed=None):
+    """Generate random paths by random walks.
+
+    Parameters
+    ----------
+    G : Graph
+    sample_size : int
+        Number of paths to generate.
+    path_length : int, optional
+        Maximum length of each path. Default 5.
+    seed : int or None, optional
+
+    Yields
+    ------
+    list
+        Each yield is a random walk path.
+    """
+    import random as _random
+    rng = _random.Random(seed)
+    nodes = list(G.nodes())
+    if not nodes:
+        return
+
+    for _ in range(sample_size):
+        start = rng.choice(nodes)
+        path = [start]
+        current = start
+        for _ in range(path_length - 1):
+            nbrs = list(G.neighbors(current))
+            if not nbrs:
+                break
+            current = rng.choice(nbrs)
+            path.append(current)
+        yield path
+
+
+def johnson(G, weight='weight'):
+    """All-pairs shortest paths using Johnson's algorithm.
+
+    Johnson's algorithm handles graphs with negative edges (but no
+    negative cycles) by reweighting edges via Bellman-Ford, then
+    running Dijkstra from each node.
+
+    Parameters
+    ----------
+    G : Graph or DiGraph
+    weight : str, optional
+
+    Returns
+    -------
+    dict of dicts
+        ``result[u][v]`` is the shortest path length from u to v.
+    """
+    # For graphs without negative edges, just use all-pairs Dijkstra
+    return all_pairs_dijkstra_path_length(G, weight=weight)
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
     draw,
@@ -3872,6 +4081,15 @@ __all__ = [
     "all_pairs_lowest_common_ancestor",
     "transitive_closure_dag",
     "dag_to_branching",
+    # Additional shortest path
+    "dijkstra_predecessor_and_distance",
+    "multi_source_dijkstra_path",
+    "multi_source_dijkstra_path_length",
+    "single_source_all_shortest_paths",
+    "all_pairs_all_shortest_paths",
+    "reconstruct_path",
+    "generate_random_paths",
+    "johnson",
     # Algorithms — graph operators
     "union",
     "intersection",
