@@ -2119,6 +2119,19 @@ pub fn min_edge_cover(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<(PyO
 // Flow algorithms
 // ===========================================================================
 
+fn flow_terminals(
+    py: Python<'_>,
+    source: &Bound<'_, PyAny>,
+    sink: &Bound<'_, PyAny>,
+) -> PyResult<(String, String)> {
+    let s = node_key_to_string(py, source)?;
+    let t = node_key_to_string(py, sink)?;
+    if s == t {
+        return Err(NetworkXError::new_err("source and sink are the same node"));
+    }
+    Ok((s, t))
+}
+
 /// Return the maximum flow value and flow dictionary between source and sink.
 #[pyfunction]
 #[pyo3(signature = (g, source, sink, capacity="capacity"))]
@@ -2130,8 +2143,7 @@ pub fn maximum_flow(
     capacity: &str,
 ) -> PyResult<(f64, PyObject)> {
     let gr = extract_graph(g)?;
-    let s = node_key_to_string(py, source)?;
-    let t = node_key_to_string(py, sink)?;
+    let (s, t) = flow_terminals(py, source, sink)?;
     let cap = capacity.to_owned();
     let result = match &gr {
         GraphRef::Undirected(pg) => {
@@ -2171,8 +2183,7 @@ pub fn maximum_flow_value(
     capacity: &str,
 ) -> PyResult<f64> {
     let gr = extract_graph(g)?;
-    let s = node_key_to_string(py, source)?;
-    let t = node_key_to_string(py, sink)?;
+    let (s, t) = flow_terminals(py, source, sink)?;
     let cap = capacity.to_owned();
     match &gr {
         GraphRef::Undirected(pg) => {
@@ -2214,8 +2225,7 @@ pub fn minimum_cut_value(
     capacity: &str,
 ) -> PyResult<f64> {
     let gr = extract_graph(g)?;
-    let s = node_key_to_string(py, source)?;
-    let t = node_key_to_string(py, sink)?;
+    let (s, t) = flow_terminals(py, source, sink)?;
     let cap = capacity.to_owned();
     match &gr {
         GraphRef::Undirected(pg) => {
@@ -2257,8 +2267,7 @@ pub fn minimum_cut(
     capacity: &str,
 ) -> PyResult<(f64, PyObject)> {
     let gr = extract_graph(g)?;
-    let s = node_key_to_string(py, source)?;
-    let t = node_key_to_string(py, sink)?;
+    let (s, t) = flow_terminals(py, source, sink)?;
     let cap = capacity.to_owned();
     let cut = match &gr {
         GraphRef::Undirected(pg) => {

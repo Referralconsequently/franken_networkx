@@ -108,3 +108,28 @@ class TestFlow:
         fnx_cut_val = fnx.minimum_cut_value(DG_fnx, "s", "t")
         nx_cut_val = nx.minimum_cut_value(DG_nx, "s", "t")
         assert abs(fnx_cut_val - nx_cut_val) < 1e-9
+
+    def test_flow_bindings_reject_same_source_and_sink(self, fnx, nx):
+        DG_fnx, DG_nx = _directed_flow_pair(
+            fnx,
+            nx,
+            [
+                ("s", "a", 3.0),
+                ("a", "t", 2.0),
+            ],
+        )
+
+        for name in (
+            "maximum_flow",
+            "maximum_flow_value",
+            "minimum_cut",
+            "minimum_cut_value",
+        ):
+            fnx_flow_fn = getattr(fnx, name)
+            nx_flow_fn = getattr(nx, name)
+
+            with pytest.raises(fnx.NetworkXError, match="source and sink are the same node"):
+                fnx_flow_fn(DG_fnx, "s", "s")
+
+            with pytest.raises(nx.NetworkXError, match="source and sink are the same node"):
+                nx_flow_fn(DG_nx, "s", "s")

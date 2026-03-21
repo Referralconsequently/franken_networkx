@@ -433,17 +433,25 @@ impl Graph {
             return false;
         }
 
-        let incident_neighbors = self
-            .adjacency
-            .get(node)
-            .map_or_else(Vec::new, |neighbors| neighbors.iter().cloned().collect());
-
-        for neighbor in &incident_neighbors {
-            let _ = self.remove_edge(node, neighbor);
+        // 1. Remove node from its neighbors' adjacency lists.
+        if let Some(neighbors) = self.adjacency.get(node) {
+            let neighbor_names: Vec<String> = neighbors.keys().cloned().collect();
+            for neighbor in neighbor_names {
+                if neighbor != node {
+                    if let Some(remote_neighbors) = self.adjacency.get_mut(&neighbor) {
+                        remote_neighbors.shift_remove(node);
+                    }
+                }
+            }
         }
 
+        // 2. Remove all incident edges from the edges map using retain (O(E)).
+        self.edges.retain(|key, _| key.left != node && key.right != node);
+
+        // 3. Remove node from adjacency and nodes maps.
         self.adjacency.shift_remove(node);
         self.nodes.shift_remove(node);
+
         self.revision = self.revision.saturating_add(1);
         true
     }
@@ -924,24 +932,23 @@ impl MultiGraph {
             return false;
         }
 
-        let incident = self.adjacency.get(node).map_or_else(Vec::new, |neighbors| {
-            neighbors
-                .iter()
-                .map(|(neighbor, keys)| {
-                    (
-                        neighbor.clone(),
-                        keys.iter().copied().collect::<Vec<usize>>(),
-                    )
-                })
-                .collect::<Vec<(String, Vec<usize>)>>()
-        });
-
-        for (neighbor, keys) in incident {
-            for key in keys {
-                let _ = self.remove_edge(node, &neighbor, Some(key));
+        // 1. Remove node from its neighbors' adjacency lists.
+        if let Some(neighbors) = self.adjacency.get(node) {
+            let neighbor_names: Vec<String> = neighbors.keys().cloned().collect();
+            for neighbor in neighbor_names {
+                if neighbor != node {
+                    if let Some(remote_neighbors) = self.adjacency.get_mut(&neighbor) {
+                        remote_neighbors.shift_remove(node);
+                    }
+                }
             }
         }
 
+        // 2. Remove all incident edges from edges and next_edge_key maps using retain (O(E)).
+        self.edges.retain(|key, _| key.left != node && key.right != node);
+        self.next_edge_key.retain(|key, _| key.left != node && key.right != node);
+
+        // 3. Remove node from adjacency and nodes maps.
         self.adjacency.shift_remove(node);
         self.nodes.shift_remove(node);
         self.revision = self.revision.saturating_add(1);
