@@ -457,18 +457,32 @@ impl PyMultiDiGraph {
                 n.repr()?
             )));
         }
+
+        // surgically remove attributes for incident edges before removing node from inner graph
+        if let Some(succs) = self.inner.successors(&canonical) {
+            for v in succs {
+                if let Some(keys) = self.inner.edge_keys(&canonical, v) {
+                    for key in keys {
+                        let ek = Self::edge_key(&canonical, v, key);
+                        self.edge_py_attrs.remove(&ek);
+                    }
+                }
+            }
+        }
+        if let Some(preds) = self.inner.predecessors(&canonical) {
+            for u in preds {
+                if let Some(keys) = self.inner.edge_keys(u, &canonical) {
+                    for key in keys {
+                        let ek = Self::edge_key(u, &canonical, key);
+                        self.edge_py_attrs.remove(&ek);
+                    }
+                }
+            }
+        }
+
         self.inner.remove_node(&canonical);
         self.node_key_map.remove(&canonical);
         self.node_py_attrs.remove(&canonical);
-        let keys_to_remove: Vec<(String, String, usize)> = self
-            .edge_py_attrs
-            .keys()
-            .filter(|(u, v, _)| u == &canonical || v == &canonical)
-            .cloned()
-            .collect();
-        for k in keys_to_remove {
-            self.edge_py_attrs.remove(&k);
-        }
         Ok(())
     }
 
@@ -478,18 +492,29 @@ impl PyMultiDiGraph {
             let item = item?;
             let canonical = node_key_to_string(py, &item)?;
             if self.inner.has_node(&canonical) {
+                if let Some(succs) = self.inner.successors(&canonical) {
+                    for v in succs {
+                        if let Some(keys) = self.inner.edge_keys(&canonical, v) {
+                            for key in keys {
+                                let ek = Self::edge_key(&canonical, v, key);
+                                self.edge_py_attrs.remove(&ek);
+                            }
+                        }
+                    }
+                }
+                if let Some(preds) = self.inner.predecessors(&canonical) {
+                    for u in preds {
+                        if let Some(keys) = self.inner.edge_keys(u, &canonical) {
+                            for key in keys {
+                                let ek = Self::edge_key(u, &canonical, key);
+                                self.edge_py_attrs.remove(&ek);
+                            }
+                        }
+                    }
+                }
                 self.inner.remove_node(&canonical);
                 self.node_key_map.remove(&canonical);
                 self.node_py_attrs.remove(&canonical);
-                let keys_to_remove: Vec<(String, String, usize)> = self
-                    .edge_py_attrs
-                    .keys()
-                    .filter(|(u, v, _)| u == &canonical || v == &canonical)
-                    .cloned()
-                    .collect();
-                for k in keys_to_remove {
-                    self.edge_py_attrs.remove(&k);
-                }
             }
         }
         Ok(())
@@ -1560,18 +1585,24 @@ impl PyDiGraph {
                 n.repr()?
             )));
         }
+
+        // surgically remove attributes for incident edges before removing node from inner graph
+        if let Some(succs) = self.inner.successors(&canonical) {
+            for v in succs {
+                let ek = Self::edge_key(&canonical, v);
+                self.edge_py_attrs.remove(&ek);
+            }
+        }
+        if let Some(preds) = self.inner.predecessors(&canonical) {
+            for u in preds {
+                let ek = Self::edge_key(u, &canonical);
+                self.edge_py_attrs.remove(&ek);
+            }
+        }
+
         self.inner.remove_node(&canonical);
         self.node_key_map.remove(&canonical);
         self.node_py_attrs.remove(&canonical);
-        let keys_to_remove: Vec<(String, String)> = self
-            .edge_py_attrs
-            .keys()
-            .filter(|(u, v)| u == &canonical || v == &canonical)
-            .cloned()
-            .collect();
-        for k in keys_to_remove {
-            self.edge_py_attrs.remove(&k);
-        }
         Ok(())
     }
 
@@ -1581,18 +1612,21 @@ impl PyDiGraph {
             let item = item?;
             let canonical = node_key_to_string(py, &item)?;
             if self.inner.has_node(&canonical) {
+                if let Some(succs) = self.inner.successors(&canonical) {
+                    for v in succs {
+                        let ek = Self::edge_key(&canonical, v);
+                        self.edge_py_attrs.remove(&ek);
+                    }
+                }
+                if let Some(preds) = self.inner.predecessors(&canonical) {
+                    for u in preds {
+                        let ek = Self::edge_key(u, &canonical);
+                        self.edge_py_attrs.remove(&ek);
+                    }
+                }
                 self.inner.remove_node(&canonical);
                 self.node_key_map.remove(&canonical);
                 self.node_py_attrs.remove(&canonical);
-                let keys_to_remove: Vec<(String, String)> = self
-                    .edge_py_attrs
-                    .keys()
-                    .filter(|(u, v)| u == &canonical || v == &canonical)
-                    .cloned()
-                    .collect();
-                for k in keys_to_remove {
-                    self.edge_py_attrs.remove(&k);
-                }
             }
         }
         Ok(())
