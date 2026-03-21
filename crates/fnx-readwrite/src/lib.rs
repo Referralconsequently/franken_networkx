@@ -1283,10 +1283,7 @@ impl EdgeListEngine {
     ) -> Result<String, ReadWriteError> {
         let mut out = String::new();
         out.push_str("graph [\n");
-        out.push_str(&format!(
-            "  directed {}\n",
-            if directed { 1 } else { 0 }
-        ));
+        out.push_str(&format!("  directed {}\n", if directed { 1 } else { 0 }));
 
         // Build node-name → id map (use integer label if parseable, otherwise assign sequentially)
         let mut label_to_id: BTreeMap<String, i64> = BTreeMap::new();
@@ -1311,11 +1308,7 @@ impl EdgeListEngine {
             out.push_str(&format!("    label \"{}\"\n", gml_escape(node_name)));
             if let Some(attrs) = graph.node_attrs(node_name) {
                 for (key, value) in attrs {
-                    out.push_str(&format!(
-                        "    {} {}\n",
-                        key,
-                        gml_value_str(value)
-                    ));
+                    out.push_str(&format!("    {} {}\n", key, gml_value_str(value)));
                 }
             }
             out.push_str("  ]\n");
@@ -1328,11 +1321,7 @@ impl EdgeListEngine {
             out.push_str(&format!("    source {src_id}\n"));
             out.push_str(&format!("    target {tgt_id}\n"));
             for (key, value) in &edge.attrs {
-                out.push_str(&format!(
-                    "    {} {}\n",
-                    key,
-                    gml_value_str(value)
-                ));
+                out.push_str(&format!("    {} {}\n", key, gml_value_str(value)));
             }
             out.push_str("  ]\n");
         }
@@ -1356,19 +1345,26 @@ impl EdgeListEngine {
         if is_directed {
             warnings.push("GML declares directed=1 but read into undirected Graph".to_owned());
         }
-        self.record("read_gml", DecisionAction::Allow, "gml parse completed", 0.04);
+        self.record(
+            "read_gml",
+            DecisionAction::Allow,
+            "gml parse completed",
+            0.04,
+        );
         Ok(ReadWriteReport { graph, warnings })
     }
 
     /// Read a GML string into a directed graph.
-    pub fn read_digraph_gml(
-        &mut self,
-        input: &str,
-    ) -> Result<DiReadWriteReport, ReadWriteError> {
+    pub fn read_digraph_gml(&mut self, input: &str) -> Result<DiReadWriteReport, ReadWriteError> {
         let mut graph = DiGraph::new(self.mode);
         let mut warnings = Vec::new();
         let _ = self.read_gml_into(&mut graph, &mut warnings, input)?;
-        self.record("read_gml", DecisionAction::Allow, "digraph gml parse completed", 0.04);
+        self.record(
+            "read_gml",
+            DecisionAction::Allow,
+            "digraph gml parse completed",
+            0.04,
+        );
         Ok(DiReadWriteReport { graph, warnings })
     }
 
@@ -1408,7 +1404,8 @@ impl EdgeListEngine {
                 }
                 "node" if pos + 1 < tokens.len() && tokens[pos + 1] == "[" => {
                     pos += 2;
-                    let (id, label, attrs, new_pos) = self.parse_gml_node(&tokens, pos, warnings)?;
+                    let (id, label, attrs, new_pos) =
+                        self.parse_gml_node(&tokens, pos, warnings)?;
                     let node_label = label.unwrap_or_else(|| id.to_string());
                     id_to_label.insert(id, node_label.clone());
                     let _ = graph.add_node(node_label);
@@ -1430,14 +1427,14 @@ impl EdgeListEngine {
                         .cloned()
                         .unwrap_or_else(|| target.to_string());
                     // Ensure nodes exist
-                    if !id_to_label.contains_key(&source) {
+                    id_to_label.entry(source).or_insert_with(|| {
                         let _ = graph.add_node(source_label.clone());
-                        id_to_label.insert(source, source_label.clone());
-                    }
-                    if !id_to_label.contains_key(&target) {
+                        source_label.clone()
+                    });
+                    id_to_label.entry(target).or_insert_with(|| {
                         let _ = graph.add_node(target_label.clone());
-                        id_to_label.insert(target, target_label.clone());
-                    }
+                        target_label.clone()
+                    });
                     let _ = graph.add_edge_with_attrs(source_label, target_label, attrs);
                     pos = new_pos;
                 }
@@ -1484,10 +1481,7 @@ impl EdgeListEngine {
                 }
                 key => {
                     if pos + 1 < tokens.len() && tokens[pos + 1] != "[" && tokens[pos + 1] != "]" {
-                        attrs.insert(
-                            key.to_owned(),
-                            gml_unescape(&tokens[pos + 1]),
-                        );
+                        attrs.insert(key.to_owned(), gml_unescape(&tokens[pos + 1]));
                         pos += 2;
                     } else {
                         pos += 1;
@@ -1524,10 +1518,7 @@ impl EdgeListEngine {
                 }
                 key => {
                     if pos + 1 < tokens.len() && tokens[pos + 1] != "[" && tokens[pos + 1] != "]" {
-                        attrs.insert(
-                            key.to_owned(),
-                            gml_unescape(&tokens[pos + 1]),
-                        );
+                        attrs.insert(key.to_owned(), gml_unescape(&tokens[pos + 1]));
                         pos += 2;
                     } else {
                         pos += 1;
@@ -1638,9 +1629,7 @@ fn gml_escape(s: &str) -> String {
 
 /// Format a value for GML: try numeric, otherwise quote it.
 fn gml_value_str(value: &str) -> String {
-    if value.parse::<i64>().is_ok() {
-        value.to_owned()
-    } else if value.parse::<f64>().is_ok() {
+    if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
         value.to_owned()
     } else {
         format!("\"{}\"", gml_escape(value))

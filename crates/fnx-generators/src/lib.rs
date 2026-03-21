@@ -245,10 +245,11 @@ impl GraphGenerator {
     /// Generate a Watts-Strogatz small-world graph.
     ///
     /// Start with a ring lattice of `n` nodes where each node is connected
-    /// to its `k` nearest neighbours (k/2 on each side). Then rewire each
-    /// edge with probability `p`.
+    /// to its `k` nearest neighbours (floor(k/2) on each side). Then rewire
+    /// each edge with probability `p`.
     ///
-    /// Requires `k` to be even and `n >= k >= 2`.
+    /// Matches NetworkX semantics: odd `k` connects to `k - 1` nearest
+    /// neighbors, and `k == n` returns the complete graph.
     pub fn watts_strogatz_graph(
         &mut self,
         n: usize,
@@ -262,16 +263,19 @@ impl GraphGenerator {
             warnings.push(warning);
         }
 
-        if !k.is_multiple_of(2) {
+        if k > n {
             return Err(GenerationError::FailClosed {
                 operation: "watts_strogatz_graph",
-                reason: format!("k={k} must be even"),
+                reason: "k>n, choose smaller k or larger n".to_owned(),
             });
         }
-        if n < k || k < 2 {
+        if k == n {
+            return self.complete_graph(n);
+        }
+        if k < 2 {
             return Err(GenerationError::FailClosed {
                 operation: "watts_strogatz_graph",
-                reason: format!("requires n >= k >= 2, got n={n}, k={k}"),
+                reason: format!("requires k >= 2, got k={k}"),
             });
         }
 
@@ -489,24 +493,25 @@ impl GraphGenerator {
         p: f64,
         seed: u64,
     ) -> Result<GenerationReport, GenerationError> {
-        let (n, mut warnings) =
-            self.validate_n("newman_watts_strogatz_graph", n, MAX_N_GNP)?;
-        let (p, p_warning) =
-            self.validate_probability("newman_watts_strogatz_graph", p)?;
+        let (n, mut warnings) = self.validate_n("newman_watts_strogatz_graph", n, MAX_N_GNP)?;
+        let (p, p_warning) = self.validate_probability("newman_watts_strogatz_graph", p)?;
         if let Some(warning) = p_warning {
             warnings.push(warning);
         }
 
-        if !k.is_multiple_of(2) {
+        if k > n {
             return Err(GenerationError::FailClosed {
                 operation: "newman_watts_strogatz_graph",
-                reason: format!("k={k} must be even"),
+                reason: "k>=n, choose smaller k or larger n".to_owned(),
             });
         }
-        if n < k || k < 2 {
+        if k == n {
+            return self.complete_graph(n);
+        }
+        if k < 2 {
             return Err(GenerationError::FailClosed {
                 operation: "newman_watts_strogatz_graph",
-                reason: format!("requires n >= k >= 2, got n={n}, k={k}"),
+                reason: format!("requires k >= 2, got k={k}"),
             });
         }
 
@@ -524,7 +529,7 @@ impl GraphGenerator {
 
         // Step 2: Add shortcut edges with probability p (don't remove originals).
         for i in 0..n {
-            for j in 1..=half_k {
+            for _ in 1..=half_k {
                 if rng.random::<f64>() < p {
                     let mut new_target = rng.random_range(0..n);
                     let mut attempts = 0;
@@ -547,9 +552,7 @@ impl GraphGenerator {
             "newman_watts_strogatz_graph",
             DecisionAction::Allow,
             0.08,
-            format!(
-                "generated newman-watts-strogatz graph with n={n}, k={k}, p={p}, seed={seed}"
-            ),
+            format!("generated newman-watts-strogatz graph with n={n}, k={k}, p={p}, seed={seed}"),
         );
         Ok(GenerationReport { graph, warnings })
     }
@@ -563,11 +566,11 @@ impl GraphGenerator {
         n: usize,
         k: usize,
         p: f64,
+        tries: usize,
         seed: u64,
     ) -> Result<GenerationReport, GenerationError> {
-        let max_tries = 100;
-        for attempt in 0..max_tries {
-            let report = self.watts_strogatz_graph(n, k, p, seed.wrapping_add(attempt))?;
+        for attempt in 0..tries {
+            let report = self.watts_strogatz_graph(n, k, p, seed.wrapping_add(attempt as u64))?;
             // Check if the generated graph is connected via BFS.
             let is_connected = {
                 let nodes = report.graph.nodes_ordered();
@@ -596,9 +599,7 @@ impl GraphGenerator {
         }
         Err(GenerationError::FailClosed {
             operation: "connected_watts_strogatz_graph",
-            reason: format!(
-                "failed to generate a connected graph after {max_tries} attempts"
-            ),
+            reason: "Maximum number of tries exceeded".to_owned(),
         })
     }
 
@@ -614,7 +615,7 @@ impl GraphGenerator {
     ) -> Result<GenerationReport, GenerationError> {
         let (n, warnings) = self.validate_n("random_regular_graph", n, MAX_N_GNP)?;
 
-        if n * d % 2 != 0 {
+        if !(n * d).is_multiple_of(2) {
             return Err(GenerationError::FailClosed {
                 operation: "random_regular_graph",
                 reason: format!("n*d must be even, got n={n}, d={d}"),
@@ -670,18 +671,14 @@ impl GraphGenerator {
 
             if valid {
                 for pair in stubs.chunks_exact(2) {
-                    let _ = graph.add_edge(
-                        node_labels[pair[0]].clone(),
-                        node_labels[pair[1]].clone(),
-                    );
+                    let _ =
+                        graph.add_edge(node_labels[pair[0]].clone(), node_labels[pair[1]].clone());
                 }
                 self.record(
                     "random_regular_graph",
                     DecisionAction::Allow,
                     0.08,
-                    format!(
-                        "generated random regular graph with n={n}, d={d}, seed={seed}"
-                    ),
+                    format!("generated random regular graph with n={n}, d={d}, seed={seed}"),
                 );
                 return Ok(GenerationReport { graph, warnings });
             }
@@ -689,9 +686,7 @@ impl GraphGenerator {
 
         Err(GenerationError::FailClosed {
             operation: "random_regular_graph",
-            reason: format!(
-                "failed to generate a valid regular graph after {max_tries} attempts"
-            ),
+            reason: format!("failed to generate a valid regular graph after {max_tries} attempts"),
         })
     }
 
@@ -707,10 +702,8 @@ impl GraphGenerator {
         p: f64,
         seed: u64,
     ) -> Result<GenerationReport, GenerationError> {
-        let (n, mut warnings) =
-            self.validate_n("powerlaw_cluster_graph", n, MAX_N_GNP)?;
-        let (p, p_warning) =
-            self.validate_probability("powerlaw_cluster_graph", p)?;
+        let (n, mut warnings) = self.validate_n("powerlaw_cluster_graph", n, MAX_N_GNP)?;
+        let (p, p_warning) = self.validate_probability("powerlaw_cluster_graph", p)?;
         if let Some(warning) = p_warning {
             warnings.push(warning);
         }
@@ -771,10 +764,8 @@ impl GraphGenerator {
                         })
                         .collect();
                     if !candidates.is_empty() {
-                        let chosen_name =
-                            candidates[rng.random_range(0..candidates.len())];
-                        let chosen_idx =
-                            chosen_name.parse::<usize>().unwrap_or(n);
+                        let chosen_name = candidates[rng.random_range(0..candidates.len())];
+                        let chosen_idx = chosen_name.parse::<usize>().unwrap_or(n);
                         if chosen_idx < n {
                             target_set.insert(chosen_idx);
                             targets.push(chosen_idx);
@@ -802,10 +793,7 @@ impl GraphGenerator {
             }
 
             for &target in &targets {
-                let _ = graph.add_edge(
-                    node_labels[source].clone(),
-                    node_labels[target].clone(),
-                );
+                let _ = graph.add_edge(node_labels[source].clone(), node_labels[target].clone());
                 repeated_nodes.push(source);
                 repeated_nodes.push(target);
             }
@@ -815,9 +803,7 @@ impl GraphGenerator {
             "powerlaw_cluster_graph",
             DecisionAction::Allow,
             0.08,
-            format!(
-                "generated powerlaw cluster graph with n={n}, m={m}, p={p}, seed={seed}"
-            ),
+            format!("generated powerlaw cluster graph with n={n}, m={m}, p={p}, seed={seed}"),
         );
         Ok(GenerationReport { graph, warnings })
     }
@@ -1069,12 +1055,23 @@ mod tests {
     }
 
     #[test]
-    fn watts_strogatz_rejects_odd_k() {
+    fn watts_strogatz_accepts_odd_k_as_k_minus_one_neighbors() {
         let mut gg = GraphGenerator::strict();
-        let err = gg
-            .watts_strogatz_graph(10, 3, 0.1, 1)
-            .expect_err("odd k should fail");
-        assert!(matches!(err, GenerationError::FailClosed { .. }));
+        let report = gg
+            .watts_strogatz_graph(7, 3, 0.0, 1)
+            .expect("odd k should succeed");
+        assert_eq!(report.graph.node_count(), 7);
+        assert_eq!(report.graph.edge_count(), 7);
+    }
+
+    #[test]
+    fn watts_strogatz_k_equal_n_returns_complete_graph() {
+        let mut gg = GraphGenerator::strict();
+        let report = gg
+            .watts_strogatz_graph(6, 6, 0.3, 1)
+            .expect("k == n should succeed");
+        assert_eq!(report.graph.node_count(), 6);
+        assert_eq!(report.graph.edge_count(), 15);
     }
 
     #[test]
@@ -1083,6 +1080,25 @@ mod tests {
         let err = gg
             .watts_strogatz_graph(4, 6, 0.1, 1)
             .expect_err("k > n should fail");
+        assert!(matches!(err, GenerationError::FailClosed { .. }));
+    }
+
+    #[test]
+    fn newman_watts_strogatz_accepts_odd_k_as_k_minus_one_neighbors() {
+        let mut gg = GraphGenerator::strict();
+        let report = gg
+            .newman_watts_strogatz_graph(7, 3, 0.0, 1)
+            .expect("odd k should succeed");
+        assert_eq!(report.graph.node_count(), 7);
+        assert_eq!(report.graph.edge_count(), 7);
+    }
+
+    #[test]
+    fn connected_watts_strogatz_zero_tries_fails_immediately() {
+        let mut gg = GraphGenerator::strict();
+        let err = gg
+            .connected_watts_strogatz_graph(10, 4, 0.5, 0, 1)
+            .expect_err("zero tries should fail");
         assert!(matches!(err, GenerationError::FailClosed { .. }));
     }
 

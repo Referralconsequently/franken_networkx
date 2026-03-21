@@ -6278,7 +6278,7 @@ pub fn greedy_color_with_strategy(graph: &Graph, strategy: &str) -> GreedyColorR
         }
         "smallest_last" => {
             // Iteratively remove the smallest-degree node, then reverse
-            let mut remaining: Vec<&str> = nodes.clone();
+            let remaining: Vec<&str> = nodes.clone();
             let mut order = Vec::with_capacity(n);
             let mut removed = HashSet::new();
             for _ in 0..n {
@@ -6286,12 +6286,12 @@ pub fn greedy_color_with_strategy(graph: &Graph, strategy: &str) -> GreedyColorR
                     .iter()
                     .filter(|nd| !removed.contains(*nd))
                     .min_by(|a, b| {
-                        let deg_a = graph
-                            .neighbors(*a)
-                            .map_or(0, |nbrs| nbrs.iter().filter(|nb| !removed.contains(*nb)).count());
-                        let deg_b = graph
-                            .neighbors(*b)
-                            .map_or(0, |nbrs| nbrs.iter().filter(|nb| !removed.contains(*nb)).count());
+                        let deg_a = graph.neighbors(a).map_or(0, |nbrs| {
+                            nbrs.iter().filter(|nb| !removed.contains(*nb)).count()
+                        });
+                        let deg_b = graph.neighbors(b).map_or(0, |nbrs| {
+                            nbrs.iter().filter(|nb| !removed.contains(*nb)).count()
+                        });
                         deg_a.cmp(&deg_b).then_with(|| a.cmp(b))
                     })
                     .copied();
@@ -6319,22 +6319,18 @@ pub fn greedy_color_with_strategy(graph: &Graph, strategy: &str) -> GreedyColorR
                     .iter()
                     .filter(|nd| !colored.contains_key(*nd))
                     .max_by(|a, b| {
-                        let sat_a = graph
-                            .neighbors(a)
-                            .map_or(0, |nbrs| {
-                                nbrs.iter()
-                                    .filter_map(|nb| colored.get(nb))
-                                    .collect::<HashSet<_>>()
-                                    .len()
-                            });
-                        let sat_b = graph
-                            .neighbors(b)
-                            .map_or(0, |nbrs| {
-                                nbrs.iter()
-                                    .filter_map(|nb| colored.get(nb))
-                                    .collect::<HashSet<_>>()
-                                    .len()
-                            });
+                        let sat_a = graph.neighbors(a).map_or(0, |nbrs| {
+                            nbrs.iter()
+                                .filter_map(|nb| colored.get(nb))
+                                .collect::<HashSet<_>>()
+                                .len()
+                        });
+                        let sat_b = graph.neighbors(b).map_or(0, |nbrs| {
+                            nbrs.iter()
+                                .filter_map(|nb| colored.get(nb))
+                                .collect::<HashSet<_>>()
+                                .len()
+                        });
                         sat_a
                             .cmp(&sat_b)
                             .then_with(|| graph.degree(b).cmp(&graph.degree(a)))
@@ -6409,7 +6405,7 @@ pub fn greedy_color_with_strategy(graph: &Graph, strategy: &str) -> GreedyColorR
         }
     }
 
-    let coloring: Vec<NodeColor> = sorted_nodes
+    let coloring: Vec<NodeColor> = ordered_nodes
         .iter()
         .map(|&node| NodeColor {
             node: node.to_owned(),

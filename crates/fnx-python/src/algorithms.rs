@@ -2472,11 +2472,22 @@ pub fn bipartite_sets(
 }
 
 /// Return a greedy graph coloring as a dict mapping node -> color.
+///
+/// Parameters
+/// ----------
+/// g : Graph or DiGraph
+///     The input graph.
+/// strategy : str, optional
+///     Node ordering strategy. One of ``"largest_first"`` (default),
+///     ``"smallest_last"``, ``"random_sequential"``, ``"DSATUR"``,
+///     ``"saturation_largest_first"``, or ``"connected_sequential"``.
 #[pyfunction]
-pub fn greedy_color(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+#[pyo3(signature = (g, strategy="largest_first"))]
+pub fn greedy_color(py: Python<'_>, g: &Bound<'_, PyAny>, strategy: &str) -> PyResult<Py<PyDict>> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::greedy_color(inner));
+    let s = strategy.to_owned();
+    let result = py.allow_threads(move || fnx_algorithms::greedy_color_with_strategy(inner, &s));
     let dict = PyDict::new(py);
     for nc in &result.coloring {
         dict.set_item(gr.py_node_key(py, &nc.node), nc.color)?;

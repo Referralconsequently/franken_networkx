@@ -299,6 +299,38 @@ class TestGenerators:
         assert G.number_of_nodes() == 20
         assert fnx.is_connected(G)
 
+    @needs_nx
+    def test_watts_strogatz_accepts_odd_k_like_networkx(self):
+        fnx_graph = fnx.watts_strogatz_graph(7, 3, 0.0, seed=42)
+        nx_graph = nx.watts_strogatz_graph(7, 3, 0.0, seed=42)
+        assert fnx_graph.number_of_nodes() == nx_graph.number_of_nodes()
+        assert fnx_graph.number_of_edges() == nx_graph.number_of_edges() == 7
+        assert sorted(dict(fnx_graph.degree).values()) == sorted(
+            dict(nx_graph.degree()).values()
+        )
+
+    @needs_nx
+    def test_newman_watts_strogatz_accepts_odd_k_like_networkx(self):
+        fnx_graph = fnx.newman_watts_strogatz_graph(7, 3, 0.0, seed=42)
+        nx_graph = nx.newman_watts_strogatz_graph(7, 3, 0.0, seed=42)
+        assert fnx_graph.number_of_nodes() == nx_graph.number_of_nodes()
+        assert fnx_graph.number_of_edges() == nx_graph.number_of_edges() == 7
+        assert sorted(dict(fnx_graph.degree).values()) == sorted(
+            dict(nx_graph.degree()).values()
+        )
+
+    @needs_nx
+    def test_connected_watts_strogatz_accepts_tries_keyword(self):
+        fnx_graph = fnx.connected_watts_strogatz_graph(12, 4, 0.2, tries=5, seed=42)
+        nx_graph = nx.connected_watts_strogatz_graph(12, 4, 0.2, tries=5, seed=42)
+        assert fnx_graph.number_of_nodes() == nx_graph.number_of_nodes() == 12
+        assert fnx.is_connected(fnx_graph)
+        assert nx.is_connected(nx_graph)
+
+    def test_connected_watts_strogatz_zero_tries_raises(self):
+        with pytest.raises(ValueError, match="Maximum number of tries exceeded"):
+            fnx.connected_watts_strogatz_graph(12, 4, 0.2, tries=0, seed=42)
+
 
 # ---------------------------------------------------------------------------
 # Misc

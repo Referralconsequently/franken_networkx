@@ -141,7 +141,8 @@ pub fn gnp_random_graph(py: Python<'_>, n: usize, p: f64, seed: u64) -> PyResult
 ///     Number of nodes.
 /// k : int
 ///     Each node is joined with its ``k`` nearest neighbors in a ring
-///     topology.  Must be even.
+///     topology. If ``k`` is odd, this matches NetworkX by using ``k - 1``
+///     nearest neighbors.
 /// p : float
 ///     Probability of rewiring each edge.
 /// seed : int
@@ -208,17 +209,18 @@ pub fn newman_watts_strogatz_graph(
 /// Return a connected Watts-Strogatz small-world graph.
 ///
 /// Repeatedly generates Watts-Strogatz graphs until a connected one is found.
-#[pyfunction]
+#[pyfunction(signature = (n, k, p, tries=100, seed=0))]
 pub fn connected_watts_strogatz_graph(
     py: Python<'_>,
     n: usize,
     k: usize,
     p: f64,
+    tries: usize,
     seed: u64,
 ) -> PyResult<PyGraph> {
     let mut gg = GraphGenerator::strict();
     let report = gg
-        .connected_watts_strogatz_graph(n, k, p, seed)
+        .connected_watts_strogatz_graph(n, k, p, tries, seed)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e:?}")))?;
     report_to_pygraph(py, report.graph)
 }

@@ -381,12 +381,18 @@ fn read_gml(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyObject> {
         let report = py
             .allow_threads(|| engine.read_digraph_gml(&input))
             .map_err(rw_error_to_py)?;
-        Ok(di_report_to_pydigraph(py, report)?.into_pyobject(py)?.into_any().unbind())
+        Ok(di_report_to_pydigraph(py, report)?
+            .into_pyobject(py)?
+            .into_any()
+            .unbind())
     } else {
         let report = py
             .allow_threads(|| engine.read_gml(&input))
             .map_err(rw_error_to_py)?;
-        Ok(report_to_pygraph(py, report)?.into_pyobject(py)?.into_any().unbind())
+        Ok(report_to_pygraph(py, report)?
+            .into_pyobject(py)?
+            .into_any()
+            .unbind())
     }
 }
 
