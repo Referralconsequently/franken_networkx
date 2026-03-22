@@ -34,19 +34,28 @@ def graph_snapshot(nx_graph: Any) -> dict[str, Any]:
     }
 
 
+def node_ops(nx_graph: Any) -> list[dict[str, Any]]:
+    """Generate add_node operations list from a NetworkX graph to preserve order."""
+    return [{"op": "add_node", "node": str(node)} for node in nx_graph.nodes()]
+
+
 def edge_ops(nx_graph: Any) -> list[dict[str, Any]]:
     """Generate add_edge operations list from a NetworkX graph."""
     ops: list[dict[str, Any]] = []
-    for left, right, attrs in nx_graph.edges(data=True):
-        canonical_left, canonical_right = canonical_edge(str(left), str(right))
-        entry: dict[str, Any] = {
-            "op": "add_edge",
-            "left": canonical_left,
-            "right": canonical_right,
-        }
-        if attrs:
-            entry["attrs"] = to_attr_str_map(dict(attrs))
-        ops.append(entry)
+    # Use explicit node order from graph to try and keep edge discovery stable
+    for u in nx_graph.nodes():
+        for v in nx_graph.neighbors(u):
+            if u <= v:
+                attrs = nx_graph.get_edge_data(u, v)
+                canonical_left, canonical_right = canonical_edge(str(u), str(v))
+                entry: dict[str, Any] = {
+                    "op": "add_edge",
+                    "left": canonical_left,
+                    "right": canonical_right,
+                }
+                if attrs:
+                    entry["attrs"] = to_attr_str_map(dict(attrs))
+                ops.append(entry)
     return ops
 
 
@@ -788,11 +797,7 @@ def main() -> int:
     tree_fixture = {
         "suite": "tree_v1",
         "mode": "strict",
-        "operations": [
-            {"op": "add_edge", "left": "a", "right": "b"},
-            {"op": "add_edge", "left": "a", "right": "c"},
-            {"op": "add_edge", "left": "b", "right": "d"},
-            {"op": "add_edge", "left": "b", "right": "e"},
+        "operations": node_ops(tree_graph) + edge_ops(tree_graph) + [
             {"op": "is_tree_query"},
             {"op": "is_forest_query"},
         ],
@@ -812,32 +817,21 @@ def main() -> int:
     color_graph.add_edge("b", "d")
     color_graph.add_edge("c", "d")
     color_graph.add_edge("d", "e")
-    # Greedy coloring in sorted node order
-    sorted_nodes = sorted(color_graph.nodes())
-    coloring = {}
-    for node in sorted_nodes:
-        neighbor_colors = {coloring[n] for n in color_graph.neighbors(node) if n in coloring}
-        color = 0
-        while color in neighbor_colors:
-            color += 1
-        coloring[node] = color
+    # Greedy coloring using NetworkX default (largest_first)
+    coloring = nx.greedy_color(color_graph, strategy="largest_first")
     num_colors = max(coloring.values()) + 1 if coloring else 0
+    # Use sorted nodes for consistent JSON output of the coloring
+    sorted_nodes = sorted(color_graph.nodes())
     color_fixture = {
         "suite": "coloring_v1",
         "mode": "strict",
-        "operations": [
-            {"op": "add_edge", "left": "a", "right": "b"},
-            {"op": "add_edge", "left": "a", "right": "c"},
-            {"op": "add_edge", "left": "b", "right": "c"},
-            {"op": "add_edge", "left": "b", "right": "d"},
-            {"op": "add_edge", "left": "c", "right": "d"},
-            {"op": "add_edge", "left": "d", "right": "e"},
+        "operations": node_ops(color_graph) + edge_ops(color_graph) + [
             {"op": "greedy_color_query"},
         ],
         "expected": {
             "graph": graph_snapshot(color_graph),
             "greedy_coloring": [
-                {"node": n, "color": coloring[n]} for n in sorted_nodes
+                {"node": str(n), "color": coloring[n]} for n in sorted_nodes
             ],
             "num_colors": num_colors,
         },
@@ -857,15 +851,11 @@ def main() -> int:
     bip_fixture = {
         "suite": "bipartite_v1",
         "mode": "strict",
-        "operations": [
-            {"op": "add_edge", "left": "a", "right": "b"},
-            {"op": "add_edge", "left": "a", "right": "d"},
-            {"op": "add_edge", "left": "c", "right": "b"},
-            {"op": "add_edge", "left": "c", "right": "d"},
-            {"op": "add_edge", "left": "e", "right": "b"},
+        "operations": node_ops(bip_graph) + edge_ops(bip_graph) + [
             {"op": "is_bipartite_query"},
             {"op": "bipartite_sets_query"},
         ],
+
         "expected": {
             "graph": graph_snapshot(bip_graph),
             "is_bipartite": bool(nx_is_bipartite(bip_graph)),
@@ -883,13 +873,7 @@ def main() -> int:
     cn_fixture = {
         "suite": "core_number_v1",
         "mode": "strict",
-        "operations": [
-            {"op": "add_edge", "left": "a", "right": "b", "attrs": {"weight": "5"}},
-            {"op": "add_edge", "left": "a", "right": "c", "attrs": {"weight": "1"}},
-            {"op": "add_edge", "left": "b", "right": "c", "attrs": {"weight": "3"}},
-            {"op": "add_edge", "left": "b", "right": "d", "attrs": {"weight": "2"}},
-            {"op": "add_edge", "left": "c", "right": "d", "attrs": {"weight": "4"}},
-            {"op": "add_edge", "left": "d", "right": "e", "attrs": {"weight": "6"}},
+        "operations": node_ops(core_graph) + edge_ops(core_graph) + [
             {"op": "core_number_query"},
         ],
         "expected": {
@@ -909,13 +893,7 @@ def main() -> int:
     and_fixture = {
         "suite": "avg_neighbor_degree_v1",
         "mode": "strict",
-        "operations": [
-            {"op": "add_edge", "left": "a", "right": "b", "attrs": {"weight": "5"}},
-            {"op": "add_edge", "left": "a", "right": "c", "attrs": {"weight": "1"}},
-            {"op": "add_edge", "left": "b", "right": "c", "attrs": {"weight": "3"}},
-            {"op": "add_edge", "left": "b", "right": "d", "attrs": {"weight": "2"}},
-            {"op": "add_edge", "left": "c", "right": "d", "attrs": {"weight": "4"}},
-            {"op": "add_edge", "left": "d", "right": "e", "attrs": {"weight": "6"}},
+        "operations": node_ops(and_graph) + edge_ops(and_graph) + [
             {"op": "average_neighbor_degree_query"},
             {"op": "degree_assortativity_query"},
             {"op": "voterank_query"},
@@ -947,7 +925,7 @@ def main() -> int:
     nc_fixture = {
         "suite": "node_connectivity_v1",
         "mode": "strict",
-        "operations": edge_ops(nc_graph) + [
+        "operations": node_ops(nc_graph) + edge_ops(nc_graph) + [
             {"op": "node_connectivity_query", "source": "a", "target": "e"},
             {"op": "minimum_node_cut_query", "source": "a", "target": "e"},
             {"op": "global_node_connectivity_query"},
@@ -976,7 +954,7 @@ def main() -> int:
     clique_fixture = {
         "suite": "cliques_v1",
         "mode": "strict",
-        "operations": edge_ops(clique_graph) + [{"op": "find_cliques_query"}],
+        "operations": node_ops(clique_graph) + edge_ops(clique_graph) + [{"op": "find_cliques_query"}],
         "expected": {
             "graph": graph_snapshot(clique_graph),
             "cliques": cliques,
@@ -992,7 +970,7 @@ def main() -> int:
     cb_fixture = {
         "suite": "cycle_basis_v1",
         "mode": "strict",
-        "operations": edge_ops(cb_graph) + [{"op": "cycle_basis_query"}],
+        "operations": node_ops(cb_graph) + edge_ops(cb_graph) + [{"op": "cycle_basis_query"}],
         "expected": {
             "graph": graph_snapshot(cb_graph),
             "cycle_basis": cycles,
@@ -1014,7 +992,7 @@ def main() -> int:
     pec_fixture = {
         "suite": "paths_efficiency_cover_v1",
         "mode": "strict",
-        "operations": edge_ops(pec_graph) + [
+        "operations": node_ops(pec_graph) + edge_ops(pec_graph) + [
             {"op": "all_simple_paths_query", "source": "a", "target": "e"},
             {"op": "global_efficiency_query"},
             {"op": "local_efficiency_query"},
@@ -1071,7 +1049,7 @@ def main() -> int:
     euler_fixture = {
         "suite": "euler_v1",
         "mode": "strict",
-        "operations": edge_ops(euler_circuit_graph) + [
+        "operations": node_ops(euler_circuit_graph) + edge_ops(euler_circuit_graph) + [
             {"op": "is_eulerian_query"},
             {"op": "has_eulerian_path_query"},
             {"op": "is_semieulerian_query"},
@@ -1090,7 +1068,7 @@ def main() -> int:
     euler_path_fixture = {
         "suite": "euler_path_v1",
         "mode": "strict",
-        "operations": edge_ops(euler_path_graph) + [
+        "operations": node_ops(euler_path_graph) + edge_ops(euler_path_graph) + [
             {"op": "is_eulerian_query"},
             {"op": "has_eulerian_path_query"},
             {"op": "is_semieulerian_query"},

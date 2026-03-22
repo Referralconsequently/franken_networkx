@@ -10,7 +10,6 @@ use crate::{
 };
 use fnx_classes::AttrMap;
 use fnx_classes::digraph::{DiGraph, MultiDiGraph};
-use fnx_runtime::CgseValue;
 use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyIterator, PyTuple};

@@ -3,6 +3,26 @@
   "mode": "strict",
   "operations": [
     {
+      "op": "add_node",
+      "node": "a"
+    },
+    {
+      "op": "add_node",
+      "node": "b"
+    },
+    {
+      "op": "add_node",
+      "node": "c"
+    },
+    {
+      "op": "add_node",
+      "node": "d"
+    },
+    {
+      "op": "add_node",
+      "node": "e"
+    },
+    {
       "op": "add_edge",
       "left": "a",
       "right": "b",
