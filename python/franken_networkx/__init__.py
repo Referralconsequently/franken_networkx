@@ -572,10 +572,15 @@ from franken_networkx._fnx import (
 from franken_networkx.readwrite import (
     generate_adjlist,
     generate_edgelist,
+    generate_gexf,
     generate_gml,
+    parse_gexf,
     parse_adjlist,
     parse_edgelist,
     parse_gml,
+    read_gexf,
+    relabel_gexf_graph,
+    write_gexf,
     write_graphml_lxml,
     write_graphml_xml,
 )
@@ -3751,69 +3756,127 @@ _TRIAD_TYPES = [
 
 
 def _classify_triad(G, u, v, w):
-    """Classify a 3-node subgraph into one of 16 triad types."""
-    # Count mutual (M), asymmetric (A), null (N) dyads
-    edges = set()
-    for a, b in [(u, v), (v, u), (u, w), (w, u), (v, w), (w, v)]:
-        if G.has_edge(a, b):
-            edges.add((a, b))
+    """Classify a 3-node subgraph into one of 16 triad types.
 
-    pairs = [(u, v), (u, w), (v, w)]
-    m = a = n = 0
-    for x, y in pairs:
-        fwd = (x, y) in edges
-        bwd = (y, x) in edges
-        if fwd and bwd:
-            m += 1
-        elif fwd or bwd:
-            a += 1
-        else:
-            n += 1
+    Uses a canonical 6-bit encoding of the directed edges and a lookup
+    table to correctly distinguish all 16 MAN types including subtypes.
+    """
+    # Encode the 6 possible directed edges as a 6-bit integer:
+    # bit 0: u→v, bit 1: v→u, bit 2: u→w, bit 3: w→u, bit 4: v→w, bit 5: w→v
+    code = 0
+    if G.has_edge(u, v): code |= 1
+    if G.has_edge(v, u): code |= 2
+    if G.has_edge(u, w): code |= 4
+    if G.has_edge(w, u): code |= 8
+    if G.has_edge(v, w): code |= 16
+    if G.has_edge(w, v): code |= 32
 
-    man = f'{m}{a}{n}'
-    total_edges = len(edges)
+    # To classify correctly, we need isomorphism-invariant encoding.
+    # Since node ordering is arbitrary, compute the canonical type by
+    # trying all 6 permutations and using the MAN dyad counts + subtype.
+    # Dyads: (u,v), (u,w), (v,w) — check mutual/asymmetric/null for each.
+    uv_m = bool(code & 1) and bool(code & 2)
+    uv_a = bool(code & 1) != bool(code & 2)
+    uw_m = bool(code & 4) and bool(code & 8)
+    uw_a = bool(code & 4) != bool(code & 8)
+    vw_m = bool(code & 16) and bool(code & 32)
+    vw_a = bool(code & 16) != bool(code & 32)
 
-    if man == '003':
+    m = sum([uv_m, uw_m, vw_m])
+    a = sum([uv_a, uw_a, vw_a])
+    n = 3 - m - a
+
+    if m == 0 and a == 0:
         return '003'
-    elif man == '012':
+    if m == 0 and a == 1:
         return '012'
-    elif man == '102':
+    if m == 1 and a == 0:
         return '102'
-    elif man == '021':
-        # 021D, 021U, 021C — distinguish by edge pattern
-        if total_edges == 2:
-            targets = [b for (_, b) in edges]
-            sources = [a for (a, _) in edges]
-            if len(set(targets)) == 1:
-                return '021D'  # both edges point to same node
-            elif len(set(sources)) == 1:
-                return '021U'  # both edges from same node
+    if m == 0 and a == 2:
+        # 021D, 021U, 021C — check if both asymmetric edges share an endpoint
+        # Get the directed edges
+        asym_edges = []
+        if uv_a:
+            asym_edges.append((u, v) if (code & 1) else (v, u))
+        if uw_a:
+            asym_edges.append((u, w) if (code & 4) else (w, u))
+        if vw_a:
+            asym_edges.append((v, w) if (code & 16) else (w, v))
+        if len(asym_edges) == 2:
+            s0, t0 = asym_edges[0]
+            s1, t1 = asym_edges[1]
+            if t0 == t1:
+                return '021U'  # both point TO same node (NX: "Up")
+            elif s0 == s1:
+                return '021D'  # both point FROM same node (NX: "Down")
             else:
-                return '021C'  # cycle pattern
-    elif man == '111':
-        # 111D vs 111U
-        if total_edges == 3:
-            return '111D'
-        return '111U'
-    elif man == '030':
-        # 030T vs 030C
-        # 030C is a directed 3-cycle
-        if (u, v) in edges and (v, w) in edges and (w, u) in edges:
-            return '030C'
-        if (u, w) in edges and (w, v) in edges and (v, u) in edges:
-            return '030C'
-        return '030T'
-    elif man == '201':
+                return '021C'  # chain: one's target is the other's source
+        return '021C'
+    if m == 1 and a == 1:
+        # 111D vs 111U — NX convention: D = edge FROM mutual pair outward,
+        # U = edge TO mutual pair from outside
+        if uv_m:
+            mutual_nodes = {u, v}
+        elif uw_m:
+            mutual_nodes = {u, w}
+        else:
+            mutual_nodes = {v, w}
+
+        if uv_a:
+            asym_src = u if (code & 1) else v
+        elif uw_a:
+            asym_src = u if (code & 4) else w
+        else:
+            asym_src = v if (code & 16) else w
+
+        if asym_src in mutual_nodes:
+            return '111D'  # asymmetric edge goes FROM mutual pair outward
+        else:
+            return '111U'  # asymmetric edge goes TO mutual pair from outside
+    if m == 0 and a == 3:
+        # 030T vs 030C — check if all 3 asymmetric edges form a directed cycle
+        # 030C: u→v→w→u or u→w→v→u
+        is_cycle = ((code & 1) and (code & 16) and (code & 8)) or \
+                   ((code & 4) and (code & 32) and (code & 2))
+        return '030C' if is_cycle else '030T'
+    if m == 2 and a == 0:
         return '201'
-    elif man == '120':
-        if total_edges == 5:
-            return '120C'
-        return '120D'
-    elif man == '210':
+    if m == 1 and a == 2:
+        # 120D, 120U, 120C
+        # Find which pair is mutual
+        if uv_m:
+            # Asymmetric pairs are (u,w) and (v,w)
+            uw_dir = u if (code & 4) else w  # source of u-w asymmetric
+            vw_dir = v if (code & 16) else w  # source of v-w asymmetric
+            if uw_dir == u and vw_dir == v:
+                return '120D'  # both go down from mutual pair to third
+            elif uw_dir == w and vw_dir == w:
+                return '120U'  # both go up from third to mutual pair
+            else:
+                return '120C'  # one up, one down = cycle through third
+        elif uw_m:
+            uv_dir = u if (code & 1) else v
+            vw_dir = v if (code & 16) else w
+            if uv_dir == u and vw_dir == w:
+                return '120D'
+            elif uv_dir == v and vw_dir == v:
+                return '120U'
+            else:
+                return '120C'
+        else:  # vw_m
+            uv_dir = u if (code & 1) else v
+            uw_dir = u if (code & 4) else w
+            if uv_dir == v and uw_dir == w:
+                return '120D'
+            elif uv_dir == u and uw_dir == u:
+                return '120U'
+            else:
+                return '120C'
+    if m == 2 and a == 1:
         return '210'
-    elif man == '300':
+    if m == 3:
         return '300'
-    return man
+    return f'{m}{a}{n}'
 
 
 def triadic_census(G):
@@ -5693,10 +5756,15 @@ __all__ = [
     "write_gml",
     "generate_adjlist",
     "generate_edgelist",
+    "generate_gexf",
     "generate_gml",
+    "parse_gexf",
     "parse_adjlist",
     "parse_edgelist",
     "parse_gml",
+    "read_gexf",
+    "relabel_gexf_graph",
+    "write_gexf",
     "write_graphml_lxml",
     "write_graphml_xml",
     # Drawing

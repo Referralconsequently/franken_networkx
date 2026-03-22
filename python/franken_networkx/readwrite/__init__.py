@@ -1,5 +1,7 @@
 """Pure-Python graph I/O helpers layered on top of the core bindings."""
 
+from io import BytesIO
+
 from franken_networkx.drawing.layout import _to_nx
 
 
@@ -137,3 +139,58 @@ def write_graphml_lxml(
     import franken_networkx as fnx
 
     return fnx.write_graphml(G, path)
+
+
+def read_gexf(path, node_type=None, relabel=False, version="1.2draft"):
+    """Read GEXF through NetworkX and convert the result back to FrankenNetworkX."""
+    import networkx as nx
+
+    graph = nx.read_gexf(
+        path,
+        node_type=node_type,
+        relabel=relabel,
+        version=version,
+    )
+    return _from_nx_graph(graph)
+
+
+def write_gexf(G, path, encoding="utf-8", prettyprint=True, version="1.2draft"):
+    """Write GEXF through NetworkX."""
+    import networkx as nx
+
+    return nx.write_gexf(
+        _to_nx(G),
+        path,
+        encoding=encoding,
+        prettyprint=prettyprint,
+        version=version,
+    )
+
+
+def generate_gexf(G, encoding="utf-8", prettyprint=True, version="1.2draft"):
+    """Yield GEXF lines through NetworkX."""
+    import networkx as nx
+
+    yield from nx.generate_gexf(
+        _to_nx(G),
+        encoding=encoding,
+        prettyprint=prettyprint,
+        version=version,
+    )
+
+
+def parse_gexf(string, node_type=None, relabel=False, version="1.2draft"):
+    """Parse a GEXF string into a FrankenNetworkX graph."""
+    return read_gexf(
+        BytesIO(string.encode("utf-8")),
+        node_type=node_type,
+        relabel=relabel,
+        version=version,
+    )
+
+
+def relabel_gexf_graph(G):
+    """Relabel a GEXF graph from internal ids to labels via NetworkX."""
+    import networkx as nx
+
+    return _from_nx_graph(nx.relabel_gexf_graph(_to_nx(G)))
