@@ -8310,6 +8310,19 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(group_degree_centrality, m)?)?;
     m.add_function(wrap_pyfunction!(group_in_degree_centrality, m)?)?;
     m.add_function(wrap_pyfunction!(group_out_degree_centrality, m)?)?;
+    // Expansion and conductance metrics
+    m.add_function(wrap_pyfunction!(volume, m)?)?;
+    m.add_function(wrap_pyfunction!(boundary_expansion, m)?)?;
+    m.add_function(wrap_pyfunction!(conductance, m)?)?;
+    m.add_function(wrap_pyfunction!(edge_expansion, m)?)?;
+    m.add_function(wrap_pyfunction!(node_expansion, m)?)?;
+    m.add_function(wrap_pyfunction!(mixing_expansion, m)?)?;
+    m.add_function(wrap_pyfunction!(non_edges, m)?)?;
+    m.add_function(wrap_pyfunction!(average_node_connectivity, m)?)?;
+    m.add_function(wrap_pyfunction!(is_k_edge_connected, m)?)?;
+    m.add_function(wrap_pyfunction!(all_pairs_dijkstra, m)?)?;
+    m.add_function(wrap_pyfunction!(number_of_spanning_arborescences, m)?)?;
+    m.add_function(wrap_pyfunction!(global_node_connectivity, m)?)?;
     // Component algorithms
     m.add_function(wrap_pyfunction!(node_connected_component, m)?)?;
     m.add_function(wrap_pyfunction!(is_biconnected, m)?)?;

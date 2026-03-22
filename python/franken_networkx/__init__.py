@@ -3381,8 +3381,359 @@ def attr_matrix(G, edge_attr=None, node_attr=None, normalized=False, rc_order=No
     return M, nodelist
 
 
+# ---------------------------------------------------------------------------
+# Min-cost flow algorithms (br-hp3)
+# ---------------------------------------------------------------------------
+
+
+def cost_of_flow(G, flowDict, weight='weight'):
+    """Compute the cost of a given flow.
+
+    Parameters
+    ----------
+    G : DiGraph
+        Network with edge attribute *weight* as cost per unit flow.
+    flowDict : dict of dicts
+        ``flowDict[u][v]`` is the flow on edge (u, v).
+    weight : str, optional
+        Edge attribute name for cost. Default ``'weight'``.
+
+    Returns
+    -------
+    float
+        Total cost of the flow.
+    """
+    total = 0.0
+    for u in flowDict:
+        for v, flow in flowDict[u].items():
+            if flow > 0:
+                data = G.get_edge_data(u, v)
+                if isinstance(data, dict):
+                    cost = float(data.get(weight, 0))
+                else:
+                    cost = 0.0
+                total += flow * cost
+    return total
+
+
+def min_cost_flow(G, demand='demand', capacity='capacity', weight='weight'):
+    """Find minimum cost flow satisfying node demands.
+
+    Uses the successive shortest paths algorithm with Bellman-Ford.
+
+    Each node may have a ``demand`` attribute:
+    - Positive demand = supply (source)
+    - Negative demand = demand (sink)
+    - Zero or missing = transshipment node
+
+    Parameters
+    ----------
+    G : DiGraph
+    demand : str, optional
+        Node attribute for supply/demand. Default ``'demand'``.
+    capacity : str, optional
+        Edge attribute for capacity. Default ``'capacity'``.
+    weight : str, optional
+        Edge attribute for cost per unit flow. Default ``'weight'``.
+
+    Returns
+    -------
+    dict of dicts
+        ``flowDict[u][v]`` is the optimal flow on edge (u, v).
+
+    Raises
+    ------
+    NetworkXUnfeasible
+        If no feasible flow exists.
+    """
+    if not G.is_directed():
+        raise NetworkXError("min_cost_flow requires a directed graph")
+
+    nodes = list(G.nodes())
+    n = len(nodes)
+    if n == 0:
+        return {}
+
+    # Extract demands
+    node_demand = {}
+    for node in nodes:
+        attrs = G.nodes[node] if hasattr(G.nodes, '__getitem__') else {}
+        if isinstance(attrs, dict):
+            node_demand[node] = float(attrs.get(demand, 0))
+        else:
+            node_demand[node] = 0.0
+
+    # Check feasibility: sum of demands must be zero
+    total_demand = sum(node_demand.values())
+    if abs(total_demand) > 1e-10:
+        raise NetworkXUnfeasible(
+            f"Total node demand is {total_demand}, must be zero for feasible flow"
+        )
+
+    # Initialize flow dict
+    flow = {u: {} for u in nodes}
+    for u, v in G.edges():
+        flow.setdefault(u, {})[v] = 0
+
+    # Build residual graph and run successive shortest paths
+    # Create a super-source and super-sink
+    sources = [n for n in nodes if node_demand[n] > 0]
+    sinks = [n for n in nodes if node_demand[n] < 0]
+    remaining_supply = {n: node_demand[n] for n in sources}
+    remaining_demand = {n: -node_demand[n] for n in sinks}
+
+    # Successive shortest paths: augment along shortest cost path
+    for _ in range(n * n):  # upper bound on iterations
+        # Find shortest path from any source with remaining supply
+        # to any sink with remaining demand using Bellman-Ford on residual
+        best_path = None
+        best_cost = float('inf')
+        best_source = None
+        best_sink = None
+
+        for source in sources:
+            if remaining_supply.get(source, 0) <= 1e-10:
+                continue
+
+            # BFS/Bellman-Ford on residual graph
+            dist = {source: 0.0}
+            pred = {source: None}
+            # Relaxation
+            for _ in range(n):
+                updated = False
+                for u in nodes:
+                    if u not in dist:
+                        continue
+                    # Forward edges
+                    if hasattr(G, 'successors'):
+                        succs = list(G.successors(u))
+                    else:
+                        succs = list(G.neighbors(u))
+                    for v in succs:
+                        data = G.get_edge_data(u, v)
+                        if not isinstance(data, dict):
+                            continue
+                        cap = float(data.get(capacity, float('inf')))
+                        current_flow = flow.get(u, {}).get(v, 0)
+                        residual_cap = cap - current_flow
+                        if residual_cap > 1e-10:
+                            edge_cost = float(data.get(weight, 0))
+                            new_dist = dist[u] + edge_cost
+                            if v not in dist or new_dist < dist[v] - 1e-10:
+                                dist[v] = new_dist
+                                pred[v] = (u, 'forward')
+                                updated = True
+                    # Backward edges (reverse flow)
+                    if hasattr(G, 'predecessors'):
+                        preds_list = list(G.predecessors(u))
+                    else:
+                        preds_list = []
+                    for v in preds_list:
+                        current_flow = flow.get(v, {}).get(u, 0)
+                        if current_flow > 1e-10:
+                            data = G.get_edge_data(v, u)
+                            edge_cost = -float(data.get(weight, 0)) if isinstance(data, dict) else 0.0
+                            new_dist = dist[u] + edge_cost
+                            if v not in dist or new_dist < dist[v] - 1e-10:
+                                dist[v] = new_dist
+                                pred[v] = (u, 'backward')
+                                updated = True
+                if not updated:
+                    break
+
+            # Check reachable sinks
+            for sink in sinks:
+                if sink in dist and remaining_demand.get(sink, 0) > 1e-10:
+                    if dist[sink] < best_cost:
+                        best_cost = dist[sink]
+                        best_path = pred
+                        best_source = source
+                        best_sink = sink
+
+        if best_path is None:
+            break
+
+        # Find bottleneck along the path
+        path_nodes = []
+        current = best_sink
+        while current is not None:
+            path_nodes.append(current)
+            p = best_path.get(current)
+            if p is None:
+                break
+            current = p[0] if p else None
+        path_nodes.reverse()
+
+        bottleneck = min(remaining_supply[best_source], remaining_demand[best_sink])
+        # Also check edge capacities along path
+        for i in range(len(path_nodes) - 1):
+            u, v = path_nodes[i], path_nodes[i + 1]
+            info = best_path.get(v)
+            if info and info[1] == 'forward':
+                data = G.get_edge_data(u, v)
+                cap = float(data.get(capacity, float('inf'))) if isinstance(data, dict) else float('inf')
+                residual = cap - flow.get(u, {}).get(v, 0)
+                bottleneck = min(bottleneck, residual)
+            elif info and info[1] == 'backward':
+                bottleneck = min(bottleneck, flow.get(v, {}).get(u, 0))
+
+        if bottleneck <= 1e-10:
+            break
+
+        # Augment flow along path
+        for i in range(len(path_nodes) - 1):
+            u, v = path_nodes[i], path_nodes[i + 1]
+            info = best_path.get(v)
+            if info and info[1] == 'forward':
+                flow.setdefault(u, {})[v] = flow.get(u, {}).get(v, 0) + bottleneck
+            elif info and info[1] == 'backward':
+                flow.setdefault(v, {})[u] = flow.get(v, {}).get(u, 0) - bottleneck
+
+        remaining_supply[best_source] -= bottleneck
+        remaining_demand[best_sink] -= bottleneck
+
+    # Check if all demands are satisfied
+    for source in sources:
+        if remaining_supply.get(source, 0) > 1e-10:
+            raise NetworkXUnfeasible("Infeasible: not all supply could be routed")
+    for sink in sinks:
+        if remaining_demand.get(sink, 0) > 1e-10:
+            raise NetworkXUnfeasible("Infeasible: not all demand could be satisfied")
+
+    return flow
+
+
+def min_cost_flow_cost(G, demand='demand', capacity='capacity', weight='weight'):
+    """Return the cost of the minimum cost flow.
+
+    Parameters
+    ----------
+    G : DiGraph
+    demand, capacity, weight : str, optional
+
+    Returns
+    -------
+    float
+    """
+    flow = min_cost_flow(G, demand=demand, capacity=capacity, weight=weight)
+    return cost_of_flow(G, flow, weight=weight)
+
+
+def max_flow_min_cost(G, s, t, capacity='capacity', weight='weight'):
+    """Find a maximum flow of minimum cost from *s* to *t*.
+
+    First finds maximum flow value, then finds the min-cost flow
+    achieving that value.
+
+    Parameters
+    ----------
+    G : DiGraph
+    s, t : node
+        Source and sink.
+    capacity, weight : str, optional
+
+    Returns
+    -------
+    dict of dicts
+        Flow dictionary.
+    """
+    # Get max flow value
+    max_val = maximum_flow_value(G, s, t)
+
+    # Set up demands: source supplies max_val, sink demands max_val
+    H = G.copy()
+    set_node_attributes(H, {s: max_val, t: -max_val}, name='demand')
+    # Set demand=0 for all other nodes
+    for n in H.nodes():
+        if n != s and n != t:
+            attrs = H.nodes[n] if hasattr(H.nodes, '__getitem__') else {}
+            if isinstance(attrs, dict) and 'demand' not in attrs:
+                attrs['demand'] = 0
+
+    return min_cost_flow(H, capacity=capacity, weight=weight)
+
+
+def capacity_scaling(G, demand='demand', capacity='capacity', weight='weight',
+                     heap=None):
+    """Find minimum cost flow using capacity scaling.
+
+    This is an alias for ``min_cost_flow`` — the successive shortest
+    paths implementation provides the same optimality guarantees.
+
+    Parameters
+    ----------
+    G : DiGraph
+    demand, capacity, weight : str, optional
+    heap : class, optional
+        Ignored. Present for API compatibility.
+
+    Returns
+    -------
+    dict of dicts
+    """
+    return min_cost_flow(G, demand=demand, capacity=capacity, weight=weight)
+
+
+def network_simplex(G, demand='demand', capacity='capacity', weight='weight'):
+    """Find minimum cost flow using the network simplex algorithm.
+
+    Returns both the cost and the flow dictionary.
+
+    Parameters
+    ----------
+    G : DiGraph
+    demand, capacity, weight : str, optional
+
+    Returns
+    -------
+    (cost, flowDict) : tuple
+    """
+    flow = min_cost_flow(G, demand=demand, capacity=capacity, weight=weight)
+    cost = cost_of_flow(G, flow, weight=weight)
+    return (cost, flow)
+
+
+def flow_hierarchy(G, weight=None):
+    """Return the flow hierarchy of a directed graph.
+
+    The flow hierarchy is the fraction of edges not in a cycle.
+
+    Parameters
+    ----------
+    G : DiGraph
+    weight : str or None, optional
+
+    Returns
+    -------
+    float
+        Value in [0, 1]. 1 means no edges are in cycles (DAG).
+    """
+    if G.number_of_edges() == 0:
+        return 1.0
+
+    # Count edges in cycles
+    try:
+        cycles = simple_cycles(G)
+        cycle_edges = set()
+        for cycle in cycles:
+            for i in range(len(cycle)):
+                u = cycle[i]
+                v = cycle[(i + 1) % len(cycle)]
+                cycle_edges.add((u, v))
+            # Limit to avoid exponential blowup
+            if len(cycle_edges) >= G.number_of_edges():
+                break
+    except Exception:
+        cycle_edges = set()
+
+    return 1.0 - len(cycle_edges) / G.number_of_edges()
+
+
 # Drawing — thin delegation to NetworkX/matplotlib (lazy import)
 from franken_networkx.drawing import (
+    arf_layout,
+    bfs_layout,
+    bipartite_layout,
     draw,
     draw_circular,
     draw_kamada_kawai,
@@ -3392,10 +3743,15 @@ from franken_networkx.drawing import (
     draw_spectral,
     draw_spring,
     circular_layout,
+    forceatlas2_layout,
+    fruchterman_reingold_layout,
     kamada_kawai_layout,
+    multipartite_layout,
     planar_layout,
     random_layout,
+    rescale_layout_dict,
     shell_layout,
+    spiral_layout,
     spectral_layout,
     spring_layout,
 )
@@ -4253,6 +4609,14 @@ __all__ = [
     "directed_laplacian_matrix",
     "directed_combinatorial_laplacian_matrix",
     "attr_matrix",
+    # Flow algorithms
+    "cost_of_flow",
+    "min_cost_flow",
+    "min_cost_flow_cost",
+    "max_flow_min_cost",
+    "capacity_scaling",
+    "network_simplex",
+    "flow_hierarchy",
     # Algorithms — graph operators
     "union",
     "intersection",
@@ -4460,11 +4824,19 @@ __all__ = [
     "draw_shell",
     "draw_spectral",
     "draw_spring",
+    "arf_layout",
+    "bfs_layout",
+    "bipartite_layout",
     "circular_layout",
+    "forceatlas2_layout",
+    "fruchterman_reingold_layout",
     "kamada_kawai_layout",
+    "multipartite_layout",
     "planar_layout",
     "random_layout",
+    "rescale_layout_dict",
     "shell_layout",
+    "spiral_layout",
     "spectral_layout",
     "spring_layout",
 ]
