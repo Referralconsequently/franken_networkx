@@ -4511,14 +4511,16 @@ pub fn ring_of_cliques(
 #[pyfunction]
 #[pyo3(signature = (r, h))]
 pub fn balanced_tree(py: Python<'_>, r: usize, h: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::balanced_tree(r, h));
+    let result = py.allow_threads(|| fnx_algorithms::balanced_tree(r, h))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n1, n2))]
 pub fn barbell_graph(py: Python<'_>, n1: usize, n2: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::barbell_graph(n1, n2));
+    let result = py.allow_threads(|| fnx_algorithms::barbell_graph(n1, n2))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
@@ -4657,84 +4659,96 @@ pub fn hoffman_singleton_graph(py: Python<'_>) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n, k))]
 pub fn generalized_petersen_graph(py: Python<'_>, n: usize, k: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::generalized_petersen_graph(n, k));
+    let result = py.allow_threads(|| fnx_algorithms::generalized_petersen_graph(n, k))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn wheel_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::wheel_graph(n));
+    let result = py.allow_threads(|| fnx_algorithms::wheel_graph(n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn ladder_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::ladder_graph(n));
+    let result = py.allow_threads(|| fnx_algorithms::ladder_graph(n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn circular_ladder_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::circular_ladder_graph(n));
+    let result = py.allow_threads(|| fnx_algorithms::circular_ladder_graph(n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (m, n))]
 pub fn lollipop_graph(py: Python<'_>, m: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::lollipop_graph(m, n));
+    let result = py.allow_threads(|| fnx_algorithms::lollipop_graph(m, n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (m, n))]
 pub fn tadpole_graph(py: Python<'_>, m: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::tadpole_graph(m, n));
+    let result = py.allow_threads(|| fnx_algorithms::tadpole_graph(m, n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n, r))]
 pub fn turan_graph(py: Python<'_>, n: usize, r: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::turan_graph(n, r));
+    let result = py.allow_threads(|| fnx_algorithms::turan_graph(n, r))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (k, n))]
 pub fn windmill_graph(py: Python<'_>, k: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::windmill_graph(k, n));
+    let result = py.allow_threads(|| fnx_algorithms::windmill_graph(k, n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn hypercube_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::hypercube_graph(n));
+    let result = py.allow_threads(|| fnx_algorithms::hypercube_graph(n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n1, n2))]
 pub fn complete_bipartite_graph(py: Python<'_>, n1: usize, n2: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::complete_bipartite_graph(n1, n2));
+    let result = py.allow_threads(|| fnx_algorithms::complete_bipartite_graph(n1, n2))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (block_sizes,))]
 pub fn complete_multipartite_graph(py: Python<'_>, block_sizes: Vec<usize>) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::complete_multipartite_graph(&block_sizes));
+    let result = py.allow_threads(|| fnx_algorithms::complete_multipartite_graph(&block_sizes))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (m, n))]
 pub fn grid_2d_graph(py: Python<'_>, m: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::grid_2d_graph(m, n));
+    let result = py.allow_threads(|| fnx_algorithms::grid_2d_graph(m, n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
@@ -4753,42 +4767,48 @@ pub fn trivial_graph(py: Python<'_>) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn binomial_tree(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::binomial_tree(n));
+    let result = py.allow_threads(|| fnx_algorithms::binomial_tree(n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (r, n))]
 pub fn full_rary_tree(py: Python<'_>, r: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::full_rary_tree(r, n));
+    let result = py.allow_threads(|| fnx_algorithms::full_rary_tree(r, n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n, offsets))]
 pub fn circulant_graph(py: Python<'_>, n: usize, offsets: Vec<usize>) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::circulant_graph(n, &offsets));
+    let result = py.allow_threads(|| fnx_algorithms::circulant_graph(n, &offsets))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n, k))]
 pub fn kneser_graph(py: Python<'_>, n: usize, k: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::kneser_graph(n, k));
+    let result = py.allow_threads(|| fnx_algorithms::kneser_graph(n, k))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (q,))]
 pub fn paley_graph(py: Python<'_>, q: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::paley_graph(q));
+    let result = py.allow_threads(|| fnx_algorithms::paley_graph(q))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn chordal_cycle_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::chordal_cycle_graph(n));
+    let result = py.allow_threads(|| fnx_algorithms::chordal_cycle_graph(n))
+        .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
 

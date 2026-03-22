@@ -481,31 +481,31 @@ impl DiGraph {
             return false;
         }
 
-        // 1. Remove node from its successors' predecessor lists.
+        // 1. Remove outgoing edges and clean up successors' predecessor lists.
         if let Some(succs) = self.successors.get(node) {
-            for target in succs.iter() {
+            let targets: Vec<String> = succs.iter().cloned().collect();
+            for target in targets {
+                self.edges.shift_remove(&DirectedEdgeKeyRef::new(node, &target));
                 if target != node
-                    && let Some(preds) = self.predecessors.get_mut(target)
+                    && let Some(preds) = self.predecessors.get_mut(&target)
                 {
                     preds.shift_remove(node);
                 }
             }
         }
 
-        // 2. Remove node from its predecessors' successor lists.
+        // 2. Remove incoming edges and clean up predecessors' successor lists.
         if let Some(preds) = self.predecessors.get(node) {
-            for source in preds.iter() {
+            let sources: Vec<String> = preds.iter().cloned().collect();
+            for source in sources {
+                self.edges.shift_remove(&DirectedEdgeKeyRef::new(&source, node));
                 if source != node
-                    && let Some(succs) = self.successors.get_mut(source)
+                    && let Some(succs) = self.successors.get_mut(&source)
                 {
                     succs.shift_remove(node);
                 }
             }
         }
-
-        // 3. Remove all incident edges from the edges map using retain (O(E)).
-        self.edges
-            .retain(|key, _| key.source != node && key.target != node);
 
         self.successors.shift_remove(node);
         self.predecessors.shift_remove(node);
@@ -1033,33 +1033,37 @@ impl MultiDiGraph {
             return false;
         }
 
-        // 1. Remove node from its successors' predecessor lists.
+        // 1. Remove outgoing edges and clean up successors' predecessor lists.
         if let Some(succs) = self.successors.get(node) {
-            for target in succs.keys() {
+            let targets: Vec<String> = succs.keys().cloned().collect();
+            for target in targets {
+                let edge_key = DirectedEdgeKeyRef::new(node, &target);
+                self.edges.shift_remove(&edge_key);
+                self.next_edge_key.shift_remove(&edge_key);
+
                 if target != node
-                    && let Some(preds) = self.predecessors.get_mut(target)
+                    && let Some(preds) = self.predecessors.get_mut(&target)
                 {
                     preds.shift_remove(node);
                 }
             }
         }
 
-        // 2. Remove node from its predecessors' successor lists.
+        // 2. Remove incoming edges and clean up predecessors' successor lists.
         if let Some(preds) = self.predecessors.get(node) {
-            for source in preds.keys() {
+            let sources: Vec<String> = preds.keys().cloned().collect();
+            for source in sources {
+                let edge_key = DirectedEdgeKeyRef::new(&source, node);
+                self.edges.shift_remove(&edge_key);
+                self.next_edge_key.shift_remove(&edge_key);
+
                 if source != node
-                    && let Some(succs) = self.successors.get_mut(source)
+                    && let Some(succs) = self.successors.get_mut(&source)
                 {
                     succs.shift_remove(node);
                 }
             }
         }
-
-        // 3. Remove all incident edges from edges and next_edge_key maps using retain (O(E)).
-        self.edges
-            .retain(|key, _| key.source != node && key.target != node);
-        self.next_edge_key
-            .retain(|key, _| key.source != node && key.target != node);
 
         self.successors.shift_remove(node);
         self.predecessors.shift_remove(node);

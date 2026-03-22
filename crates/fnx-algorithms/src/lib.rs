@@ -12153,16 +12153,26 @@ pub fn maximal_independent_set(
         .into_iter()
         .filter(|node| !blocked.contains(node))
         .collect();
-    while !available_nodes.is_empty() {
-        let index = choose_index(&mut seed_state, available_nodes.len());
-        let chosen = available_nodes.remove(index);
-        indep_nodes.push(chosen.clone());
 
-        let mut banned = HashSet::from([chosen.clone()]);
-        if let Some(neighbors) = graph.neighbors(&chosen) {
-            banned.extend(neighbors.into_iter().map(str::to_owned));
+    if let Some(mut s) = seed_state {
+        // We need deterministic shuffle for replay stability if seed is given
+        // Simple Fisher-Yates
+        for i in (1..available_nodes.len()).rev() {
+            let j = (next_seed(&mut s) as usize) % (i + 1);
+            available_nodes.swap(i, j);
         }
-        available_nodes.retain(|candidate| !banned.contains(candidate));
+    }
+
+    for chosen in available_nodes {
+        if !blocked.contains(&chosen) {
+            indep_nodes.push(chosen.clone());
+            blocked.insert(chosen.clone());
+            if let Some(neighbors) = graph.neighbors(&chosen) {
+                for nbr in neighbors {
+                    blocked.insert(nbr.to_owned());
+                }
+            }
+        }
     }
 
     Ok(indep_nodes)
@@ -12618,48 +12628,37 @@ pub fn max_clique_approx(graph: &Graph) -> Vec<String> {
         .unwrap()
         .to_string();
 
-    let mut clique: Vec<String> = vec![start];
-    let mut candidates: Vec<String> = nodes.iter().map(|s| s.to_string()).collect();
-
-    candidates.retain(|c| {
-        *c != clique[0]
-            && graph
-                .neighbors(c)
-                .map(|nbrs| nbrs.iter().any(|&n| n == clique[0]))
-                .unwrap_or(false)
-    });
+    let mut clique: Vec<String> = vec![start.clone()];
+    let mut candidates: HashSet<String> = graph
+        .neighbors(&start)
+        .unwrap_or_default()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
 
     while !candidates.is_empty() {
-        let best_idx = candidates
+        // Greedy: pick candidate with most neighbors in the candidate set
+        let chosen = candidates
             .iter()
-            .enumerate()
-            .max_by_key(|(_, c)| {
+            .max_by_key(|&c| {
                 graph
                     .neighbors(c)
-                    .map(|nbrs| {
-                        candidates
-                            .iter()
-                            .filter(|other| {
-                                other.as_str() != c.as_str() && nbrs.contains(&other.as_str())
-                            })
-                            .count()
-                    })
+                    .map(|nbrs| nbrs.iter().filter(|&&n| candidates.contains(n)).count())
                     .unwrap_or(0)
             })
-            .map(|(i, _)| i)
+            .cloned()
             .unwrap();
 
-        let chosen = candidates.remove(best_idx);
-        clique.push(chosen);
+        candidates.remove(&chosen);
+        clique.push(chosen.clone());
 
-        candidates.retain(|c| {
-            clique.iter().all(|member| {
-                graph
-                    .neighbors(c)
-                    .map(|nbrs| nbrs.contains(&member.as_str()))
-                    .unwrap_or(false)
-            })
-        });
+        // New candidates must be neighbors of the chosen node
+        if let Some(nbrs) = graph.neighbors(&chosen) {
+            let nbr_set: HashSet<&str> = nbrs.into_iter().collect();
+            candidates.retain(|c| nbr_set.contains(c.as_str()));
+        } else {
+            candidates.clear();
+        }
     }
 
     clique.sort();
@@ -16801,9 +16800,13 @@ pub fn make_max_clique_graph(graph: &Graph) -> Graph {
 /// Generate a ring of cliques graph.
 /// Creates `num_cliques` complete graphs of size `clique_size`, connected in a ring.
 #[must_use]
-pub fn ring_of_cliques(num_cliques: usize, clique_size: usize) -> Graph {
-    assert!(num_cliques >= 2, "num_cliques must be >= 2");
-    assert!(clique_size >= 2, "clique_size must be >= 2");
+pub fn ring_of_cliques(num_cliques: usize, clique_size: usize) -> Result<Graph, String> {
+    if num_cliques < 2 {
+        return Err("num_cliques must be >= 2".to_owned());
+    }
+    if clique_size < 2 {
+        return Err("clique_size must be >= 2".to_owned());
+    }
 
     let mut g = Graph::strict();
 
@@ -16827,7 +16830,7 @@ pub fn ring_of_cliques(num_cliques: usize, clique_size: usize) -> Graph {
         let _ = g.add_edge(&from, &to);
     }
 
-    g
+    Ok(g)
 }
 
 // ===========================================================================
@@ -16872,9 +16875,12 @@ pub fn balanced_tree(r: usize, h: usize) -> Graph {
     g
 }
 
-/// Return the barbell graph: two complete graphs of n1 nodes connected by a path of n2 nodes.
+/// Return the barbell graph: two complete graphs K_n1 connected by a path P_n2.
 #[must_use]
-pub fn barbell_graph(n1: usize, n2: usize) -> Graph {
+pub fn barbell_graph(n1: usize, n2: usize) -> Result<Graph, String> {
+    if n1 < 2 {
+        return Err("n1 must be >= 2".to_owned());
+    }
     let mut g = Graph::strict();
     let total = 2 * n1 + n2;
     gen_nodes(&mut g, total);
@@ -16901,7 +16907,7 @@ pub fn barbell_graph(n1: usize, n2: usize) -> Graph {
     } else {
         gen_edge(&mut g, n1 - 1, n1);
     }
-    g
+    Ok(g)
 }
 
 /// Return the bull graph (5 nodes, 5 edges).
@@ -16978,7 +16984,7 @@ pub fn cubical_graph() -> Graph {
 /// Return the Desargues graph (20 nodes, 30 edges).
 #[must_use]
 pub fn desargues_graph() -> Graph {
-    generalized_petersen_graph(10, 3)
+    generalized_petersen_graph(10, 3).expect("desargues graph failed")
 }
 
 /// Return the diamond graph (4 nodes, 5 edges).
@@ -17185,7 +17191,7 @@ pub fn krackhardt_kite_graph() -> Graph {
 /// Return the Möbius-Kantor graph (16 nodes, 24 edges).
 #[must_use]
 pub fn moebius_kantor_graph() -> Graph {
-    generalized_petersen_graph(8, 3)
+    generalized_petersen_graph(8, 3).expect("moebius-kantor graph failed")
 }
 
 /// Return the octahedral graph (6 nodes, 12 edges).
@@ -17246,7 +17252,7 @@ pub fn pappus_graph() -> Graph {
 /// Return the Petersen graph (10 nodes, 15 edges).
 #[must_use]
 pub fn petersen_graph() -> Graph {
-    generalized_petersen_graph(5, 2)
+    generalized_petersen_graph(5, 2).expect("petersen graph failed")
 }
 
 /// Return the Sedgewick maze graph (8 nodes, 10 edges).
@@ -17477,7 +17483,13 @@ pub fn hoffman_singleton_graph() -> Graph {
 
 /// Return the generalized Petersen graph GP(n, k).
 #[must_use]
-pub fn generalized_petersen_graph(n: usize, k: usize) -> Graph {
+pub fn generalized_petersen_graph(n: usize, k: usize) -> Result<Graph, String> {
+    if n < 3 {
+        return Err("n must be >= 3".to_owned());
+    }
+    if k < 1 || k * 2 >= n {
+        return Err("k must be 1 <= k < n/2".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, 2 * n);
     // Outer ring: 0..n-1
@@ -17492,12 +17504,15 @@ pub fn generalized_petersen_graph(n: usize, k: usize) -> Graph {
     for i in 0..n {
         gen_edge(&mut g, i, n + i);
     }
-    g
+    Ok(g)
 }
 
 /// Return the wheel graph W_n (n+1 nodes: hub + n rim nodes).
 #[must_use]
-pub fn wheel_graph(n: usize) -> Graph {
+pub fn wheel_graph(n: usize) -> Result<Graph, String> {
+    if n < 1 {
+        return Err("n must be >= 1".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, n + 1);
     // Hub is node 0, rim is 1..n
@@ -17510,12 +17525,15 @@ pub fn wheel_graph(n: usize) -> Graph {
     if n > 1 {
         gen_edge(&mut g, n, 1);
     }
-    g
+    Ok(g)
 }
 
 /// Return the ladder graph (2n nodes: two paths connected by rungs).
 #[must_use]
-pub fn ladder_graph(n: usize) -> Graph {
+pub fn ladder_graph(n: usize) -> Result<Graph, String> {
+    if n < 1 {
+        return Err("n must be >= 1".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, 2 * n);
     for i in 0..n.saturating_sub(1) {
@@ -17525,12 +17543,15 @@ pub fn ladder_graph(n: usize) -> Graph {
     for i in 0..n {
         gen_edge(&mut g, i, n + i);
     }
-    g
+    Ok(g)
 }
 
 /// Return the circular ladder graph (Möbius ladder, 2n nodes).
 #[must_use]
-pub fn circular_ladder_graph(n: usize) -> Graph {
+pub fn circular_ladder_graph(n: usize) -> Result<Graph, String> {
+    if n < 3 {
+        return Err("n must be >= 3".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, 2 * n);
     for i in 0..n {
@@ -17538,12 +17559,15 @@ pub fn circular_ladder_graph(n: usize) -> Graph {
         gen_edge(&mut g, n + i, n + (i + 1) % n);
         gen_edge(&mut g, i, n + i);
     }
-    g
+    Ok(g)
 }
 
 /// Return the lollipop graph (K_m connected to P_n).
 #[must_use]
-pub fn lollipop_graph(m: usize, n: usize) -> Graph {
+pub fn lollipop_graph(m: usize, n: usize) -> Result<Graph, String> {
+    if m < 2 {
+        return Err("m must be >= 2".to_owned());
+    }
     let mut g = Graph::strict();
     let total = m + n;
     gen_nodes(&mut g, total);
@@ -17560,12 +17584,15 @@ pub fn lollipop_graph(m: usize, n: usize) -> Graph {
     for i in m..total.saturating_sub(1) {
         gen_edge(&mut g, i, i + 1);
     }
-    g
+    Ok(g)
 }
 
 /// Return the tadpole graph (C_m connected to P_n).
 #[must_use]
-pub fn tadpole_graph(m: usize, n: usize) -> Graph {
+pub fn tadpole_graph(m: usize, n: usize) -> Result<Graph, String> {
+    if m < 3 {
+        return Err("m must be >= 3".to_owned());
+    }
     let mut g = Graph::strict();
     let total = m + n;
     gen_nodes(&mut g, total);
@@ -17580,13 +17607,18 @@ pub fn tadpole_graph(m: usize, n: usize) -> Graph {
     for i in m..total.saturating_sub(1) {
         gen_edge(&mut g, i, i + 1);
     }
-    g
+    Ok(g)
 }
 
 /// Return the Turán graph T(n, r).
 #[must_use]
-pub fn turan_graph(n: usize, r: usize) -> Graph {
-    assert!(r > 0 && r <= n, "r must be in [1, n]");
+pub fn turan_graph(n: usize, r: usize) -> Result<Graph, String> {
+    if r == 0 {
+        return Err("r must be > 0".to_owned());
+    }
+    if r > n {
+        return Err("r must be <= n".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, n);
     // Assign nodes to partitions: partition[i] = i % r
@@ -17598,12 +17630,15 @@ pub fn turan_graph(n: usize, r: usize) -> Graph {
             }
         }
     }
-    g
+    Ok(g)
 }
 
 /// Return the windmill graph Wd(k, n): n copies of K_k sharing a universal vertex.
 #[must_use]
-pub fn windmill_graph(k: usize, n: usize) -> Graph {
+pub fn windmill_graph(k: usize, n: usize) -> Result<Graph, String> {
+    if k < 2 {
+        return Err("k must be >= 2".to_owned());
+    }
     let mut g = Graph::strict();
     // Node 0 is the universal center
     let total = 1 + n * (k - 1);
@@ -17621,12 +17656,12 @@ pub fn windmill_graph(k: usize, n: usize) -> Graph {
             }
         }
     }
-    g
+    Ok(g)
 }
 
 /// Return the hypercube graph Q_n (2^n nodes).
 #[must_use]
-pub fn hypercube_graph(n: usize) -> Graph {
+pub fn hypercube_graph(n: usize) -> Result<Graph, String> {
     let mut g = Graph::strict();
     let size = 1usize << n;
     gen_nodes(&mut g, size);
@@ -17638,12 +17673,12 @@ pub fn hypercube_graph(n: usize) -> Graph {
             }
         }
     }
-    g
+    Ok(g)
 }
 
 /// Return the complete bipartite graph K_{n1, n2}.
 #[must_use]
-pub fn complete_bipartite_graph(n1: usize, n2: usize) -> Graph {
+pub fn complete_bipartite_graph(n1: usize, n2: usize) -> Result<Graph, String> {
     let mut g = Graph::strict();
     gen_nodes(&mut g, n1 + n2);
     for i in 0..n1 {
@@ -17651,12 +17686,12 @@ pub fn complete_bipartite_graph(n1: usize, n2: usize) -> Graph {
             gen_edge(&mut g, i, j);
         }
     }
-    g
+    Ok(g)
 }
 
 /// Return the complete multipartite graph K_{n1, n2, ...}.
 #[must_use]
-pub fn complete_multipartite_graph(block_sizes: &[usize]) -> Graph {
+pub fn complete_multipartite_graph(block_sizes: &[usize]) -> Result<Graph, String> {
     let mut g = Graph::strict();
     let total: usize = block_sizes.iter().sum();
     gen_nodes(&mut g, total);
@@ -17679,7 +17714,7 @@ pub fn complete_multipartite_graph(block_sizes: &[usize]) -> Graph {
             }
         }
     }
-    g
+    Ok(g)
 }
 
 /// Return the 2D grid graph (m x n nodes).
@@ -17760,7 +17795,10 @@ pub fn full_rary_tree(r: usize, n: usize) -> Graph {
 
 /// Return the circulant graph C_n(offsets).
 #[must_use]
-pub fn circulant_graph(n: usize, offsets: &[usize]) -> Graph {
+pub fn circulant_graph(n: usize, offsets: &[usize]) -> Result<Graph, String> {
+    if n < 1 {
+        return Err("n must be >= 1".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, n);
     for i in 0..n {
@@ -17771,16 +17809,19 @@ pub fn circulant_graph(n: usize, offsets: &[usize]) -> Graph {
             }
         }
     }
-    g
+    Ok(g)
 }
 
 /// Return the Kneser graph KG(n, k).
 /// Nodes are all k-element subsets of {0,...,n-1}; edges connect disjoint subsets.
 #[must_use]
-pub fn kneser_graph(n: usize, k: usize) -> Graph {
+pub fn kneser_graph(n: usize, k: usize) -> Result<Graph, String> {
+    if n < 1 || k < 1 {
+        return Err("n and k must be >= 1".to_owned());
+    }
     let mut g = Graph::strict();
     if k > n {
-        return g;
+        return Ok(g);
     }
     let subsets = combinations(n, k);
     // Name each subset as comma-separated indices
@@ -17804,7 +17845,7 @@ pub fn kneser_graph(n: usize, k: usize) -> Graph {
             }
         }
     }
-    g
+    Ok(g)
 }
 
 fn combinations(n: usize, k: usize) -> Vec<Vec<usize>> {
@@ -17834,7 +17875,10 @@ fn combinations(n: usize, k: usize) -> Vec<Vec<usize>> {
 /// Return the Paley graph of order q (q must be a prime power ≡ 1 mod 4).
 /// For simplicity, this only supports prime q.
 #[must_use]
-pub fn paley_graph(q: usize) -> Graph {
+pub fn paley_graph(q: usize) -> Result<Graph, String> {
+    if q < 1 {
+        return Err("q must be >= 1".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, q);
     // Compute quadratic residues mod q
@@ -17850,13 +17894,16 @@ pub fn paley_graph(q: usize) -> Graph {
             }
         }
     }
-    g
+    Ok(g)
 }
 
 /// Return the chordal cycle graph C_n with chords.
 /// This creates a cycle of n nodes where node i is also connected to node (i+2) mod n.
 #[must_use]
-pub fn chordal_cycle_graph(n: usize) -> Graph {
+pub fn chordal_cycle_graph(n: usize) -> Result<Graph, String> {
+    if n < 1 {
+        return Err("n must be >= 1".to_owned());
+    }
     let mut g = Graph::strict();
     gen_nodes(&mut g, n);
     for i in 0..n {
@@ -17865,7 +17912,7 @@ pub fn chordal_cycle_graph(n: usize) -> Graph {
             gen_edge(&mut g, i, (i + 2) % n);
         }
     }
-    g
+    Ok(g)
 }
 
 // ===========================================================================
@@ -18996,6 +19043,7 @@ mod tests {
         modularity,
         moebius_kantor_graph,
         multi_source_dijkstra,
+        multi_source_dijkstra_directed,
         negative_edge_cycle,
         node_boundary,
         node_boundary_directed,
@@ -27843,7 +27891,7 @@ mod tests {
 
     #[test]
     fn test_ring_of_cliques_basic() {
-        let g = ring_of_cliques(3, 3);
+        let g = ring_of_cliques(3, 3).expect("ring_of_cliques failed");
         // 3 cliques of size 3 = 9 nodes
         assert_eq!(g.node_count(), 9);
         // Each K3 has 3 edges + 3 ring edges = 12
@@ -27852,7 +27900,7 @@ mod tests {
 
     #[test]
     fn test_ring_of_cliques_2x2() {
-        let g = ring_of_cliques(2, 2);
+        let g = ring_of_cliques(2, 2).expect("ring_of_cliques failed");
         assert_eq!(g.node_count(), 4);
         assert_eq!(g.edge_count(), 4);
     }
@@ -27869,7 +27917,7 @@ mod tests {
 
     #[test]
     fn test_barbell_graph() {
-        let g = barbell_graph(3, 2);
+        let g = barbell_graph(3, 2).expect("barbell_graph failed");
         // 2*3 + 2 = 8 nodes
         assert_eq!(g.node_count(), 8);
     }
@@ -28030,35 +28078,35 @@ mod tests {
 
     #[test]
     fn test_generalized_petersen_graph() {
-        let g = generalized_petersen_graph(5, 2);
+        let g = generalized_petersen_graph(5, 2).expect("generalized_petersen_graph failed");
         assert_eq!(g.node_count(), 10);
         assert_eq!(g.edge_count(), 15);
     }
 
     #[test]
     fn test_wheel_graph() {
-        let g = wheel_graph(5);
+        let g = wheel_graph(5).expect("wheel_graph failed");
         assert_eq!(g.node_count(), 6);
         assert_eq!(g.edge_count(), 10);
     }
 
     #[test]
     fn test_ladder_graph() {
-        let g = ladder_graph(4);
+        let g = ladder_graph(4).expect("ladder_graph failed");
         assert_eq!(g.node_count(), 8);
         assert_eq!(g.edge_count(), 10);
     }
 
     #[test]
     fn test_circular_ladder_graph() {
-        let g = circular_ladder_graph(4);
+        let g = circular_ladder_graph(4).expect("circular_ladder_graph failed");
         assert_eq!(g.node_count(), 8);
         assert_eq!(g.edge_count(), 12);
     }
 
     #[test]
     fn test_lollipop_graph() {
-        let g = lollipop_graph(4, 3);
+        let g = lollipop_graph(4, 3).expect("lollipop_graph failed");
         assert_eq!(g.node_count(), 7);
         // K4 = 6 edges + bridge + 2 path edges = 9
         assert_eq!(g.edge_count(), 9);
@@ -28066,7 +28114,7 @@ mod tests {
 
     #[test]
     fn test_tadpole_graph() {
-        let g = tadpole_graph(4, 3);
+        let g = tadpole_graph(4, 3).expect("tadpole_graph failed");
         assert_eq!(g.node_count(), 7);
         // C4 = 4 edges + bridge + 2 path edges = 7
         assert_eq!(g.edge_count(), 7);
@@ -28074,7 +28122,7 @@ mod tests {
 
     #[test]
     fn test_turan_graph() {
-        let g = turan_graph(6, 3);
+        let g = turan_graph(6, 3).expect("turan_graph failed");
         // T(6,3) = K_{2,2,2} = 12 edges
         assert_eq!(g.node_count(), 6);
         assert_eq!(g.edge_count(), 12);
@@ -28082,28 +28130,28 @@ mod tests {
 
     #[test]
     fn test_windmill_graph() {
-        let g = windmill_graph(3, 4);
+        let g = windmill_graph(3, 4).expect("windmill_graph failed");
         // 1 center + 4*(3-1) = 9 nodes
         assert_eq!(g.node_count(), 9);
     }
 
     #[test]
     fn test_hypercube_graph() {
-        let g = hypercube_graph(3);
+        let g = hypercube_graph(3).expect("hypercube_graph failed");
         assert_eq!(g.node_count(), 8);
         assert_eq!(g.edge_count(), 12);
     }
 
     #[test]
     fn test_complete_bipartite_graph() {
-        let g = complete_bipartite_graph(3, 4);
+        let g = complete_bipartite_graph(3, 4).expect("complete_bipartite_graph failed");
         assert_eq!(g.node_count(), 7);
         assert_eq!(g.edge_count(), 12);
     }
 
     #[test]
     fn test_complete_multipartite_graph() {
-        let g = complete_multipartite_graph(&[2, 2, 2]);
+        let g = complete_multipartite_graph(&[2, 2, 2]).expect("complete_multipartite_graph failed");
         assert_eq!(g.node_count(), 6);
         assert_eq!(g.edge_count(), 12); // K_{2,2,2}
     }
@@ -28145,7 +28193,7 @@ mod tests {
 
     #[test]
     fn test_circulant_graph() {
-        let g = circulant_graph(6, &[1, 2]);
+        let g = circulant_graph(6, &[1, 2]).expect("circulant_graph failed");
         assert_eq!(g.node_count(), 6);
         // Each node connects to 4 others (offset 1 and 2 in both directions)
         // but some may overlap → 12 edges total for C_6([1,2])
@@ -28155,7 +28203,7 @@ mod tests {
     #[test]
     fn test_kneser_graph_petersen() {
         // KG(5,2) is the Petersen graph: 10 nodes, 15 edges
-        let g = kneser_graph(5, 2);
+        let g = kneser_graph(5, 2).expect("kneser_graph failed");
         assert_eq!(g.node_count(), 10);
         assert_eq!(g.edge_count(), 15);
     }
@@ -28163,14 +28211,14 @@ mod tests {
     #[test]
     fn test_paley_graph_5() {
         // Paley(5): QR = {1,4}, edges when diff is QR
-        let g = paley_graph(5);
+        let g = paley_graph(5).expect("paley_graph failed");
         assert_eq!(g.node_count(), 5);
         assert_eq!(g.edge_count(), 5); // C5
     }
 
     #[test]
     fn test_chordal_cycle_graph() {
-        let g = chordal_cycle_graph(6);
+        let g = chordal_cycle_graph(6).expect("chordal_cycle_graph failed");
         assert_eq!(g.node_count(), 6);
         // 6 cycle edges + 6 chord edges = 12
         assert_eq!(g.edge_count(), 12);
@@ -28337,45 +28385,36 @@ mod tests {
         let me = mixing_expansion(&g, &["a", "b"]);
         assert!((me - 0.25).abs() < 1e-6);
     }
-}
-
-#[test]
-fn test_betweenness_normalization_bug() {
-    let mut g = Graph::strict();
-    // Path graph a-b-c
-    g.add_edge("a", "b").unwrap();
-    g.add_edge("b", "c").unwrap();
-
-    let result = betweenness_centrality(&g);
-    let scores: std::collections::HashMap<String, f64> = result
-        .scores
-        .into_iter()
-        .map(|s| (s.node, s.score))
-        .collect();
-
-    // In NetworkX:
-    // a: 0.0
-    // b: (1 * 1) / ((3-1)*(3-2)/2) = 1.0 / 1.0 = 1.0
-    // c: 0.0
-
-    let b_score = *scores.get("b").unwrap();
-    println!("Betweenness score for b: {}", b_score);
-
-    // CURRENT BUG: FrankenNetworkX returns 0.5 because it divides by (n-1)(n-2) = 2*1 = 2 instead of (n-1)(n-2)/2 = 1.
-    assert!(
-        (b_score - 1.0).abs() < 1e-6,
-        "Betweenness score for b should be 1.0, got {}",
-        b_score
-    );
-}
-
-#[cfg(test)]
-mod test_dijkstra_bug {
-    use super::*;
-    use fnx_classes::digraph::DiGraph;
 
     #[test]
-    fn test_directed_multi() {
+    fn test_betweenness_normalization() {
+        let mut g = Graph::strict();
+        // Path graph a-b-c
+        g.add_edge("a", "b").unwrap();
+        g.add_edge("b", "c").unwrap();
+
+        let result = betweenness_centrality(&g);
+        let scores: std::collections::HashMap<String, f64> = result
+            .scores
+            .into_iter()
+            .map(|s| (s.node, s.score))
+            .collect();
+
+        // In NetworkX:
+        // a: 0.0
+        // b: (1 * 1) / ((3-1)*(3-2)/2) = 1.0 / 1.0 = 1.0
+        // c: 0.0
+
+        let b_score = *scores.get("b").unwrap();
+        assert!(
+            (b_score - 1.0).abs() < 1e-6,
+            "Betweenness score for b should be 1.0, got {}",
+            b_score
+        );
+    }
+
+    #[test]
+    fn test_directed_multi_source_dijkstra() {
         let mut g = DiGraph::strict();
         g.add_edge("a", "b").unwrap();
         g.add_edge("b", "c").unwrap();

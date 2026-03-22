@@ -5,7 +5,9 @@
 //! - `neighbors()` returns successors (matches NetworkX convention).
 //! - Additional methods: `predecessors`, `successors`, `in_degree`, `out_degree`.
 
-use crate::{NetworkXError, NodeNotFound, PyGraph, node_key_to_string, unwrap_infallible};
+use crate::{
+    NetworkXError, NodeNotFound, PyGraph, node_key_to_string, py_dict_to_attr_map, unwrap_infallible,
+};
 use fnx_classes::AttrMap;
 use fnx_classes::digraph::{DiGraph, MultiDiGraph};
 use fnx_runtime::CgseValue;
@@ -244,9 +246,8 @@ impl PyMultiDiGraph {
             .entry(canonical.clone())
             .or_insert_with(|| PyDict::new(py).unbind());
         if let Some(a) = attr {
+            rust_attrs = py_dict_to_attr_map(a)?;
             for (k, v) in a.iter() {
-                let key: String = k.extract()?;
-                rust_attrs.insert(key.clone(), CgseValue::String(v.str()?.to_string()));
                 py_dict.bind(py).set_item(k, v)?;
             }
         }
@@ -310,10 +311,7 @@ impl PyMultiDiGraph {
 
         let mut rust_attrs = AttrMap::new();
         if let Some(a) = attr {
-            for (k, val) in a.iter() {
-                let attr_key: String = k.extract()?;
-                rust_attrs.insert(attr_key, CgseValue::String(val.str()?.to_string()));
-            }
+            rust_attrs = py_dict_to_attr_map(a)?;
         }
         let actual_key = match key {
             Some(explicit_key) => self
@@ -1536,10 +1534,8 @@ impl PyDiGraph {
             .entry(canonical.clone())
             .or_insert_with(|| PyDict::new(py).unbind());
         if let Some(a) = attr {
+            rust_attrs = py_dict_to_attr_map(a)?;
             for (k, v) in a.iter() {
-                let key: String = k.extract()?;
-                let val_str = v.str()?.to_string();
-                rust_attrs.insert(key.clone(), CgseValue::String(val_str));
                 py_dict.bind(py).set_item(k, v)?;
             }
         }
@@ -1667,10 +1663,8 @@ impl PyDiGraph {
             .entry(ek)
             .or_insert_with(|| PyDict::new(py).unbind());
         if let Some(a) = attr {
+            rust_attrs = py_dict_to_attr_map(a)?;
             for (k, val) in a.iter() {
-                let key: String = k.extract()?;
-                let val_str = val.str()?.to_string();
-                rust_attrs.insert(key, CgseValue::String(val_str));
                 py_dict.bind(py).set_item(k, val)?;
             }
         }
