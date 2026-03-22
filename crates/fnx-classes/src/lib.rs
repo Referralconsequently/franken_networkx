@@ -922,7 +922,9 @@ impl MultiGraph {
         }
 
         self.remove_adjacency_key(left, right, removal_key);
-        self.remove_adjacency_key(right, left, removal_key);
+        if left != right {
+            self.remove_adjacency_key(right, left, removal_key);
+        }
         self.revision = self.revision.saturating_add(1);
         true
     }
