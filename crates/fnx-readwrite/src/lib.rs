@@ -1215,13 +1215,14 @@ impl EdgeListEngine {
         match local {
             b"data" => {
                 if let Some(key_id) = current_data_key.take()
-                    && let Some((_scope, attr_name)) = key_registry.get(&key_id)
+                    && let Some((_scope, _attr_name)) = key_registry.get(&key_id)
                 {
-                    let value = std::mem::take(current_data_text);
+                    let raw_value = std::mem::take(current_data_text);
+                    let value = CgseValue::parse_relaxed(&raw_value);
                     if current_node.is_some() && current_edge.is_none() {
-                        pending_node_attrs.insert(attr_name.clone(), CgseValue::String(value));
+                        pending_node_attrs.insert(_attr_name.clone(), value);
                     } else if current_edge.is_some() {
-                        pending_edge_attrs.insert(attr_name.clone(), CgseValue::String(value));
+                        pending_edge_attrs.insert(_attr_name.clone(), value);
                     }
                 }
                 current_data_text.clear();
@@ -1780,7 +1781,7 @@ fn decode_attrs(
             warnings.push(warning);
             continue;
         };
-        attrs.insert(attr_unescape(key), CgseValue::String(attr_unescape(value)));
+        attrs.insert(attr_unescape(key), CgseValue::parse_relaxed(&attr_unescape(value)));
     }
     Ok(attrs)
 }

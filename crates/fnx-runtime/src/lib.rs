@@ -100,6 +100,25 @@ impl CgseValue {
             Self::Bool(b) => b.to_string(),
         }
     }
+
+    /// Heuristic type inference for a raw string value.
+    /// Order of preference: Int -> Bool -> Float -> String.
+    #[must_use]
+    pub fn parse_relaxed(s: &str) -> Self {
+        if let Ok(i) = s.parse::<i64>() {
+            return Self::Int(i);
+        }
+        if s.eq_ignore_ascii_case("true") {
+            return Self::Bool(true);
+        }
+        if s.eq_ignore_ascii_case("false") {
+            return Self::Bool(false);
+        }
+        if let Ok(f) = s.parse::<f64>() {
+            return Self::Float(f);
+        }
+        Self::String(s.to_owned())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -52,6 +52,7 @@ pub trait GraphView {
     fn get_node_index(&self, node: &str) -> Option<usize>;
     fn get_node_name(&self, index: usize) -> Option<&str>;
     fn neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>>;
+    fn in_neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>>;
     fn neighbor_count(&self, node: &str) -> usize;
     fn has_node(&self, node: &str) -> bool;
     fn has_edge(&self, u: &str, v: &str) -> bool;
@@ -71,6 +72,10 @@ impl GraphView for Graph {
         self.get_node_name(index)
     }
     fn neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>> {
+        self.neighbors_iter(node)
+            .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = &str> + '_>)
+    }
+    fn in_neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>> {
         self.neighbors_iter(node)
             .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = &str> + '_>)
     }
@@ -106,6 +111,10 @@ impl GraphView for DiGraph {
     }
     fn neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>> {
         self.neighbors_iter(node)
+            .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = &str> + '_>)
+    }
+    fn in_neighbors_iter(&self, node: &str) -> Option<Box<dyn Iterator<Item = &str> + '_>> {
+        self.predecessors_iter(node)
             .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = &str> + '_>)
     }
     fn neighbor_count(&self, node: &str) -> usize {
@@ -1465,6 +1474,51 @@ pub fn single_source_shortest_path(
     result
 }
 
+/// Return all shortest paths from a single source for a directed graph (unweighted, BFS).
+///
+/// Returns a map from each reachable node to the shortest path from source
+/// to that node. `cutoff` limits the search depth (None = no limit).
+#[must_use]
+pub fn single_source_shortest_path_directed(
+    digraph: &DiGraph,
+    source: &str,
+    cutoff: Option<usize>,
+) -> HashMap<String, Vec<String>> {
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    if !digraph.has_node(source) {
+        return result;
+    }
+
+    result.insert(source.to_owned(), vec![source.to_owned()]);
+    let mut frontier: Vec<&str> = vec![source];
+    let mut level = 0usize;
+
+    while !frontier.is_empty() {
+        if let Some(c) = cutoff
+            && level >= c
+        {
+            break;
+        }
+        let mut next_frontier: Vec<&str> = Vec::new();
+        for &node in &frontier {
+            if let Some(successors) = digraph.successors_iter(node) {
+                for nbr in successors {
+                    if !result.contains_key(nbr) {
+                        let mut path = result[node].clone();
+                        path.push(nbr.to_owned());
+                        result.insert(nbr.to_owned(), path);
+                        next_frontier.push(nbr);
+                    }
+                }
+            }
+        }
+        frontier = next_frontier;
+        level += 1;
+    }
+
+    result
+}
+
 /// Return shortest path lengths from a single source (unweighted, BFS).
 ///
 /// Returns a map from each reachable node to its distance from source.
@@ -1495,6 +1549,49 @@ pub fn single_source_shortest_path_length(
         for &node in &frontier {
             if let Some(neighbors) = graph.neighbors_iter(node) {
                 for nbr in neighbors {
+                    if !result.contains_key(nbr) {
+                        result.insert(nbr.to_owned(), level + 1);
+                        next_frontier.push(nbr);
+                    }
+                }
+            }
+        }
+        frontier = next_frontier;
+        level += 1;
+    }
+
+    result
+}
+
+/// Return shortest path lengths from a single source for a directed graph (unweighted, BFS).
+///
+/// Returns a map from each reachable node to its distance from source.
+/// `cutoff` limits the search depth (None = no limit).
+#[must_use]
+pub fn single_source_shortest_path_length_directed(
+    digraph: &DiGraph,
+    source: &str,
+    cutoff: Option<usize>,
+) -> HashMap<String, usize> {
+    let mut result: HashMap<String, usize> = HashMap::new();
+    if !digraph.has_node(source) {
+        return result;
+    }
+
+    result.insert(source.to_owned(), 0);
+    let mut frontier: Vec<&str> = vec![source];
+    let mut level = 0usize;
+
+    while !frontier.is_empty() {
+        if let Some(c) = cutoff
+            && level >= c
+        {
+            break;
+        }
+        let mut next_frontier: Vec<&str> = Vec::new();
+        for &node in &frontier {
+            if let Some(successors) = digraph.successors_iter(node) {
+                for nbr in successors {
                     if !result.contains_key(nbr) {
                         result.insert(nbr.to_owned(), level + 1);
                         next_frontier.push(nbr);
@@ -1682,7 +1779,7 @@ fn closeness_centrality_generic<G: GraphView>(graph: &G) -> ClosenessCentralityR
             let d = distance[v].unwrap();
             sum_dist += d;
 
-            if let Some(neighbors) = graph.neighbors_iter(nodes[v]) {
+            if let Some(neighbors) = graph.in_neighbors_iter(nodes[v]) {
                 for w_name in neighbors {
                     total_edges_scanned += 1;
                     let w = graph.get_node_index(w_name).unwrap();
@@ -2171,12 +2268,12 @@ fn pagerank_generic<G: GraphView>(graph: &G) -> PageRankResult {
         .map(|(idx, node)| (*node, idx))
         .collect::<HashMap<&str, usize>>();
 
-    // Pre-calculate canonical neighbors for deterministic summation
-    let canonical_neighbors = canonical_nodes
+    // Pre-calculate canonical in-neighbors for deterministic summation
+    let canonical_in_neighbors = canonical_nodes
         .iter()
         .map(|&v| {
             let mut nbrs: Vec<&str> = graph
-                .neighbors_iter(v)
+                .in_neighbors_iter(v)
                 .map(|iter| iter.collect())
                 .unwrap_or_default();
             nbrs.sort_unstable();
@@ -2206,10 +2303,10 @@ fn pagerank_generic<G: GraphView>(graph: &G) -> PageRankResult {
         let dangling_term = PAGERANK_DEFAULT_ALPHA * dangling_mass / n_f64;
 
         for (v_idx, _v) in canonical_nodes.iter().enumerate() {
-            let neighbors = &canonical_neighbors[v_idx];
-            edges_scanned += neighbors.len();
+            let in_neighbors = &canonical_in_neighbors[v_idx];
+            edges_scanned += in_neighbors.len();
 
-            let inbound = neighbors.iter().fold(0.0_f64, |acc, &neighbor| {
+            let inbound = in_neighbors.iter().fold(0.0_f64, |acc, &neighbor| {
                 let Some(&u_idx) = index_by_node.get(neighbor) else {
                     return acc;
                 };
@@ -2462,10 +2559,8 @@ fn betweenness_centrality_generic<G: GraphView>(graph: &G) -> BetweennessCentral
     }
 
     let scale = if n > 2 {
-        // NetworkX normalization: 1/((n-1)*(n-2)) for both directed and undirected.
-        // Brandes accumulation already counts each unordered pair twice for
-        // undirected graphs; the 1/((n-1)*(n-2)) factor accounts for this.
-        1.0 / ((n - 1) * (n - 2)) as f64
+        let factor = if graph.is_directed() { 1.0 } else { 2.0 };
+        factor / ((n - 1) * (n - 2)) as f64
     } else {
         1.0
     };
@@ -2592,7 +2687,8 @@ fn edge_betweenness_centrality_generic<G: GraphView>(graph: &G) -> EdgeBetweenne
     }
 
     let scale = if n > 1 {
-        1.0 / ((n * (n - 1)) as f64)
+        let factor = if graph.is_directed() { 1.0 } else { 2.0 };
+        factor / ((n * (n - 1)) as f64)
     } else {
         0.0
     };
@@ -14912,6 +15008,26 @@ pub fn single_source_dijkstra_path_length(
     single_source_dijkstra_full(graph, source, weight_attr).0
 }
 
+/// Single-source Dijkstra returning paths only for directed graph.
+#[must_use]
+pub fn single_source_dijkstra_path_directed(
+    digraph: &DiGraph,
+    source: &str,
+    weight_attr: &str,
+) -> HashMap<String, Vec<String>> {
+    single_source_dijkstra_full_directed(digraph, source, weight_attr).1
+}
+
+/// Single-source Dijkstra returning distances only for directed graph.
+#[must_use]
+pub fn single_source_dijkstra_path_length_directed(
+    digraph: &DiGraph,
+    source: &str,
+    weight_attr: &str,
+) -> HashMap<String, f64> {
+    single_source_dijkstra_full_directed(digraph, source, weight_attr).0
+}
+
 /// Single-source Bellman-Ford returning paths only.
 /// Returns None if a negative cycle is detected.
 /// Matches `networkx.single_source_bellman_ford_path(G, source, weight=weight)`.
@@ -14957,6 +15073,60 @@ pub fn single_source_bellman_ford_path_length(
     weight_attr: &str,
 ) -> Option<HashMap<String, f64>> {
     let result = bellman_ford_shortest_paths(graph, source, weight_attr);
+    if result.negative_cycle_detected {
+        return None;
+    }
+
+    let mut distances = HashMap::new();
+    for entry in &result.distances {
+        distances.insert(entry.node.clone(), entry.distance);
+    }
+    Some(distances)
+}
+
+/// Single-source Bellman-Ford returning paths only for directed graph.
+/// Returns None if a negative cycle is detected.
+#[must_use]
+pub fn single_source_bellman_ford_path_directed(
+    digraph: &DiGraph,
+    source: &str,
+    weight_attr: &str,
+) -> Option<HashMap<String, Vec<String>>> {
+    let result = bellman_ford_shortest_paths_directed(digraph, source, weight_attr);
+    if result.negative_cycle_detected {
+        return None;
+    }
+
+    let pred_map: HashMap<&str, Option<&str>> = result
+        .predecessors
+        .iter()
+        .map(|e| (e.node.as_str(), e.predecessor.as_deref()))
+        .collect();
+
+    let mut paths = HashMap::new();
+    for entry in &result.distances {
+        let mut path = vec![entry.node.clone()];
+        let mut cur = entry.node.as_str();
+        while let Some(Some(prev)) = pred_map.get(cur) {
+            path.push((*prev).to_owned());
+            cur = prev;
+        }
+        path.reverse();
+        paths.insert(entry.node.clone(), path);
+    }
+
+    Some(paths)
+}
+
+/// Single-source Bellman-Ford returning distances only for directed graph.
+/// Returns None if a negative cycle is detected.
+#[must_use]
+pub fn single_source_bellman_ford_path_length_directed(
+    digraph: &DiGraph,
+    source: &str,
+    weight_attr: &str,
+) -> Option<HashMap<String, f64>> {
+    let result = bellman_ford_shortest_paths_directed(digraph, source, weight_attr);
     if result.negative_cycle_detected {
         return None;
     }
