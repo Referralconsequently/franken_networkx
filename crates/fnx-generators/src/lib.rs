@@ -346,7 +346,7 @@ impl GraphGenerator {
         m: usize,
         seed: u64,
     ) -> Result<GenerationReport, GenerationError> {
-        let (n, warnings) = self.validate_n("barabasi_albert_graph", n, MAX_N_GNP)?;
+        let (n, mut warnings) = self.validate_n("barabasi_albert_graph", n, MAX_N_GNP)?;
 
         if m < 1 || m >= n {
             return Err(GenerationError::FailClosed {
@@ -356,8 +356,9 @@ impl GraphGenerator {
         }
 
         // NetworkX default initial graph: star graph on m + 1 nodes (0..m).
-        let mut report = self.star_graph(m)?;
+        let report = self.star_graph(m)?;
         let mut graph = report.graph;
+        warnings.extend(report.warnings);
 
         // Maintain a "repeated list" of nodes for proportional-to-degree sampling.
         // Each time an edge (u, v) is added, both u and v appear once more.
@@ -405,10 +406,7 @@ impl GraphGenerator {
             0.08,
             format!("generated barabasi-albert graph with n={n}, m={m}, seed={seed}"),
         );
-        Ok(GenerationReport {
-            graph,
-            warnings: report.warnings,
-        })
+        Ok(GenerationReport { graph, warnings })
     }
 
     fn validate_n(
