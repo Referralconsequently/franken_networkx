@@ -92,6 +92,114 @@ def parse_gml(lines, label="label", destringizer=None):
     return _from_nx_graph(graph)
 
 
+def read_pajek(path, encoding="UTF-8"):
+    """Read Pajek text through NetworkX and convert it back to FrankenNetworkX."""
+    import networkx as nx
+
+    return _from_nx_graph(nx.read_pajek(path, encoding=encoding))
+
+
+def write_pajek(G, path, encoding="UTF-8"):
+    """Write Pajek through NetworkX."""
+    import networkx as nx
+
+    return nx.write_pajek(_to_nx(G), path, encoding=encoding)
+
+
+def parse_pajek(lines):
+    """Parse Pajek text or lines into a FrankenNetworkX graph."""
+    import networkx as nx
+
+    return _from_nx_graph(nx.parse_pajek(_normalize_lines(lines)))
+
+
+def generate_pajek(G):
+    """Yield Pajek lines through NetworkX."""
+    import networkx as nx
+
+    yield from nx.generate_pajek(_to_nx(G))
+
+
+def read_leda(path, encoding="UTF-8"):
+    """Read LEDA text through NetworkX and convert it back to FrankenNetworkX."""
+    import networkx as nx
+
+    return _from_nx_graph(nx.read_leda(path, encoding=encoding))
+
+
+def parse_leda(lines):
+    """Parse LEDA text or lines into a FrankenNetworkX graph."""
+    import networkx as nx
+
+    return _from_nx_graph(nx.parse_leda(_normalize_lines(lines)))
+
+
+def read_multiline_adjlist(
+    path,
+    comments="#",
+    delimiter=None,
+    create_using=None,
+    nodetype=None,
+    edgetype=None,
+    encoding="utf-8",
+):
+    """Read multiline adjacency lists through NetworkX."""
+    import networkx as nx
+
+    graph = nx.read_multiline_adjlist(
+        path,
+        comments=comments,
+        delimiter=delimiter,
+        create_using=None,
+        nodetype=nodetype,
+        edgetype=edgetype,
+        encoding=encoding,
+    )
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def write_multiline_adjlist(G, path, delimiter=" ", comments="#", encoding="utf-8"):
+    """Write multiline adjacency lists through NetworkX."""
+    import networkx as nx
+
+    return nx.write_multiline_adjlist(
+        _to_nx(G),
+        path,
+        delimiter=delimiter,
+        comments=comments,
+        encoding=encoding,
+    )
+
+
+def parse_multiline_adjlist(
+    lines,
+    comments="#",
+    delimiter=None,
+    create_using=None,
+    nodetype=None,
+    edgetype=None,
+):
+    """Parse multiline adjacency-list text or lines into a FrankenNetworkX graph."""
+    import networkx as nx
+
+    graph = nx.parse_multiline_adjlist(
+        iter(_normalize_lines(lines)),
+        comments=comments,
+        delimiter=delimiter,
+        create_using=None,
+        nodetype=nodetype,
+        edgetype=edgetype,
+    )
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def generate_multiline_adjlist(G, delimiter=" "):
+    """Yield multiline adjacency-list lines through NetworkX."""
+    import networkx as nx
+
+    yield from nx.generate_multiline_adjlist(_to_nx(G), delimiter=delimiter)
+
+
 def generate_adjlist(G, delimiter=" "):
     """Yield adjacency-list lines using NetworkX's generator."""
     import networkx as nx

@@ -574,15 +574,25 @@ from franken_networkx.readwrite import (
     generate_edgelist,
     generate_gexf,
     generate_gml,
+    generate_multiline_adjlist,
+    generate_pajek,
     parse_gexf,
     parse_adjlist,
     parse_edgelist,
     parse_gml,
+    parse_leda,
+    parse_multiline_adjlist,
+    parse_pajek,
     read_gexf,
+    read_leda,
+    read_multiline_adjlist,
+    read_pajek,
     relabel_gexf_graph,
     write_gexf,
     write_graphml_lxml,
     write_graphml_xml,
+    write_multiline_adjlist,
+    write_pajek,
 )
 
 
@@ -3830,9 +3840,9 @@ def _classify_triad(G, u, v, w):
             asym_src = v if (code & 16) else w
 
         if asym_src in mutual_nodes:
-            return '111D'  # asymmetric edge goes FROM mutual pair outward
+            return '111U'  # asymmetric edge goes FROM mutual pair outward
         else:
-            return '111U'  # asymmetric edge goes TO mutual pair from outside
+            return '111D'  # asymmetric edge goes TO mutual pair from outside
     if m == 0 and a == 3:
         # 030T vs 030C — check if all 3 asymmetric edges form a directed cycle
         # 030C: u→v→w→u or u→w→v→u
@@ -3843,33 +3853,33 @@ def _classify_triad(G, u, v, w):
         return '201'
     if m == 1 and a == 2:
         # 120D, 120U, 120C
-        # Find which pair is mutual
+        # NX convention: 120U = both asym edges go OUT from mutual pair
+        #                120D = both asym edges come IN to mutual pair
         if uv_m:
-            # Asymmetric pairs are (u,w) and (v,w)
-            uw_dir = u if (code & 4) else w  # source of u-w asymmetric
-            vw_dir = v if (code & 16) else w  # source of v-w asymmetric
+            uw_dir = u if (code & 4) else w
+            vw_dir = v if (code & 16) else w
             if uw_dir == u and vw_dir == v:
-                return '120D'  # both go down from mutual pair to third
+                return '120U'  # both go OUT from mutual pair
             elif uw_dir == w and vw_dir == w:
-                return '120U'  # both go up from third to mutual pair
+                return '120D'  # both come IN to mutual pair
             else:
-                return '120C'  # one up, one down = cycle through third
+                return '120C'
         elif uw_m:
             uv_dir = u if (code & 1) else v
             vw_dir = v if (code & 16) else w
             if uv_dir == u and vw_dir == w:
-                return '120D'
-            elif uv_dir == v and vw_dir == v:
                 return '120U'
+            elif uv_dir == v and vw_dir == v:
+                return '120D'
             else:
                 return '120C'
         else:  # vw_m
             uv_dir = u if (code & 1) else v
             uw_dir = u if (code & 4) else w
             if uv_dir == v and uw_dir == w:
-                return '120D'
-            elif uv_dir == u and uw_dir == u:
                 return '120U'
+            elif uv_dir == u and uw_dir == u:
+                return '120D'
             else:
                 return '120C'
     if m == 2 and a == 1:
@@ -5758,15 +5768,25 @@ __all__ = [
     "generate_edgelist",
     "generate_gexf",
     "generate_gml",
+    "generate_multiline_adjlist",
+    "generate_pajek",
     "parse_gexf",
     "parse_adjlist",
     "parse_edgelist",
     "parse_gml",
+    "parse_leda",
+    "parse_multiline_adjlist",
+    "parse_pajek",
     "read_gexf",
+    "read_leda",
+    "read_multiline_adjlist",
+    "read_pajek",
     "relabel_gexf_graph",
     "write_gexf",
     "write_graphml_lxml",
     "write_graphml_xml",
+    "write_multiline_adjlist",
+    "write_pajek",
     # Drawing
     "draw",
     "draw_circular",
