@@ -1,5 +1,8 @@
 """Drawing functions — delegates to NetworkX/matplotlib after graph conversion."""
 
+from io import StringIO
+
+from franken_networkx.drawing.layout import bipartite_layout
 from franken_networkx.drawing.layout import _to_nx
 
 
@@ -122,3 +125,33 @@ def generate_network_text(graph, *args, **kwargs):
 def write_network_text(graph, path=None, *args, **kwargs):
     """Write a textual graph rendering via NetworkX."""
     return _delegate_draw("write_network_text", graph, path, *args, **kwargs)
+
+
+def display(G, **kwds):
+    """Display a graph in notebooks when possible, otherwise return text output."""
+    try:
+        from IPython import get_ipython
+    except Exception:
+        get_ipython = None
+
+    shell = get_ipython() if get_ipython is not None else None
+    if shell is not None and shell.__class__.__name__ == "ZMQInteractiveShell":
+        try:
+            import matplotlib.pyplot as plt
+
+            fig, ax = plt.subplots()
+            draw(G, ax=ax, **kwds)
+            return fig
+        except Exception:
+            pass
+
+    buffer = StringIO()
+    write_network_text(G, path=buffer, **kwds)
+    return buffer.getvalue()
+
+
+def draw_bipartite(G, top_nodes, pos=None, **kwds):
+    """Draw a bipartite graph using a bipartite layout when positions are omitted."""
+    if pos is None:
+        pos = bipartite_layout(G, top_nodes)
+    return draw(G, pos=pos, **kwds)

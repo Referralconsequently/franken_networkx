@@ -1,7 +1,9 @@
 """Drawing functions — thin delegation layer to NetworkX/matplotlib."""
 
 from franken_networkx.drawing.nx_pylab import (
+    display,
     draw,
+    draw_bipartite,
     draw_circular,
     draw_forceatlas2,
     draw_kamada_kawai,
@@ -41,6 +43,8 @@ from franken_networkx.drawing.layout import (
 
 __all__ = [
     "draw",
+    "display",
+    "draw_bipartite",
     "draw_circular",
     "draw_forceatlas2",
     "draw_kamada_kawai",
