@@ -1789,7 +1789,10 @@ fn decode_attrs(
             warnings.push(warning);
             continue;
         };
-        attrs.insert(attr_unescape(key), CgseValue::parse_relaxed(&attr_unescape(value)));
+        attrs.insert(
+            attr_unescape(key),
+            CgseValue::parse_relaxed(&attr_unescape(value)),
+        );
     }
     Ok(attrs)
 }

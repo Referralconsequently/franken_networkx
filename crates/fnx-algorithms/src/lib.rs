@@ -28302,7 +28302,8 @@ mod tests {
 
     #[test]
     fn test_complete_multipartite_graph() {
-        let g = complete_multipartite_graph(&[2, 2, 2]).expect("complete_multipartite_graph failed");
+        let g =
+            complete_multipartite_graph(&[2, 2, 2]).expect("complete_multipartite_graph failed");
         assert_eq!(g.node_count(), 6);
         assert_eq!(g.edge_count(), 12); // K_{2,2,2}
     }

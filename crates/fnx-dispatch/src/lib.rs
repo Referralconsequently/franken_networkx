@@ -318,7 +318,7 @@ mod tests {
             operation: "convert".to_owned(),
             requested_backend: None,
             required_features: set(&["convert"]),
-            risk_probability: 0.2,
+            risk_probability: 0.3,
             unknown_incompatible_feature: false,
         };
 

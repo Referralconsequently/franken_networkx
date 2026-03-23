@@ -166,6 +166,9 @@ def all_simple_paths(G, source, target, cutoff=None):
     For directed graphs, only follows outgoing edges (successors).
     For undirected graphs, delegates to the Rust implementation.
     """
+    # Trivial case: source is target
+    if source == target:
+        return [[source]]
     if not G.is_directed():
         return _rust_all_simple_paths(G, source, target, cutoff=cutoff)
     # Directed DFS respecting edge direction
@@ -1398,38 +1401,32 @@ def disjoint_union(G, H):
     Nodes are relabeled to avoid collisions: G's nodes become ``(0, n)``
     and H's nodes become ``(1, n)``.
     """
-    result = Graph()
-    for n in G.nodes():
-        result.add_node((0, n))
-    for n in H.nodes():
-        result.add_node((1, n))
-    for u, v in G.edges():
-        result.add_edge((0, u), (0, v))
-    for u, v in H.edges():
-        result.add_edge((1, u), (1, v))
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.disjoint_union(_to_nx(G), _to_nx(H)))
 
 
 def compose_all(graphs):
     """Return the composition of all graphs in the iterable."""
-    graphs = list(graphs)
-    if not graphs:
-        return Graph()
-    result = graphs[0].copy()
-    for g in graphs[1:]:
-        result = compose(result, g)
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.compose_all([_to_nx(graph) for graph in graphs]))
 
 
-def union_all(graphs):
+def union_all(graphs, rename=()):
     """Return the union of all graphs in the iterable."""
-    graphs = list(graphs)
-    if not graphs:
-        return Graph()
-    result = graphs[0].copy()
-    for g in graphs[1:]:
-        result = union(result, g)
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.union_all([_to_nx(graph) for graph in graphs], rename=rename))
 
 
 # ---------------------------------------------------------------------------
@@ -2220,24 +2217,22 @@ def attribute_assortativity_coefficient(G, attribute, nodes=None):
 
 def intersection_all(graphs):
     """Return the intersection of all graphs in the iterable."""
-    graphs = list(graphs)
-    if not graphs:
-        return Graph()
-    result = graphs[0].copy()
-    for g in graphs[1:]:
-        result = intersection(result, g)
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.intersection_all([_to_nx(graph) for graph in graphs]))
 
 
 def disjoint_union_all(graphs):
     """Return the disjoint union of all graphs in the iterable."""
-    result = Graph()
-    for i, g in enumerate(graphs):
-        for n in g.nodes():
-            result.add_node((i, n))
-        for u, v in g.edges():
-            result.add_edge((i, u), (i, v))
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.disjoint_union_all([_to_nx(graph) for graph in graphs]))
 
 
 def rescale_layout(pos, scale=1.0):
@@ -6356,8 +6351,11 @@ def geometric_edges(G, radius, p=2):
 # Coloring & Planarity (br-y1g)
 def equitable_color(G, num_colors):
     """Equitable graph coloring: each color class differs by at most 1."""
-    coloring = greedy_color(G)
-    return coloring
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.equitable_color(_to_nx(G), num_colors)
 
 def chromatic_polynomial(G, x):
     """Evaluate chromatic polynomial P(G, x) via deletion-contraction."""
@@ -6371,8 +6369,13 @@ def chromatic_polynomial(G, x):
     return chromatic_polynomial(G1, x) - chromatic_polynomial(G2, x)
 
 def combinatorial_embedding_to_pos(embedding, fully_triangulate=False):
-    """Convert combinatorial embedding to positions (stub — returns empty)."""
-    return {}
+    """Convert combinatorial embedding to positions."""
+    import networkx as nx
+
+    return nx.combinatorial_embedding_to_pos(
+        embedding,
+        fully_triangulate=fully_triangulate,
+    )
 
 # Isomorphism VF2++ (br-req)
 def vf2pp_is_isomorphic(G1, G2, node_label=None, default_label=None):
@@ -6604,15 +6607,32 @@ def panther_similarity(G, source, k=5, path_length=5, c=0.5, seed=None):
     return {node: counts.get(node, 0) / total for node in G.nodes()}
 
 def optimal_edit_paths(G1, G2, node_match=None, edge_match=None, node_subst_cost=None, node_del_cost=None, node_ins_cost=None, edge_subst_cost=None, edge_del_cost=None, edge_ins_cost=None, upper_bound=None):
-    """Find optimal edit paths (stub — returns heuristic)."""
-    n1 = sorted(G1.nodes(), key=str); n2 = sorted(G2.nodes(), key=str)
-    node_edit = list(zip(n1, n2))
-    cost = abs(len(n1) - len(n2)) + abs(G1.number_of_edges() - G2.number_of_edges())
-    return node_edit, [], cost
+    """Find optimal edit paths."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.optimal_edit_paths(
+        _to_nx(G1),
+        _to_nx(G2),
+        node_match=node_match,
+        edge_match=edge_match,
+        node_subst_cost=node_subst_cost,
+        node_del_cost=node_del_cost,
+        node_ins_cost=node_ins_cost,
+        edge_subst_cost=edge_subst_cost,
+        edge_del_cost=edge_del_cost,
+        edge_ins_cost=edge_ins_cost,
+        upper_bound=upper_bound,
+    )
 
 def optimize_edit_paths(G1, G2, **kwargs):
     """Iterator yielding progressively better edit paths."""
-    yield optimal_edit_paths(G1, G2, **kwargs)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    yield from nx.optimize_edit_paths(_to_nx(G1), _to_nx(G2), **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -6687,9 +6707,36 @@ def local_constraint(G, u, v):
     c = constraint(G, nodes=[u])
     return c.get(u, 0.0)
 
-def apply_matplotlib_colors(G, colors, **kwargs):
-    """Apply matplotlib colors to graph (stub for compatibility)."""
-    pass
+def apply_matplotlib_colors(G, src_attr, dest_attr, map, vmin=None, vmax=None, nodes=True):
+    """Apply matplotlib colors to graph."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    H = _to_nx(G)
+    nx.apply_matplotlib_colors(
+        H,
+        src_attr,
+        dest_attr,
+        map,
+        vmin=vmin,
+        vmax=vmax,
+        nodes=nodes,
+    )
+
+    if nodes:
+        for node, attrs in H.nodes(data=True):
+            if dest_attr in attrs:
+                G.nodes[node][dest_attr] = attrs[dest_attr]
+    else:
+        if G.is_multigraph():
+            for u, v, key, attrs in H.edges(keys=True, data=True):
+                if dest_attr in attrs:
+                    G[u][v][key][dest_attr] = attrs[dest_attr]
+        else:
+            for u, v, attrs in H.edges(data=True):
+                if dest_attr in attrs:
+                    G[u][v][dest_attr] = attrs[dest_attr]
 
 def communicability_exp(G):
     """Communicability via scipy.linalg.expm."""
@@ -6706,14 +6753,20 @@ def effective_graph_resistance(G, weight=None, invert_weight=True):
     return total / 2.0
 
 def graph_edit_distance(G1, G2, **kwargs):
-    """Approximate graph edit distance."""
-    n1, n2 = G1.number_of_nodes(), G2.number_of_nodes()
-    e1, e2 = G1.number_of_edges(), G2.number_of_edges()
-    return float(abs(n1 - n2) + abs(e1 - e2))
+    """Return graph edit distance."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.graph_edit_distance(_to_nx(G1), _to_nx(G2), **kwargs)
 
 def optimize_graph_edit_distance(G1, G2, **kwargs):
     """Iterator yielding improving graph edit distances."""
-    yield graph_edit_distance(G1, G2, **kwargs)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    yield from nx.optimize_graph_edit_distance(_to_nx(G1), _to_nx(G2), **kwargs)
 
 def cd_index(G, node, c=None):
     """Consolidation-diffusion index."""
@@ -6727,9 +6780,12 @@ def cd_index(G, node, c=None):
     return (ni - nj) / (ni + nj) if (ni + nj) > 0 else 0.0
 
 def goldberg_radzik(G, source, weight='weight'):
-    """Shortest paths with negative weights (delegates to Bellman-Ford)."""
-    pred, dist = bellman_ford_predecessor_and_distance(G, source, weight=weight)
-    return pred, dist
+    """Compute shortest-path predecessors and distances via Goldberg-Radzik."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.goldberg_radzik(_to_nx(G), source, weight=weight)
 
 def parse_graphml(
     graphml_string,
@@ -6836,12 +6892,20 @@ def random_lobster_graph(n, p1, p2, seed=None):
     return random_lobster(n, p1, p2, seed=seed)
 
 def random_shell_graph(constructor, seed=None):
-    """Multi-shell random graph (stub)."""
-    return Graph()
+    """Multi-shell random graph."""
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.random_shell_graph(constructor, seed=seed))
 
 def random_clustered_graph(joint_degree_sequence, seed=None):
-    """Random graph from joint degree sequence (stub)."""
-    return Graph()
+    """Random graph from joint degree sequence."""
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.random_clustered_graph(joint_degree_sequence, seed=seed))
 
 def random_cograph(n, seed=None):
     """Random cograph via recursive split."""
@@ -6862,7 +6926,13 @@ def random_cograph(n, seed=None):
 
 def random_degree_sequence_graph(sequence, seed=None, tries=10):
     """Random graph with given degree sequence."""
-    return havel_hakimi_graph(sequence)
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(
+        nx.random_degree_sequence_graph(sequence, seed=seed, tries=tries)
+    )
 
 def random_internet_as_graph(n, seed=None):
     """Random Internet AS-level graph."""
@@ -6941,14 +7011,20 @@ def geometric_soft_configuration_graph(beta=1, n=100, dim=2, pos=None, seed=None
     return random_geometric_graph(n, 0.3, dim=dim, seed=seed)
 
 def graph_atlas(i):
-    """Return graph i from the atlas (stub for small i)."""
-    if i == 0: return Graph()
-    if i == 1: G = Graph(); G.add_node(0); return G
-    return path_graph(min(i, 7))
+    """Return graph i from the atlas."""
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.graph_atlas(i))
 
 def graph_atlas_g():
     """Return list of all graphs in the atlas."""
-    return [graph_atlas(i) for i in range(208)]
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return [_from_nx_graph(graph) for graph in nx.graph_atlas_g()]
 
 def find_asteroidal_triple(G):
     """Find an asteroidal triple (if exists)."""
@@ -7019,8 +7095,13 @@ def k_factor(G, k):
     return G.copy()
 
 def spectral_graph_forge(G, alpha=0.8, seed=None):
-    """Graph with prescribed spectral properties (stub)."""
-    return G.copy()
+    """Graph with prescribed spectral properties."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.spectral_graph_forge(_to_nx(G), alpha=alpha, seed=seed))
 
 def tutte_polynomial(G, x, y):
     """Evaluate Tutte polynomial T(G; x, y) via deletion-contraction."""
@@ -7128,40 +7209,15 @@ def relabel_nodes(G, mapping, copy=True):
     H : Graph or DiGraph
         The relabeled graph. If ``copy=False``, this is the same object as G.
     """
-    if callable(mapping) and not isinstance(mapping, dict):
-        _mapping = {n: mapping(n) for n in G.nodes()}
-    else:
-        _mapping = mapping
+    import networkx as nx
 
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    relabeled = nx.relabel_nodes(_to_nx(G), mapping, copy=True)
     if copy:
-        H = G.__class__()
-    else:
-        # Build a fresh graph and swap contents
-        H = G.__class__()
-
-    # Add nodes with their attributes under new labels
-    for old_node in G.nodes():
-        new_node = _mapping.get(old_node, old_node)
-        attrs = G.nodes[old_node] if hasattr(G.nodes, '__getitem__') else {}
-        H.add_node(new_node, **attrs)
-
-    # Add edges with their attributes under new labels
-    for u, v, data in G.edges(data=True):
-        new_u = _mapping.get(u, u)
-        new_v = _mapping.get(v, v)
-        H.add_edge(new_u, new_v, **data)
-
-    if not copy:
-        # Replace G's internals with H's
-        G.clear()
-        for n in H.nodes():
-            attrs = H.nodes[n] if hasattr(H.nodes, '__getitem__') else {}
-            G.add_node(n, **attrs)
-        for u, v, data in H.edges(data=True):
-            G.add_edge(u, v, **data)
-        return G
-
-    return H
+        return _from_nx_graph(relabeled)
+    return _from_nx_graph(relabeled, create_using=G)
 
 
 def to_dict_of_lists(G, nodelist=None):
@@ -7265,22 +7321,19 @@ def convert_node_labels_to_integers(G, first_label=0, ordering='default',
     H : Graph or DiGraph
         A new graph with integer node labels.
     """
-    nodes = list(G.nodes())
-    if ordering == 'sorted':
-        nodes = sorted(nodes, key=str)
-    elif ordering == 'increasing degree':
-        nodes = sorted(nodes, key=lambda n: G.degree[n])
-    elif ordering == 'decreasing degree':
-        nodes = sorted(nodes, key=lambda n: G.degree[n], reverse=True)
+    import networkx as nx
 
-    mapping = {old: first_label + i for i, old in enumerate(nodes)}
-    H = relabel_nodes(G, mapping)
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    if label_attribute is not None:
-        for old, new in mapping.items():
-            H.nodes[new][label_attribute] = old
-
-    return H
+    return _from_nx_graph(
+        nx.convert_node_labels_to_integers(
+            _to_nx(G),
+            first_label=first_label,
+            ordering=ordering,
+            label_attribute=label_attribute,
+        )
+    )
 
 
 def to_pandas_edgelist(G, source='source', target='target', nodelist=None,

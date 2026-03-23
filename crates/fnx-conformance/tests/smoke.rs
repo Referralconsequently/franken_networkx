@@ -2386,8 +2386,8 @@ fn packet_006_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
     "graph": {
       "nodes": ["a", "b", "c"],
       "edges": [
-        { "left": "a", "right": "b", "attrs": { "weight": "1" } },
-        { "left": "b", "right": "c", "attrs": { "weight": "2" } }
+        { "left": "a", "right": "b", "attrs": { "weight": 1 } },
+        { "left": "b", "right": "c", "attrs": { "weight": 2 } }
       ]
     },
     "serialized_edgelist": "a b weight=1\nb c weight=2"
@@ -2411,8 +2411,8 @@ fn packet_006_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
     "graph": {
       "nodes": ["b", "c", "a"],
       "edges": [
-        { "left": "b", "right": "c", "attrs": { "weight": "2" } },
-        { "left": "a", "right": "b", "attrs": { "weight": "1" } }
+        { "left": "b", "right": "c", "attrs": { "weight": 2 } },
+        { "left": "a", "right": "b", "attrs": { "weight": 1 } }
       ]
     },
     "serialized_edgelist": "b c weight=2\na b weight=1"

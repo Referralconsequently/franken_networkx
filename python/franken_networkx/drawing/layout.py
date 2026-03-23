@@ -11,8 +11,13 @@ def _to_nx(G):
         H = nx.DiGraph() if G.is_directed() else nx.Graph()
     for n, attrs in G.nodes(data=True):
         H.add_node(n, **attrs)
-    for u, v, d in G.edges(data=True):
-        H.add_edge(u, v, **d)
+    if G.is_multigraph():
+        for u, v, key, attrs in G.edges(keys=True, data=True):
+            H.add_edge(u, v, key=key, **attrs)
+    else:
+        for u, v, attrs in G.edges(data=True):
+            H.add_edge(u, v, **attrs)
+    H.graph.update(dict(G.graph))
     return H
 
 

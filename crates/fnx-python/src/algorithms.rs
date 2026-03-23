@@ -401,16 +401,21 @@ fn compute_single_shortest_path(
 ) -> PyResult<Option<Vec<String>>> {
     match weight {
         None => {
-            let result = py.allow_threads(|| fnx_algorithms::shortest_path_unweighted(inner, source, target));
+            let result = py
+                .allow_threads(|| fnx_algorithms::shortest_path_unweighted(inner, source, target));
             Ok(result.path)
         }
         Some(w) => match method {
             "dijkstra" => {
-                let result = py.allow_threads(|| fnx_algorithms::shortest_path_weighted(inner, source, target, w));
+                let result = py.allow_threads(|| {
+                    fnx_algorithms::shortest_path_weighted(inner, source, target, w)
+                });
                 Ok(result.path)
             }
             "bellman-ford" => {
-                let result = py.allow_threads(|| fnx_algorithms::bellman_ford_shortest_paths(inner, source, w));
+                let result = py.allow_threads(|| {
+                    fnx_algorithms::bellman_ford_shortest_paths(inner, source, w)
+                });
                 if result.negative_cycle_detected {
                     return Err(crate::NetworkXUnbounded::new_err(
                         "Negative cost cycle detected.",
@@ -458,17 +463,22 @@ fn compute_single_shortest_path_directed(
 ) -> PyResult<Option<Vec<String>>> {
     match weight {
         None => {
-            let result = py.allow_threads(|| fnx_algorithms::shortest_path_unweighted_directed(inner, source, target));
+            let result = py.allow_threads(|| {
+                fnx_algorithms::shortest_path_unweighted_directed(inner, source, target)
+            });
             Ok(result.path)
         }
         Some(w) => match method {
             "dijkstra" => {
-                let result =
-                    py.allow_threads(|| fnx_algorithms::shortest_path_weighted_directed(inner, source, target, w));
+                let result = py.allow_threads(|| {
+                    fnx_algorithms::shortest_path_weighted_directed(inner, source, target, w)
+                });
                 Ok(result.path)
             }
             "bellman-ford" => {
-                let result = py.allow_threads(|| fnx_algorithms::bellman_ford_shortest_paths_directed(inner, source, w));
+                let result = py.allow_threads(|| {
+                    fnx_algorithms::bellman_ford_shortest_paths_directed(inner, source, w)
+                });
                 if result.negative_cycle_detected {
                     return Err(crate::NetworkXUnbounded::new_err(
                         "Negative cost cycle detected.",
@@ -515,23 +525,30 @@ fn compute_single_source_shortest_paths(
 ) -> PyResult<std::collections::HashMap<String, Vec<String>>> {
     match weight {
         None => {
-            Ok(py.allow_threads(|| fnx_algorithms::single_source_shortest_path(inner, source, None)))
+            Ok(py
+                .allow_threads(|| fnx_algorithms::single_source_shortest_path(inner, source, None)))
         }
-        Some(w) => match method {
-            "dijkstra" => {
-                Ok(py.allow_threads(|| fnx_algorithms::single_source_dijkstra_path(inner, source, w)))
-            }
-            "bellman-ford" => {
-                let result = py.allow_threads(|| fnx_algorithms::single_source_bellman_ford_path(inner, source, w));
-                match result {
-                    Some(paths) => Ok(paths),
-                    None => Err(crate::NetworkXUnbounded::new_err("Negative cost cycle detected.")),
+        Some(w) => {
+            match method {
+                "dijkstra" => Ok(py.allow_threads(|| {
+                    fnx_algorithms::single_source_dijkstra_path(inner, source, w)
+                })),
+                "bellman-ford" => {
+                    let result = py.allow_threads(|| {
+                        fnx_algorithms::single_source_bellman_ford_path(inner, source, w)
+                    });
+                    match result {
+                        Some(paths) => Ok(paths),
+                        None => Err(crate::NetworkXUnbounded::new_err(
+                            "Negative cost cycle detected.",
+                        )),
+                    }
                 }
+                other => Err(NetworkXError::new_err(format!(
+                    "Method {other} not supported for shortest_path."
+                ))),
             }
-            other => Err(NetworkXError::new_err(format!(
-                "Method {other} not supported for shortest_path."
-            ))),
-        },
+        }
     }
 }
 
@@ -543,18 +560,22 @@ fn compute_single_source_shortest_paths_directed(
     method: &str,
 ) -> PyResult<std::collections::HashMap<String, Vec<String>>> {
     match weight {
-        None => {
-            Ok(py.allow_threads(|| fnx_algorithms::single_source_shortest_path_directed(inner, source, None)))
-        }
+        None => Ok(py.allow_threads(|| {
+            fnx_algorithms::single_source_shortest_path_directed(inner, source, None)
+        })),
         Some(w) => match method {
-            "dijkstra" => {
-                Ok(py.allow_threads(|| fnx_algorithms::single_source_dijkstra_path_directed(inner, source, w)))
-            }
+            "dijkstra" => Ok(py.allow_threads(|| {
+                fnx_algorithms::single_source_dijkstra_path_directed(inner, source, w)
+            })),
             "bellman-ford" => {
-                let result = py.allow_threads(|| fnx_algorithms::single_source_bellman_ford_path_directed(inner, source, w));
+                let result = py.allow_threads(|| {
+                    fnx_algorithms::single_source_bellman_ford_path_directed(inner, source, w)
+                });
                 match result {
                     Some(paths) => Ok(paths),
-                    None => Err(crate::NetworkXUnbounded::new_err("Negative cost cycle detected.")),
+                    None => Err(crate::NetworkXUnbounded::new_err(
+                        "Negative cost cycle detected.",
+                    )),
                 }
             }
             other => Err(NetworkXError::new_err(format!(
@@ -930,7 +951,13 @@ pub fn shortest_path(
                 (Some(src), None) => {
                     let s = node_key_to_string(py, src)?;
                     validate_node(&gr, &s, src)?;
-                    let paths = compute_single_source_shortest_paths_directed(py, inner, &s, Some(weight_attr), method)?;
+                    let paths = compute_single_source_shortest_paths_directed(
+                        py,
+                        inner,
+                        &s,
+                        Some(weight_attr),
+                        method,
+                    )?;
                     let result = PyDict::new(py);
                     for (node, p) in paths {
                         let py_path: Vec<PyObject> =
@@ -963,7 +990,13 @@ pub fn shortest_path(
                     let result = PyDict::new(py);
                     for src_node in inner.nodes_ordered() {
                         let inner_dict = PyDict::new(py);
-                        let paths = compute_single_source_shortest_paths_directed(py, inner, src_node, Some(weight_attr), method)?;
+                        let paths = compute_single_source_shortest_paths_directed(
+                            py,
+                            inner,
+                            src_node,
+                            Some(weight_attr),
+                            method,
+                        )?;
                         for (tgt_node, p) in paths {
                             let py_path: Vec<PyObject> =
                                 p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -1002,7 +1035,13 @@ pub fn shortest_path(
                 (Some(src), None) => {
                     let s = node_key_to_string(py, src)?;
                     validate_node(&gr, &s, src)?;
-                    let paths = compute_single_source_shortest_paths(py, inner, &s, Some(weight_attr), method)?;
+                    let paths = compute_single_source_shortest_paths(
+                        py,
+                        inner,
+                        &s,
+                        Some(weight_attr),
+                        method,
+                    )?;
                     let result = PyDict::new(py);
                     for (node, p) in paths {
                         let py_path: Vec<PyObject> =
@@ -1014,7 +1053,13 @@ pub fn shortest_path(
                 (None, Some(tgt)) => {
                     let t = node_key_to_string(py, tgt)?;
                     validate_node(&gr, &t, tgt)?;
-                    let paths = compute_single_source_shortest_paths(py, inner, &t, Some(weight_attr), method)?;
+                    let paths = compute_single_source_shortest_paths(
+                        py,
+                        inner,
+                        &t,
+                        Some(weight_attr),
+                        method,
+                    )?;
                     let result = PyDict::new(py);
                     for (node, mut p) in paths {
                         p.reverse();
@@ -1028,7 +1073,13 @@ pub fn shortest_path(
                     let result = PyDict::new(py);
                     for src_node in inner.nodes_ordered() {
                         let inner_dict = PyDict::new(py);
-                        let paths = compute_single_source_shortest_paths(py, inner, src_node, Some(weight_attr), method)?;
+                        let paths = compute_single_source_shortest_paths(
+                            py,
+                            inner,
+                            src_node,
+                            Some(weight_attr),
+                            method,
+                        )?;
                         for (tgt_node, p) in paths {
                             let py_path: Vec<PyObject> =
                                 p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -1065,11 +1116,11 @@ pub fn shortest_path(
             (Some(src), None) => {
                 let s = node_key_to_string(py, src)?;
                 validate_node(&gr, &s, src)?;
-                let paths = compute_single_source_shortest_paths_directed(py, inner, &s, None, method)?;
+                let paths =
+                    compute_single_source_shortest_paths_directed(py, inner, &s, None, method)?;
                 let result = PyDict::new(py);
                 for (node, p) in paths {
-                    let py_path: Vec<PyObject> =
-                        p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                    let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
                     result.set_item(gr.py_node_key(py, &node), py_path)?;
                 }
                 Ok(result.into_any().unbind())
@@ -1093,7 +1144,9 @@ pub fn shortest_path(
                 let result = PyDict::new(py);
                 for src_node in inner.nodes_ordered() {
                     let inner_dict = PyDict::new(py);
-                    let paths = compute_single_source_shortest_paths_directed(py, inner, src_node, None, method)?;
+                    let paths = compute_single_source_shortest_paths_directed(
+                        py, inner, src_node, None, method,
+                    )?;
                     for (tgt_node, p) in paths {
                         let py_path: Vec<PyObject> =
                             p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -1133,8 +1186,7 @@ pub fn shortest_path(
                 let paths = compute_single_source_shortest_paths(py, inner, &s, None, method)?;
                 let result = PyDict::new(py);
                 for (node, p) in paths {
-                    let py_path: Vec<PyObject> =
-                        p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                    let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
                     result.set_item(gr.py_node_key(py, &node), py_path)?;
                 }
                 Ok(result.into_any().unbind())
@@ -1146,8 +1198,7 @@ pub fn shortest_path(
                 let result = PyDict::new(py);
                 for (node, mut p) in paths {
                     p.reverse();
-                    let py_path: Vec<PyObject> =
-                        p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                    let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
                     result.set_item(gr.py_node_key(py, &node), py_path)?;
                 }
                 Ok(result.into_any().unbind())
@@ -1156,7 +1207,8 @@ pub fn shortest_path(
                 let result = PyDict::new(py);
                 for src_node in inner.nodes_ordered() {
                     let inner_dict = PyDict::new(py);
-                    let paths = compute_single_source_shortest_paths(py, inner, src_node, None, method)?;
+                    let paths =
+                        compute_single_source_shortest_paths(py, inner, src_node, None, method)?;
                     for (tgt_node, p) in paths {
                         let py_path: Vec<PyObject> =
                             p.iter().map(|n| gr.py_node_key(py, n)).collect();
@@ -1527,18 +1579,18 @@ pub fn is_connected(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
 pub fn density(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
     let gr = extract_graph(g)?;
     let (n, m, directed) = match &gr {
-        GraphRef::Undirected(pg) => {
-            (pg.inner.nodes_ordered().len(), pg.inner.edge_count(), false)
-        }
+        GraphRef::Undirected(pg) => (pg.inner.nodes_ordered().len(), pg.inner.edge_count(), false),
         GraphRef::Directed { dg, .. } => {
             (dg.inner.nodes_ordered().len(), dg.inner.edge_count(), true)
         }
         GraphRef::MultiUndirected { simple, .. } => {
             (simple.nodes_ordered().len(), simple.edge_count(), false)
         }
-        GraphRef::MultiDirected { simple_dg, .. } => {
-            (simple_dg.nodes_ordered().len(), simple_dg.edge_count(), true)
-        }
+        GraphRef::MultiDirected { simple_dg, .. } => (
+            simple_dg.nodes_ordered().len(),
+            simple_dg.edge_count(),
+            true,
+        ),
     };
     if n < 2 {
         return Ok(0.0);
@@ -4542,7 +4594,8 @@ pub fn ring_of_cliques(
     num_cliques: usize,
     clique_size: usize,
 ) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::ring_of_cliques(num_cliques, clique_size))
+    let result = py
+        .allow_threads(|| fnx_algorithms::ring_of_cliques(num_cliques, clique_size))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4561,7 +4614,8 @@ pub fn balanced_tree(py: Python<'_>, r: usize, h: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n1, n2))]
 pub fn barbell_graph(py: Python<'_>, n1: usize, n2: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::barbell_graph(n1, n2))
+    let result = py
+        .allow_threads(|| fnx_algorithms::barbell_graph(n1, n2))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4701,7 +4755,8 @@ pub fn hoffman_singleton_graph(py: Python<'_>) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n, k))]
 pub fn generalized_petersen_graph(py: Python<'_>, n: usize, k: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::generalized_petersen_graph(n, k))
+    let result = py
+        .allow_threads(|| fnx_algorithms::generalized_petersen_graph(n, k))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4709,7 +4764,8 @@ pub fn generalized_petersen_graph(py: Python<'_>, n: usize, k: usize) -> PyResul
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn wheel_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::wheel_graph(n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::wheel_graph(n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4717,7 +4773,8 @@ pub fn wheel_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn ladder_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::ladder_graph(n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::ladder_graph(n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4725,7 +4782,8 @@ pub fn ladder_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn circular_ladder_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::circular_ladder_graph(n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::circular_ladder_graph(n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4733,7 +4791,8 @@ pub fn circular_ladder_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (m, n))]
 pub fn lollipop_graph(py: Python<'_>, m: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::lollipop_graph(m, n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::lollipop_graph(m, n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4741,7 +4800,8 @@ pub fn lollipop_graph(py: Python<'_>, m: usize, n: usize) -> PyResult<PyObject> 
 #[pyfunction]
 #[pyo3(signature = (m, n))]
 pub fn tadpole_graph(py: Python<'_>, m: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::tadpole_graph(m, n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::tadpole_graph(m, n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4749,7 +4809,8 @@ pub fn tadpole_graph(py: Python<'_>, m: usize, n: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n, r))]
 pub fn turan_graph(py: Python<'_>, n: usize, r: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::turan_graph(n, r))
+    let result = py
+        .allow_threads(|| fnx_algorithms::turan_graph(n, r))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4757,7 +4818,8 @@ pub fn turan_graph(py: Python<'_>, n: usize, r: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (k, n))]
 pub fn windmill_graph(py: Python<'_>, k: usize, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::windmill_graph(k, n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::windmill_graph(k, n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4765,7 +4827,8 @@ pub fn windmill_graph(py: Python<'_>, k: usize, n: usize) -> PyResult<PyObject> 
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn hypercube_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::hypercube_graph(n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::hypercube_graph(n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4773,7 +4836,8 @@ pub fn hypercube_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n1, n2))]
 pub fn complete_bipartite_graph(py: Python<'_>, n1: usize, n2: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::complete_bipartite_graph(n1, n2))
+    let result = py
+        .allow_threads(|| fnx_algorithms::complete_bipartite_graph(n1, n2))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4781,7 +4845,8 @@ pub fn complete_bipartite_graph(py: Python<'_>, n1: usize, n2: usize) -> PyResul
 #[pyfunction]
 #[pyo3(signature = (block_sizes,))]
 pub fn complete_multipartite_graph(py: Python<'_>, block_sizes: Vec<usize>) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::complete_multipartite_graph(&block_sizes))
+    let result = py
+        .allow_threads(|| fnx_algorithms::complete_multipartite_graph(&block_sizes))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4822,7 +4887,8 @@ pub fn full_rary_tree(py: Python<'_>, r: usize, n: usize) -> PyResult<PyObject> 
 #[pyfunction]
 #[pyo3(signature = (n, offsets))]
 pub fn circulant_graph(py: Python<'_>, n: usize, offsets: Vec<usize>) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::circulant_graph(n, &offsets))
+    let result = py
+        .allow_threads(|| fnx_algorithms::circulant_graph(n, &offsets))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4830,7 +4896,8 @@ pub fn circulant_graph(py: Python<'_>, n: usize, offsets: Vec<usize>) -> PyResul
 #[pyfunction]
 #[pyo3(signature = (n, k))]
 pub fn kneser_graph(py: Python<'_>, n: usize, k: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::kneser_graph(n, k))
+    let result = py
+        .allow_threads(|| fnx_algorithms::kneser_graph(n, k))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4838,7 +4905,8 @@ pub fn kneser_graph(py: Python<'_>, n: usize, k: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (q,))]
 pub fn paley_graph(py: Python<'_>, q: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::paley_graph(q))
+    let result = py
+        .allow_threads(|| fnx_algorithms::paley_graph(q))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }
@@ -4846,7 +4914,8 @@ pub fn paley_graph(py: Python<'_>, q: usize) -> PyResult<PyObject> {
 #[pyfunction]
 #[pyo3(signature = (n,))]
 pub fn chordal_cycle_graph(py: Python<'_>, n: usize) -> PyResult<PyObject> {
-    let result = py.allow_threads(|| fnx_algorithms::chordal_cycle_graph(n))
+    let result = py
+        .allow_threads(|| fnx_algorithms::chordal_cycle_graph(n))
         .map_err(NetworkXError::new_err)?;
     rust_graph_to_py_standalone(py, &result)
 }

@@ -39,8 +39,8 @@ def _from_nx_graph(graph, create_using=None):
         result.add_node(node, **attrs)
 
     if graph.is_multigraph():
-        for left, right, _, attrs in graph.edges(keys=True, data=True):
-            result.add_edge(left, right, **attrs)
+        for left, right, key, attrs in graph.edges(keys=True, data=True):
+            result.add_edge(left, right, key=key, **attrs)
     else:
         for left, right, attrs in graph.edges(data=True):
             result.add_edge(left, right, **attrs)

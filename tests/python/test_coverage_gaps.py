@@ -358,3 +358,205 @@ class TestMisc:
         G.add_edge(0, 2, weight=2.0)
         mst = fnx.maximum_spanning_tree(G)
         assert mst.number_of_edges() == 2
+
+
+class TestDelegateFixes:
+    @needs_nx
+    def test_graph_operator_batches_delegate(self):
+        empty_cases = [
+            ("compose_all", fnx.compose_all, nx.compose_all),
+            ("union_all", fnx.union_all, nx.union_all),
+            ("intersection_all", fnx.intersection_all, nx.intersection_all),
+            ("disjoint_union_all", fnx.disjoint_union_all, nx.disjoint_union_all),
+        ]
+        for _, fnx_func, nx_func in empty_cases:
+            with pytest.raises(ValueError):
+                nx_func([])
+            with pytest.raises(ValueError):
+                fnx_func([])
+
+        left = fnx.MultiGraph()
+        left.graph["left"] = 1
+        left.add_node("a", color="red")
+        left.add_edge("a", "b", key=7, weight=2)
+
+        right = fnx.MultiGraph()
+        right.graph["right"] = 2
+        right.add_node("c", color="blue")
+        right.add_edge("c", "d", key=3, cost=4)
+
+        left_nx = nx.MultiGraph()
+        left_nx.graph["left"] = 1
+        left_nx.add_node("a", color="red")
+        left_nx.add_edge("a", "b", key=7, weight=2)
+
+        right_nx = nx.MultiGraph()
+        right_nx.graph["right"] = 2
+        right_nx.add_node("c", color="blue")
+        right_nx.add_edge("c", "d", key=3, cost=4)
+
+        composed = fnx.compose_all([left, right])
+        composed_nx = nx.compose_all([left_nx, right_nx])
+        assert composed.is_multigraph()
+        assert dict(composed.graph) == composed_nx.graph
+        assert sorted(composed.edges(keys=True, data=True)) == sorted(
+            composed_nx.edges(keys=True, data=True)
+        )
+
+        unioned = fnx.union_all([left, right], rename=("L-", "R-"))
+        unioned_nx = nx.union_all([left_nx, right_nx], rename=("L-", "R-"))
+        assert unioned.is_multigraph()
+        assert dict(unioned.graph) == unioned_nx.graph
+        assert sorted(unioned.edges(keys=True, data=True)) == sorted(
+            unioned_nx.edges(keys=True, data=True)
+        )
+
+        disjoint = fnx.disjoint_union_all([left, right])
+        disjoint_nx = nx.disjoint_union_all([left_nx, right_nx])
+        assert disjoint.is_multigraph()
+        assert dict(disjoint.graph) == disjoint_nx.graph
+        assert sorted(disjoint.edges(keys=True, data=True)) == sorted(
+            disjoint_nx.edges(keys=True, data=True)
+        )
+
+    @needs_nx
+    def test_conversion_helpers_preserve_multigraph_keys_and_graph_attrs(self):
+        graph_nx = nx.MultiGraph()
+        graph_nx.graph["name"] = "demo"
+        graph_nx.add_edge("a", "b", key=9, weight=4)
+
+        converted = fnx.readwrite._from_nx_graph(graph_nx)
+        assert dict(converted.graph) == graph_nx.graph
+        assert sorted(converted["a"]["b"].keys()) == [9]
+
+        roundtrip = fnx.drawing.layout._to_nx(converted)
+        assert roundtrip.graph == graph_nx.graph
+        assert sorted(roundtrip["a"]["b"].keys()) == [9]
+
+    @needs_nx
+    def test_disjoint_union_and_relabel_helpers_delegate(self):
+        left = fnx.MultiGraph()
+        left.graph["left"] = 1
+        left.add_edge("a", "b", key=7, weight=2)
+
+        right = fnx.MultiGraph()
+        right.graph["right"] = 2
+        right.add_edge("c", "d", key=3, cost=4)
+
+        left_nx = nx.MultiGraph()
+        left_nx.graph["left"] = 1
+        left_nx.add_edge("a", "b", key=7, weight=2)
+
+        right_nx = nx.MultiGraph()
+        right_nx.graph["right"] = 2
+        right_nx.add_edge("c", "d", key=3, cost=4)
+
+        disjoint = fnx.disjoint_union(left, right)
+        disjoint_nx = nx.disjoint_union(left_nx, right_nx)
+        assert disjoint.is_multigraph()
+        assert dict(disjoint.graph) == disjoint_nx.graph
+        assert sorted(disjoint.edges(keys=True, data=True)) == sorted(
+            disjoint_nx.edges(keys=True, data=True)
+        )
+
+        graph = fnx.Graph()
+        graph.graph["name"] = "base"
+        graph.add_edge("a", "b", weight=1)
+
+        relabeled = fnx.relabel_nodes(graph, {"a": "x"})
+        relabeled_nx = nx.relabel_nodes(nx.Graph([("a", "b", {"weight": 1})]), {"a": "x"})
+        relabeled_nx.graph["name"] = "base"
+        assert dict(relabeled.graph) == dict(graph.graph)
+        assert sorted((frozenset((u, v)), data) for u, v, data in relabeled.edges(data=True)) == sorted(
+            (frozenset((u, v)), data) for u, v, data in relabeled_nx.edges(data=True)
+        )
+
+        converted = fnx.convert_node_labels_to_integers(graph, label_attribute="old")
+        converted_nx = nx.convert_node_labels_to_integers(
+            nx.Graph([("a", "b", {"weight": 1})]),
+            label_attribute="old",
+        )
+        converted_nx.graph["name"] = "base"
+        assert dict(converted.graph) == dict(graph.graph)
+        assert sorted(converted.edges(data=True)) == sorted(converted_nx.edges(data=True))
+        assert sorted(converted.nodes(data=True)) == sorted(converted_nx.nodes(data=True))
+
+    @needs_nx
+    def test_graph_atlas_helpers_match_networkx(self):
+        atlas = fnx.graph_atlas(6)
+        atlas_nx = nx.graph_atlas(6)
+
+        assert sorted(atlas.edges()) == sorted(atlas_nx.edges())
+        assert len(fnx.graph_atlas_g()) == len(nx.graph_atlas_g())
+
+    @needs_nx
+    def test_random_shell_and_clustered_generators_delegate(self):
+        shell = fnx.random_shell_graph([(4, 8, 0.8)], seed=1)
+        shell_nx = nx.random_shell_graph([(4, 8, 0.8)], seed=1)
+        clustered_sequence = [(1, 0), (1, 0), (1, 0), (1, 0)]
+        clustered = fnx.random_clustered_graph(clustered_sequence, seed=1)
+        clustered_nx = nx.random_clustered_graph(clustered_sequence, seed=1)
+
+        assert sorted(shell.edges()) == sorted(shell_nx.edges())
+        assert clustered.number_of_nodes() == clustered_nx.number_of_nodes()
+        assert clustered.number_of_edges() == clustered_nx.number_of_edges()
+
+    @needs_nx
+    def test_spectral_graph_forge_and_edit_distance_delegate(self):
+        graph = fnx.path_graph(5)
+        forged = fnx.spectral_graph_forge(graph, alpha=0.5, seed=1)
+        forged_nx = nx.spectral_graph_forge(nx.path_graph(5), alpha=0.5, seed=1)
+
+        assert forged.number_of_nodes() == forged_nx.number_of_nodes()
+        assert fnx.graph_edit_distance(fnx.path_graph(3), fnx.path_graph(4)) == nx.graph_edit_distance(
+            nx.path_graph(3), nx.path_graph(4)
+        )
+        assert fnx.optimal_edit_paths(fnx.path_graph(3), fnx.path_graph(3))[1] == 0
+        assert next(fnx.optimize_edit_paths(fnx.path_graph(3), fnx.path_graph(3)))[2] == 0
+
+    @needs_nx
+    def test_embedding_and_matplotlib_color_helpers_delegate(self):
+        embedding = nx.PlanarEmbedding()
+        embedding.add_half_edge_cw(0, 1, None)
+        embedding.add_half_edge_cw(1, 0, None)
+        embedding.add_half_edge_cw(1, 2, 0)
+        embedding.add_half_edge_cw(2, 1, None)
+        embedding.check_structure()
+
+        pos = fnx.combinatorial_embedding_to_pos(embedding)
+        assert set(pos) == {0, 1, 2}
+
+        mpl = pytest.importorskip("matplotlib")
+        graph = fnx.path_graph(3)
+        for node, value in enumerate([0.0, 0.5, 1.0]):
+            graph.nodes[node]["score"] = value
+        fnx.apply_matplotlib_colors(graph, "score", "rgba", mpl.cm.viridis)
+        assert "rgba" in graph.nodes[0]
+
+    @needs_nx
+    def test_equitable_coloring_and_goldberg_radzik_delegate(self):
+        coloring = fnx.equitable_color(fnx.cycle_graph(4), 3)
+        expected_coloring = nx.equitable_color(nx.cycle_graph(4), 3)
+
+        assert coloring == expected_coloring
+
+        graph = fnx.DiGraph()
+        graph.add_weighted_edges_from([(0, 1, 1), (1, 2, -2), (0, 2, 4)])
+        expected_graph = nx.DiGraph()
+        expected_graph.add_weighted_edges_from([(0, 1, 1), (1, 2, -2), (0, 2, 4)])
+        expected = nx.goldberg_radzik(expected_graph, 0)
+
+        assert fnx.goldberg_radzik(graph, 0) == expected
+
+    @needs_nx
+    def test_random_degree_sequence_and_edit_distance_iter_delegate(self):
+        sequence = [2, 2, 2, 2]
+        graph = fnx.random_degree_sequence_graph(sequence, seed=1)
+        expected = nx.random_degree_sequence_graph(sequence, seed=1)
+
+        assert sorted(graph.degree[node] for node in graph.nodes()) == sorted(
+            degree for _, degree in expected.degree()
+        )
+        assert list(fnx.optimize_graph_edit_distance(fnx.path_graph(3), fnx.path_graph(3))) == list(
+            nx.optimize_graph_edit_distance(nx.path_graph(3), nx.path_graph(3))
+        )

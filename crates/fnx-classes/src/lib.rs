@@ -946,7 +946,8 @@ impl MultiGraph {
             }
         }
         self.edges.retain(|k, _| k.left != node && k.right != node);
-        self.next_edge_key.retain(|k, _| k.left != node && k.right != node);
+        self.next_edge_key
+            .retain(|k, _| k.left != node && k.right != node);
 
         // 2. Remove node from adjacency and nodes maps.
         self.adjacency.shift_remove(node);

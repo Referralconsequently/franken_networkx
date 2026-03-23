@@ -4370,7 +4370,12 @@ mod tests {
         if report.mismatch_count > 0 {
             for log in &report.fixture_reports {
                 if !log.mismatches.is_empty() {
-                    println!("Fixture {} failed with {} errors: {:#?}", log.fixture_id, log.mismatches.len(), log.mismatches);
+                    println!(
+                        "Fixture {} failed with {} errors: {:#?}",
+                        log.fixture_id,
+                        log.mismatches.len(),
+                        log.mismatches
+                    );
                 }
             }
         }

@@ -6,7 +6,8 @@
 //! - Additional methods: `predecessors`, `successors`, `in_degree`, `out_degree`.
 
 use crate::{
-    NetworkXError, NodeNotFound, PyGraph, node_key_to_string, py_dict_to_attr_map, unwrap_infallible,
+    NetworkXError, NodeNotFound, PyGraph, node_key_to_string, py_dict_to_attr_map,
+    unwrap_infallible,
 };
 use fnx_classes::AttrMap;
 use fnx_classes::digraph::{DiGraph, MultiDiGraph};

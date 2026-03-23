@@ -505,7 +505,8 @@ impl DiGraph {
             }
         }
 
-        self.edges.retain(|k, _| k.source != node && k.target != node);
+        self.edges
+            .retain(|k, _| k.source != node && k.target != node);
 
         self.successors.shift_remove(node);
         self.predecessors.shift_remove(node);
@@ -1057,8 +1058,10 @@ impl MultiDiGraph {
             }
         }
 
-        self.edges.retain(|k, _| k.source != node && k.target != node);
-        self.next_edge_key.retain(|k, _| k.source != node && k.target != node);
+        self.edges
+            .retain(|k, _| k.source != node && k.target != node);
+        self.next_edge_key
+            .retain(|k, _| k.source != node && k.target != node);
 
         self.successors.shift_remove(node);
         self.predecessors.shift_remove(node);
