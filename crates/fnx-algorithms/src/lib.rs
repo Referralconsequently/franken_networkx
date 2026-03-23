@@ -2559,8 +2559,7 @@ fn betweenness_centrality_generic<G: GraphView>(graph: &G) -> BetweennessCentral
     }
 
     let scale = if n > 2 {
-        let factor = if graph.is_directed() { 1.0 } else { 2.0 };
-        factor / ((n - 1) * (n - 2)) as f64
+        1.0 / ((n - 1) * (n - 2)) as f64
     } else {
         1.0
     };
@@ -2687,8 +2686,7 @@ fn edge_betweenness_centrality_generic<G: GraphView>(graph: &G) -> EdgeBetweenne
     }
 
     let scale = if n > 1 {
-        let factor = if graph.is_directed() { 1.0 } else { 2.0 };
-        factor / ((n * (n - 1)) as f64)
+        1.0 / ((n * (n - 1)) as f64)
     } else {
         0.0
     };
@@ -16969,7 +16967,6 @@ pub fn make_max_clique_graph(graph: &Graph) -> Graph {
 
 /// Generate a ring of cliques graph.
 /// Creates `num_cliques` complete graphs of size `clique_size`, connected in a ring.
-#[must_use]
 pub fn ring_of_cliques(num_cliques: usize, clique_size: usize) -> Result<Graph, String> {
     if num_cliques < 2 {
         return Err("num_cliques must be >= 2".to_owned());
@@ -17046,7 +17043,6 @@ pub fn balanced_tree(r: usize, h: usize) -> Graph {
 }
 
 /// Return the barbell graph: two complete graphs K_n1 connected by a path P_n2.
-#[must_use]
 pub fn barbell_graph(n1: usize, n2: usize) -> Result<Graph, String> {
     if n1 < 2 {
         return Err("n1 must be >= 2".to_owned());
@@ -17652,7 +17648,6 @@ pub fn hoffman_singleton_graph() -> Graph {
 // ---------- Parametric generators ----------
 
 /// Return the generalized Petersen graph GP(n, k).
-#[must_use]
 pub fn generalized_petersen_graph(n: usize, k: usize) -> Result<Graph, String> {
     if n < 3 {
         return Err("n must be >= 3".to_owned());
@@ -17678,7 +17673,6 @@ pub fn generalized_petersen_graph(n: usize, k: usize) -> Result<Graph, String> {
 }
 
 /// Return the wheel graph W_n (n+1 nodes: hub + n rim nodes).
-#[must_use]
 pub fn wheel_graph(n: usize) -> Result<Graph, String> {
     if n < 1 {
         return Err("n must be >= 1".to_owned());
@@ -17699,7 +17693,6 @@ pub fn wheel_graph(n: usize) -> Result<Graph, String> {
 }
 
 /// Return the ladder graph (2n nodes: two paths connected by rungs).
-#[must_use]
 pub fn ladder_graph(n: usize) -> Result<Graph, String> {
     if n < 1 {
         return Err("n must be >= 1".to_owned());
@@ -17717,7 +17710,6 @@ pub fn ladder_graph(n: usize) -> Result<Graph, String> {
 }
 
 /// Return the circular ladder graph (Möbius ladder, 2n nodes).
-#[must_use]
 pub fn circular_ladder_graph(n: usize) -> Result<Graph, String> {
     if n < 3 {
         return Err("n must be >= 3".to_owned());
@@ -17733,7 +17725,6 @@ pub fn circular_ladder_graph(n: usize) -> Result<Graph, String> {
 }
 
 /// Return the lollipop graph (K_m connected to P_n).
-#[must_use]
 pub fn lollipop_graph(m: usize, n: usize) -> Result<Graph, String> {
     if m < 2 {
         return Err("m must be >= 2".to_owned());
@@ -17758,7 +17749,6 @@ pub fn lollipop_graph(m: usize, n: usize) -> Result<Graph, String> {
 }
 
 /// Return the tadpole graph (C_m connected to P_n).
-#[must_use]
 pub fn tadpole_graph(m: usize, n: usize) -> Result<Graph, String> {
     if m < 3 {
         return Err("m must be >= 3".to_owned());
@@ -17781,7 +17771,6 @@ pub fn tadpole_graph(m: usize, n: usize) -> Result<Graph, String> {
 }
 
 /// Return the Turán graph T(n, r).
-#[must_use]
 pub fn turan_graph(n: usize, r: usize) -> Result<Graph, String> {
     if r == 0 {
         return Err("r must be > 0".to_owned());
@@ -17804,7 +17793,6 @@ pub fn turan_graph(n: usize, r: usize) -> Result<Graph, String> {
 }
 
 /// Return the windmill graph Wd(k, n): n copies of K_k sharing a universal vertex.
-#[must_use]
 pub fn windmill_graph(k: usize, n: usize) -> Result<Graph, String> {
     if k < 2 {
         return Err("k must be >= 2".to_owned());
@@ -17830,7 +17818,6 @@ pub fn windmill_graph(k: usize, n: usize) -> Result<Graph, String> {
 }
 
 /// Return the hypercube graph Q_n (2^n nodes).
-#[must_use]
 pub fn hypercube_graph(n: usize) -> Result<Graph, String> {
     let mut g = Graph::strict();
     let size = 1usize << n;
@@ -17847,7 +17834,6 @@ pub fn hypercube_graph(n: usize) -> Result<Graph, String> {
 }
 
 /// Return the complete bipartite graph K_{n1, n2}.
-#[must_use]
 pub fn complete_bipartite_graph(n1: usize, n2: usize) -> Result<Graph, String> {
     let mut g = Graph::strict();
     gen_nodes(&mut g, n1 + n2);
@@ -17860,7 +17846,6 @@ pub fn complete_bipartite_graph(n1: usize, n2: usize) -> Result<Graph, String> {
 }
 
 /// Return the complete multipartite graph K_{n1, n2, ...}.
-#[must_use]
 pub fn complete_multipartite_graph(block_sizes: &[usize]) -> Result<Graph, String> {
     let mut g = Graph::strict();
     let total: usize = block_sizes.iter().sum();
@@ -17964,7 +17949,6 @@ pub fn full_rary_tree(r: usize, n: usize) -> Graph {
 }
 
 /// Return the circulant graph C_n(offsets).
-#[must_use]
 pub fn circulant_graph(n: usize, offsets: &[usize]) -> Result<Graph, String> {
     if n < 1 {
         return Err("n must be >= 1".to_owned());
@@ -17984,7 +17968,6 @@ pub fn circulant_graph(n: usize, offsets: &[usize]) -> Result<Graph, String> {
 
 /// Return the Kneser graph KG(n, k).
 /// Nodes are all k-element subsets of {0,...,n-1}; edges connect disjoint subsets.
-#[must_use]
 pub fn kneser_graph(n: usize, k: usize) -> Result<Graph, String> {
     if n < 1 || k < 1 {
         return Err("n and k must be >= 1".to_owned());
@@ -18044,7 +18027,6 @@ fn combinations(n: usize, k: usize) -> Vec<Vec<usize>> {
 
 /// Return the Paley graph of order q (q must be a prime power ≡ 1 mod 4).
 /// For simplicity, this only supports prime q.
-#[must_use]
 pub fn paley_graph(q: usize) -> Result<Graph, String> {
     if q < 1 {
         return Err("q must be >= 1".to_owned());
@@ -18069,7 +18051,6 @@ pub fn paley_graph(q: usize) -> Result<Graph, String> {
 
 /// Return the chordal cycle graph C_n with chords.
 /// This creates a cycle of n nodes where node i is also connected to node (i+2) mod n.
-#[must_use]
 pub fn chordal_cycle_graph(n: usize) -> Result<Graph, String> {
     if n < 1 {
         return Err("n must be >= 1".to_owned());

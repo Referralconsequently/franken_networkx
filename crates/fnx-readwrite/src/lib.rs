@@ -983,7 +983,7 @@ impl EdgeListEngine {
     where
         G: GraphLike,
     {
-        let mut key_registry: BTreeMap<String, (String, String)> = BTreeMap::new();
+        let mut key_registry: BTreeMap<String, (String, String, String)> = BTreeMap::new();
         let mut reader = Reader::from_str(input);
         reader.config_mut().trim_text(true);
 
@@ -1085,7 +1085,7 @@ impl EdgeListEngine {
         e: &BytesStart<'_>,
         graph: &mut G,
         warnings: &mut Vec<String>,
-        key_registry: &mut BTreeMap<String, (String, String)>,
+        key_registry: &mut BTreeMap<String, (String, String, String)>,
         in_graph: &mut bool,
         current_node: &mut Option<String>,
         current_edge: &mut Option<(String, String)>,
@@ -1104,6 +1104,7 @@ impl EdgeListEngine {
                 let mut key_id = String::new();
                 let mut for_scope = String::new();
                 let mut attr_name = String::new();
+                let mut attr_type = String::new();
                 for attr in e.attributes().flatten() {
                     match attr.key.as_ref() {
                         b"id" => {
@@ -1115,11 +1116,14 @@ impl EdgeListEngine {
                         b"attr.name" => {
                             attr_name = String::from_utf8_lossy(&attr.value).into_owned();
                         }
+                        b"attr.type" => {
+                            attr_type = String::from_utf8_lossy(&attr.value).into_owned();
+                        }
                         _ => {}
                     }
                 }
                 if !key_id.is_empty() && !attr_name.is_empty() {
-                    key_registry.insert(key_id, (for_scope, attr_name));
+                    key_registry.insert(key_id, (for_scope, attr_name, attr_type));
                 }
             }
             b"graph" => {
@@ -1207,7 +1211,7 @@ impl EdgeListEngine {
         current_data_text: &mut String,
         pending_node_attrs: &mut AttrMap,
         pending_edge_attrs: &mut AttrMap,
-        key_registry: &BTreeMap<String, (String, String)>,
+        key_registry: &BTreeMap<String, (String, String, String)>,
     ) -> Result<(), ReadWriteError>
     where
         G: GraphLike,
@@ -1215,10 +1219,14 @@ impl EdgeListEngine {
         match local {
             b"data" => {
                 if let Some(key_id) = current_data_key.take()
-                    && let Some((_scope, _attr_name)) = key_registry.get(&key_id)
+                    && let Some((_scope, _attr_name, _attr_type)) = key_registry.get(&key_id)
                 {
                     let raw_value = std::mem::take(current_data_text);
-                    let value = CgseValue::parse_relaxed(&raw_value);
+                    let value = if _attr_type == "string" {
+                        CgseValue::String(raw_value.clone())
+                    } else {
+                        CgseValue::parse_relaxed(&raw_value)
+                    };
                     if current_node.is_some() && current_edge.is_none() {
                         pending_node_attrs.insert(_attr_name.clone(), value);
                     } else if current_edge.is_some() {
@@ -1878,7 +1886,7 @@ mod tests {
             .add_edge_with_attrs(
                 "a".to_owned(),
                 "b".to_owned(),
-                BTreeMap::from([("weight".to_owned(), CgseValue::String("1".to_owned()))]),
+                BTreeMap::from([("weight".to_owned(), CgseValue::Int(1))]),
             )
             .expect("edge add should succeed");
         graph
@@ -1893,8 +1901,8 @@ mod tests {
                 "b".to_owned(),
                 "d".to_owned(),
                 BTreeMap::from([
-                    ("weight".to_owned(), CgseValue::String("3".to_owned())),
-                    ("capacity".to_owned(), CgseValue::String("7".to_owned())),
+                    ("weight".to_owned(), CgseValue::Int(3)),
+                    ("capacity".to_owned(), CgseValue::Int(7)),
                 ]),
             )
             .expect("edge add should succeed");

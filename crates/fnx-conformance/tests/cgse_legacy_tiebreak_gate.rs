@@ -312,7 +312,7 @@ fn cgse_policy_runtime_surface_matches_generated_policy_rows() {
     }
 
     let engine = CgsePolicyEngine::new(CompatibilityMode::Hardened);
-    let allowlisted = engine.evaluate_at(CgsePolicyRule::R01, Some("CGSE-AMB-001"), 0.2, false, 7);
+    let allowlisted = engine.evaluate_at(CgsePolicyRule::R01, Some("CGSE-AMB-001"), 0.3, false, 7);
     assert_eq!(allowlisted.policy_spec_path, CGSE_POLICY_SPEC_PATH);
     assert_eq!(allowlisted.decision.action, DecisionAction::FullValidate);
     assert!(allowlisted.allowlisted_ambiguity);

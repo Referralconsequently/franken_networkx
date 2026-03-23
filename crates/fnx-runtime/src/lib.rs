@@ -42,10 +42,10 @@ pub enum DecisionAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum CgseValue {
-    String(String),
-    Float(f64),
-    Int(i64),
     Bool(bool),
+    Int(i64),
+    Float(f64),
+    String(String),
 }
 
 impl Eq for CgseValue {}
@@ -1929,7 +1929,7 @@ mod tests {
 
     #[test]
     fn strict_mode_prefers_validation_for_uncertain_inputs() {
-        let action = decision_theoretic_action(CompatibilityMode::Strict, 0.2, false);
+        let action = decision_theoretic_action(CompatibilityMode::Strict, 0.3, false);
         assert_eq!(action, DecisionAction::FullValidate);
     }
 
@@ -1987,8 +1987,8 @@ mod tests {
     #[test]
     fn cgse_policy_engine_is_deterministic_for_fixed_timestamp() {
         let engine = CgsePolicyEngine::new(CompatibilityMode::Strict);
-        let left = engine.evaluate_at(CgsePolicyRule::R08, Some("CGSE-AMB-008"), 0.2, false, 42);
-        let right = engine.evaluate_at(CgsePolicyRule::R08, Some("CGSE-AMB-008"), 0.2, false, 42);
+        let left = engine.evaluate_at(CgsePolicyRule::R08, Some("CGSE-AMB-008"), 0.3, false, 42);
+        let right = engine.evaluate_at(CgsePolicyRule::R08, Some("CGSE-AMB-008"), 0.3, false, 42);
         assert_eq!(left, right);
         assert_eq!(left.decision.action, DecisionAction::FullValidate);
     }

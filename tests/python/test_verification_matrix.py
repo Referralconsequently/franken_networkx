@@ -18,9 +18,38 @@ def _public_functions(module):
     return names
 
 
+def _public_classes(module):
+    names = set()
+    for name in dir(module):
+        if name.startswith("_"):
+            continue
+        if inspect.isclass(getattr(module, name)):
+            names.add(name)
+    return names
+
+
+def _public_other_attrs(module):
+    names = set()
+    for name in dir(module):
+        if name.startswith("_"):
+            continue
+        obj = getattr(module, name)
+        if not (inspect.isfunction(obj) or inspect.isbuiltin(obj) or inspect.isclass(obj)):
+            names.add(name)
+    return names
+
+
 def test_networkx_public_function_parity_has_no_gaps():
     missing = sorted(_public_functions(nx) - _public_functions(fnx))
     assert missing == []
+
+
+def test_networkx_public_namespace_parity_has_no_class_or_attr_gaps():
+    missing_classes = sorted(_public_classes(nx) - _public_classes(fnx))
+    missing_other_attrs = sorted(_public_other_attrs(nx) - _public_other_attrs(fnx))
+
+    assert missing_classes == []
+    assert missing_other_attrs == []
 
 
 def test_lcf_graph_wrapper_matches_networkx():

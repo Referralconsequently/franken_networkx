@@ -59,12 +59,13 @@ pub(crate) fn py_dict_to_attr_map(attrs: &Bound<'_, PyDict>) -> PyResult<AttrMap
         let key: String = k.extract()?;
         let val = if let Ok(s) = v.extract::<String>() {
             CgseValue::String(s)
-        } else if let Ok(f) = v.extract::<f64>() {
-            CgseValue::Float(f)
+        } else if let Ok(b) = v.extract::<bool>() {
+            // bool must be checked before i64/f64 because Python bool is a subclass of int
+            CgseValue::Bool(b)
         } else if let Ok(i) = v.extract::<i64>() {
             CgseValue::Int(i)
-        } else if let Ok(b) = v.extract::<bool>() {
-            CgseValue::Bool(b)
+        } else if let Ok(f) = v.extract::<f64>() {
+            CgseValue::Float(f)
         } else {
             CgseValue::String(v.str()?.to_string())
         };

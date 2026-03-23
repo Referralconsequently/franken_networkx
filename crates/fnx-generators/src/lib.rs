@@ -362,12 +362,9 @@ impl GraphGenerator {
 
         // Maintain a "repeated list" of nodes for proportional-to-degree sampling.
         // Each time an edge (u, v) is added, both u and v appear once more.
-        let mut repeated_nodes: Vec<usize> = Vec::new();
+        let mut repeated_nodes: Vec<usize> = vec![0; m];
         // Star graph (m+1 nodes) has node 0 as center connected to nodes 1..m.
         // Degree(0) = m, Degree(1..m) = 1.
-        for _ in 0..m {
-            repeated_nodes.push(0);
-        }
         for i in 1..=m {
             repeated_nodes.push(i);
         }

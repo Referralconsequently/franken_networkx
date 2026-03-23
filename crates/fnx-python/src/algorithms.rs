@@ -1520,11 +1520,35 @@ pub fn is_connected(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
 }
 
 /// Return the density of the graph.
+///
+/// For undirected graphs: ``2 * m / (n * (n - 1))``.
+/// For directed graphs: ``m / (n * (n - 1))``.
 #[pyfunction]
-pub fn density(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
+pub fn density(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
     let gr = extract_graph(g)?;
-    let inner = gr.undirected();
-    Ok(py.allow_threads(|| fnx_algorithms::density(inner).density))
+    let (n, m, directed) = match &gr {
+        GraphRef::Undirected(pg) => {
+            (pg.inner.nodes_ordered().len(), pg.inner.edge_count(), false)
+        }
+        GraphRef::Directed { dg, .. } => {
+            (dg.inner.nodes_ordered().len(), dg.inner.edge_count(), true)
+        }
+        GraphRef::MultiUndirected { simple, .. } => {
+            (simple.nodes_ordered().len(), simple.edge_count(), false)
+        }
+        GraphRef::MultiDirected { simple_dg, .. } => {
+            (simple_dg.nodes_ordered().len(), simple_dg.edge_count(), true)
+        }
+    };
+    if n < 2 {
+        return Ok(0.0);
+    }
+    let denom = (n * (n - 1)) as f64;
+    if directed {
+        Ok(m as f64 / denom)
+    } else {
+        Ok(2.0 * m as f64 / denom)
+    }
 }
 
 /// Generate connected components.

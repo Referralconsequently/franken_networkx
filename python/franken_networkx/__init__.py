@@ -155,9 +155,38 @@ from franken_networkx._fnx import (
 # Algorithm functions — paths and cycles
 from franken_networkx._fnx import (
     all_shortest_paths,
-    all_simple_paths,
+    all_simple_paths as _rust_all_simple_paths,
     cycle_basis,
 )
+
+
+def all_simple_paths(G, source, target, cutoff=None):
+    """Return all simple paths from source to target.
+
+    For directed graphs, only follows outgoing edges (successors).
+    For undirected graphs, delegates to the Rust implementation.
+    """
+    if not G.is_directed():
+        return _rust_all_simple_paths(G, source, target, cutoff=cutoff)
+    # Directed DFS respecting edge direction
+    cutoff_val = cutoff if cutoff is not None else len(G) - 1
+    result = []
+    visited = {source}
+    stack = [(source, iter(G.successors(source)), [source])]
+    while stack:
+        parent, children, path = stack[-1]
+        try:
+            child = next(children)
+        except StopIteration:
+            stack.pop()
+            visited.discard(parent)
+            continue
+        if child == target:
+            result.append(path + [child])
+        elif child not in visited and len(path) < cutoff_val + 1:
+            visited.add(child)
+            stack.append((child, iter(G.successors(child)), path + [child]))
+    return result
 
 # Algorithm functions — graph operators
 from franken_networkx._fnx import (
@@ -1626,8 +1655,8 @@ def florentine_families_graph():
         ("Albizzi", "Medici"), ("Barbadori", "Castellani"), ("Barbadori", "Medici"),
         ("Bischeri", "Guadagni"), ("Bischeri", "Peruzzi"), ("Bischeri", "Strozzi"),
         ("Castellani", "Peruzzi"), ("Castellani", "Strozzi"),
-        ("Ginori", "Medici"), ("Guadagni", "Lamberteschi"),
-        ("Guadagni", "Tornabuoni"), ("Lamberteschi", "Medici" if False else "Guadagni"),
+        ("Guadagni", "Lamberteschi"),
+        ("Guadagni", "Tornabuoni"),
         ("Medici", "Ridolfi"), ("Medici", "Salviati"), ("Medici", "Tornabuoni"),
         ("Peruzzi", "Strozzi"), ("Ridolfi", "Strozzi"), ("Ridolfi", "Tornabuoni"),
         ("Salviati", "Pazzi"),
@@ -3108,6 +3137,8 @@ def all_pairs_lowest_common_ancestor(G, pairs=None):
 
         pairs = combinations_with_replacement(G, 2)
     else:
+        # Materialize to list so we can iterate twice (validate + compute)
+        pairs = list(pairs)
         # Verify that each of the nodes in the provided pairs is in G
         nodeset = set(G)
         for u, v in pairs:
@@ -3160,17 +3191,19 @@ def root_to_leaf_paths(G):
 
 
 def prefix_tree(paths):
-    """Creates a directed prefix tree from a list of paths."""
-    # Simplified implementation of prefix_tree for internal use by dag_to_branching
+    """Creates a directed prefix tree from a list of paths.
+
+    Each non-root node has a ``source`` attribute (used by ``dag_to_branching``)
+    and a ``label`` attribute (used by the public NetworkX API).
+    """
     tree = DiGraph()
     root = 0
-    tree.add_node(root, source=None)
+    tree.add_node(root, source=None, label=None)
     nodes_count = 1
 
     for path in paths:
         parent = root
         for node in path:
-            # Check if any successor of parent has node as source
             found = None
             for succ in tree.successors(parent):
                 if tree.nodes[succ].get("source") == node:
@@ -3179,7 +3212,7 @@ def prefix_tree(paths):
             if found is None:
                 new_node = nodes_count
                 nodes_count += 1
-                tree.add_node(new_node, source=node)
+                tree.add_node(new_node, source=node, label=node)
                 tree.add_edge(parent, new_node)
                 parent = new_node
             else:
@@ -6060,9 +6093,10 @@ def find_induced_nodes(G, s, d):
 def k_edge_augmentation(G, k, avail=None, weight=None, partial=False):
     """Find edges to add for k-edge-connectivity."""
     if k <= 1:
-        comps = connected_components(G)
-        if len(comps) <= 1: return []
-        return [(list(comps[i])[0], list(comps[i+1])[0]) for i in range(len(comps)-1)]
+        comps = list(connected_components(G))
+        if len(comps) <= 1:
+            return []
+        return [(list(comps[i])[0], list(comps[i + 1])[0]) for i in range(len(comps) - 1)]
     return []
 
 
@@ -6744,25 +6778,6 @@ def dorogovtsev_goltsev_mendes_graph(n):
         for u, v in list(G.edges()):
             G.add_node(next_id); new_edges.append((next_id, u)); new_edges.append((next_id, v)); next_id += 1
         G.add_edges_from(new_edges)
-    return G
-
-def prefix_tree(paths):
-    """Build trie-like tree from iterable of paths."""
-    G = DiGraph(); G.add_node(0); nid = 1
-    for path in paths:
-        cur = 0
-        for elem in path:
-            found = None
-            if hasattr(G, 'successors'):
-                for child in G.successors(cur):
-                    if G.nodes[child].get('label') == elem if hasattr(G.nodes, '__getitem__') and isinstance(G.nodes[child], dict) else False:
-                        found = child; break
-            if found is None:
-                G.add_node(nid); G.add_edge(cur, nid)
-                if hasattr(G.nodes, '__getitem__'): G.nodes[nid]['label'] = elem
-                cur = nid; nid += 1
-            else:
-                cur = found
     return G
 
 def prefix_tree_recursive(paths):
@@ -8051,94 +8066,9 @@ def directed_havel_hakimi_graph(in_deg_sequence, out_deg_sequence, create_using=
     return _from_nx_graph(graph, create_using=create_using)
 
 
-def stochastic_block_model(
-    sizes,
-    p,
-    nodelist=None,
-    seed=None,
-    directed=False,
-    selfloops=False,
-    sparse=True,
-):
-    """Return a stochastic block model graph."""
-    import networkx as nx
 
-    from franken_networkx.readwrite import _from_nx_graph
-
-    return _from_nx_graph(
-        nx.stochastic_block_model(
-            sizes,
-            p,
-            nodelist=nodelist,
-            seed=seed,
-            directed=directed,
-            selfloops=selfloops,
-            sparse=sparse,
-        )
-    )
-
-
-def planted_partition_graph(l, k, p_in, p_out, seed=None, directed=False):
-    """Return a planted partition random graph."""
-    import networkx as nx
-
-    from franken_networkx.readwrite import _from_nx_graph
-
-    return _from_nx_graph(
-        nx.planted_partition_graph(
-            l,
-            k,
-            p_in,
-            p_out,
-            seed=seed,
-            directed=directed,
-        )
-    )
-
-
-def gaussian_random_partition_graph(n, s, v, p_in, p_out, directed=False, seed=None):
-    """Return a Gaussian random partition graph."""
-    import networkx as nx
-
-    from franken_networkx.readwrite import _from_nx_graph
-
-    return _from_nx_graph(
-        nx.gaussian_random_partition_graph(
-            n,
-            s,
-            v,
-            p_in,
-            p_out,
-            directed=directed,
-            seed=seed,
-        )
-    )
-
-
-def relaxed_caveman_graph(l, k, p, seed=None):
-    """Return a relaxed caveman graph."""
-    import networkx as nx
-
-    from franken_networkx.readwrite import _from_nx_graph
-
-    return _from_nx_graph(nx.relaxed_caveman_graph(l, k, p, seed=seed))
-
-
-def random_partition_graph(sizes, p_in, p_out, seed=None, directed=False):
-    """Return a random partition graph."""
-    import networkx as nx
-
-    from franken_networkx.readwrite import _from_nx_graph
-
-    return _from_nx_graph(
-        nx.random_partition_graph(
-            sizes,
-            p_in,
-            p_out,
-            seed=seed,
-            directed=directed,
-        )
-    )
+# stochastic_block_model, planted_partition_graph, gaussian_random_partition_graph,
+# relaxed_caveman_graph, random_partition_graph defined earlier as standalone
 
 
 __all__ = [
@@ -8996,3 +8926,26 @@ __all__ = [
     "write_latex",
     "write_network_text",
 ]
+
+import networkx as _nx
+
+# Match NetworkX's top-level config object rather than exposing the older stub
+# helper function shape from this module.
+config = _nx.config
+
+
+def __getattr__(name):
+    """Fallback to the NetworkX top-level namespace for missing public attrs."""
+    import networkx as nx
+
+    try:
+        return getattr(nx, name)
+    except AttributeError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+
+
+def __dir__():
+    """Expose FrankenNetworkX globals plus NetworkX's public top-level namespace."""
+    import networkx as nx
+
+    return sorted(set(globals()) | set(dir(nx)))

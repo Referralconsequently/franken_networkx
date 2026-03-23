@@ -1072,7 +1072,7 @@ fn packet_003_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
       "op": "dispatch_resolve",
       "operation": "shortest_path",
       "required_features": ["shortest_path"],
-      "risk_probability": 0.2,
+      "risk_probability": 0.3,
       "unknown_incompatible_feature": false
     }
   ],
@@ -1099,7 +1099,7 @@ fn packet_003_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
       "operation": "shortest_path",
       "requested_backend": "native",
       "required_features": ["shortest_path"],
-      "risk_probability": 0.2,
+      "risk_probability": 0.3,
       "unknown_incompatible_feature": false
     }
   ],
@@ -1125,7 +1125,7 @@ fn packet_003_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
       "op": "dispatch_resolve",
       "operation": "shortest_path",
       "required_features": ["shortest_path"],
-      "risk_probability": 0.2,
+      "risk_probability": 0.3,
       "unknown_incompatible_feature": true
     }
   ],
@@ -1147,7 +1147,7 @@ fn packet_003_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
       "operation": "shortest_path",
       "requested_backend": "ghost-backend",
       "required_features": ["shortest_path"],
-      "risk_probability": 0.2,
+      "risk_probability": 0.3,
       "unknown_incompatible_feature": false
     }
   ],
@@ -1168,7 +1168,7 @@ fn packet_003_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
       "op": "dispatch_resolve",
       "operation": "shortest_path",
       "required_features": ["shortest_path", "version_skew_marker"],
-      "risk_probability": 0.2,
+      "risk_probability": 0.3,
       "unknown_incompatible_feature": false
     }
   ],
@@ -1210,7 +1210,7 @@ fn packet_003_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
       "op": "dispatch_resolve",
       "operation": "shortest_path",
       "required_features": ["cache_state_break_marker"],
-      "risk_probability": 0.2,
+      "risk_probability": 0.3,
       "unknown_incompatible_feature": false
     }
   ],
@@ -1233,7 +1233,7 @@ fn packet_003_differential_metamorphic_and_adversarial_taxonomy_is_deterministic
       "operation": "shortest_path",
       "requested_backend": "ghost-backend",
       "required_features": ["shortest_path"],
-      "risk_probability": 0.2,
+      "risk_probability": 0.3,
       "unknown_incompatible_feature": false
     }
   ],
