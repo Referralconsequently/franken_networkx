@@ -995,19 +995,12 @@ def create_empty_copy(G, with_data=True):
     H : Graph
         A graph with the same nodes but no edges.
     """
-    H = G.__class__()
-    if with_data:
-        for node in G.nodes():
-            attrs = {}
-            if hasattr(G.nodes, '__getitem__'):
-                a = G.nodes[node]
-                if isinstance(a, dict):
-                    attrs = dict(a)
-            H.add_node(node, **attrs)
-    else:
-        for node in G.nodes():
-            H.add_node(node)
-    return H
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.create_empty_copy(_to_nx(G), with_data=with_data))
 
 
 def number_of_selfloops(G):
@@ -1348,20 +1341,12 @@ def line_graph(G):
     The line graph L(G) has a node for each edge in G. Two nodes in L(G)
     are adjacent iff the corresponding edges in G share an endpoint.
     """
-    L = Graph()
-    edges = list(G.edges())
+    import networkx as nx
 
-    for e in edges:
-        L.add_node(e)
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    for i in range(len(edges)):
-        for j in range(i + 1, len(edges)):
-            u1, v1 = edges[i]
-            u2, v2 = edges[j]
-            if u1 == u2 or u1 == v2 or v1 == u2 or v1 == v2:
-                L.add_edge(edges[i], edges[j])
-
-    return L
+    return _from_nx_graph(nx.line_graph(_to_nx(G)))
 
 
 def power(G, k):
@@ -5728,14 +5713,15 @@ def to_directed(G):
 
 def reverse(G, copy=True):
     """Return graph with all edges reversed."""
-    if hasattr(G, 'reverse'):
-        return G.reverse()
-    D = DiGraph()
-    for n in G.nodes():
-        D.add_node(n)
-    for u, v in G.edges():
-        D.add_edge(v, u)
-    return D
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    reversed_graph = nx.reverse(_to_nx(G), copy=True)
+    if copy:
+        return _from_nx_graph(reversed_graph)
+    return _from_nx_graph(reversed_graph, create_using=G)
 
 
 def nodes(G):

@@ -482,6 +482,43 @@ class TestDelegateFixes:
         assert sorted(converted.nodes(data=True)) == sorted(converted_nx.nodes(data=True))
 
     @needs_nx
+    def test_line_graph_reverse_and_empty_copy_delegate(self):
+        graph = fnx.MultiGraph()
+        graph.graph["name"] = "multi"
+        graph.add_edge("a", "b", key=5, weight=2)
+
+        graph_nx = nx.MultiGraph()
+        graph_nx.graph["name"] = "multi"
+        graph_nx.add_edge("a", "b", key=5, weight=2)
+
+        line = fnx.line_graph(graph)
+        line_nx = nx.line_graph(graph_nx)
+        assert type(line).__name__ == type(line_nx).__name__
+        assert sorted(line.nodes(data=True)) == sorted(line_nx.nodes(data=True))
+        assert sorted(line.edges(data=True)) == sorted(line_nx.edges(data=True))
+
+        empty = fnx.create_empty_copy(graph)
+        empty_nx = nx.create_empty_copy(graph_nx)
+        assert dict(empty.graph) == empty_nx.graph
+        assert sorted(empty.nodes(data=True)) == sorted(empty_nx.nodes(data=True))
+        assert empty.number_of_edges() == empty_nx.number_of_edges()
+
+        digraph = fnx.MultiDiGraph()
+        digraph.graph["kind"] = "digraph"
+        digraph.add_edge("u", "v", key=9, capacity=4)
+
+        digraph_nx = nx.MultiDiGraph()
+        digraph_nx.graph["kind"] = "digraph"
+        digraph_nx.add_edge("u", "v", key=9, capacity=4)
+
+        reversed_graph = fnx.reverse(digraph)
+        reversed_nx = nx.reverse(digraph_nx)
+        assert dict(reversed_graph.graph) == reversed_nx.graph
+        assert sorted(reversed_graph.edges(keys=True, data=True)) == sorted(
+            reversed_nx.edges(keys=True, data=True)
+        )
+
+    @needs_nx
     def test_graph_atlas_helpers_match_networkx(self):
         atlas = fnx.graph_atlas(6)
         atlas_nx = nx.graph_atlas(6)
