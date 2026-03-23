@@ -3533,23 +3533,52 @@ def directed_combinatorial_laplacian_matrix(G, nodelist=None, weight='weight', a
 
 
 def attr_matrix(G, edge_attr=None, node_attr=None, normalized=False, rc_order=None, dtype=None):
-    """Construct a matrix from edge attributes."""
+    """Construct a matrix from edge attributes.
+
+    When *node_attr* is given, nodes are grouped by attribute value and the
+    matrix has size ``len(unique_attr_values)`` with entries summed over
+    nodes sharing the same attribute.  *rc_order* then specifies the
+    ordering of attribute values, not nodes.
+    """
     import numpy as np
-    nodelist = list(rc_order) if rc_order is not None else list(G.nodes())
-    n = len(nodelist)
-    idx = {node: i for i, node in enumerate(nodelist)}
-    M = np.zeros((n, n), dtype=dtype or np.float64)
-    for u, v, data in G.edges(data=True):
-        if u in idx and v in idx:
-            val = data.get(edge_attr, 1) if edge_attr and isinstance(data, dict) else 1
-            M[idx[u], idx[v]] = val
-            if not G.is_directed():
-                M[idx[v], idx[u]] = val
-    if normalized:
-        rs = M.sum(axis=1)
-        rs[rs == 0] = 1
-        M = M / rs[:, np.newaxis]
-    return M, nodelist
+    if node_attr is not None:
+        # Group nodes by their node_attr value
+        node_attrs = {n: G.nodes[n].get(node_attr, n) for n in G.nodes()}
+        if rc_order is not None:
+            labels = list(rc_order)
+        else:
+            labels = sorted(set(node_attrs.values()))
+        label_idx = {lab: i for i, lab in enumerate(labels)}
+        n = len(labels)
+        M = np.zeros((n, n), dtype=dtype or np.float64)
+        for u, v, data in G.edges(data=True):
+            lu, lv = node_attrs.get(u), node_attrs.get(v)
+            if lu in label_idx and lv in label_idx:
+                val = data.get(edge_attr, 1) if edge_attr and isinstance(data, dict) else 1
+                M[label_idx[lu], label_idx[lv]] += val
+                if not G.is_directed():
+                    M[label_idx[lv], label_idx[lu]] += val
+        if normalized:
+            rs = M.sum(axis=1)
+            rs[rs == 0] = 1
+            M = M / rs[:, np.newaxis]
+        return M, labels
+    else:
+        nodelist = list(rc_order) if rc_order is not None else list(G.nodes())
+        n = len(nodelist)
+        idx = {node: i for i, node in enumerate(nodelist)}
+        M = np.zeros((n, n), dtype=dtype or np.float64)
+        for u, v, data in G.edges(data=True):
+            if u in idx and v in idx:
+                val = data.get(edge_attr, 1) if edge_attr and isinstance(data, dict) else 1
+                M[idx[u], idx[v]] = val
+                if not G.is_directed():
+                    M[idx[v], idx[u]] = val
+        if normalized:
+            rs = M.sum(axis=1)
+            rs[rs == 0] = 1
+            M = M / rs[:, np.newaxis]
+        return M, nodelist
 
 
 # ---------------------------------------------------------------------------
@@ -5845,11 +5874,12 @@ def directed_modularity_matrix(G, nodelist=None):
 
 
 def modularity_spectrum(G):
-    """Eigenvalues of the modularity matrix, sorted by real part."""
-    import numpy as np
-    B = modularity_matrix(G)
-    evals = np.linalg.eigvalsh(B)
-    return np.sort(np.real(evals))
+    """Eigenvalues of the modularity matrix."""
+    import scipy.linalg
+    if G.is_directed():
+        return scipy.linalg.eigvals(directed_modularity_matrix(G))
+    else:
+        return scipy.linalg.eigvals(modularity_matrix(G))
 
 
 # ---------------------------------------------------------------------------
@@ -7572,31 +7602,54 @@ def to_dict_of_dicts(G, nodelist=None, edge_data=None):
 
 def cytoscape_data(G, attrs=None):
     """Export graph to Cytoscape.js JSON format."""
-    elements = []
+    nodes = []
     for node in G.nodes():
-        el = {"data": {"id": str(node)}}
+        el = {"data": {"id": str(node), "value": str(node), "name": str(node)}}
         if hasattr(G.nodes, '__getitem__'):
             a = G.nodes[node]
             if isinstance(a, dict):
                 el["data"].update({str(k): v for k, v in a.items()})
-        elements.append(el)
+        nodes.append(el)
+    edges = []
     for u, v, data in G.edges(data=True):
         el = {"data": {"source": str(u), "target": str(v)}}
         if isinstance(data, dict):
             el["data"].update({str(k): v for k, v in data.items()})
-        elements.append(el)
-    return {"elements": elements}
+        edges.append(el)
+    return {
+        "data": [],
+        "directed": G.is_directed(),
+        "multigraph": G.is_multigraph(),
+        "elements": {"nodes": nodes, "edges": edges},
+    }
 
 
 def cytoscape_graph(data, attrs=None):
     """Build graph from Cytoscape.js JSON format."""
-    G = Graph()
-    for el in data.get("elements", []):
+    if data.get("directed", False):
+        G = DiGraph()
+    else:
+        G = Graph()
+    elements = data.get("elements", {})
+    # Handle both list and dict formats
+    if isinstance(elements, dict):
+        node_list = elements.get("nodes", [])
+        edge_list = elements.get("edges", [])
+    else:
+        node_list = [el for el in elements if "source" not in el.get("data", {})]
+        edge_list = [el for el in elements if "source" in el.get("data", {})]
+    for el in node_list:
         d = el.get("data", {})
-        if "source" in d and "target" in d:
-            G.add_edge(d["source"], d["target"])
-        elif "id" in d:
-            G.add_node(d["id"])
+        node_id = d.get("id")
+        if node_id is not None:
+            node_attrs = {k: v for k, v in d.items() if k not in ("id", "value", "name")}
+            G.add_node(node_id, **node_attrs)
+    for el in edge_list:
+        d = el.get("data", {})
+        src, tgt = d.get("source"), d.get("target")
+        if src is not None and tgt is not None:
+            edge_attrs = {k: v for k, v in d.items() if k not in ("source", "target")}
+            G.add_edge(src, tgt, **edge_attrs)
     return G
 
 
