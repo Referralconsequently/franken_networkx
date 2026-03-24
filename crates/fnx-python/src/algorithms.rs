@@ -1158,65 +1158,136 @@ pub fn shortest_path(
             }
         }
     } else {
-        let inner = gr.undirected();
-        log::info!(target: "franken_networkx", "shortest_path: nodes={} edges={}", inner.node_count(), inner.edge_count());
-        match (source, target) {
-            (Some(src), Some(tgt)) => {
-                let s = node_key_to_string(py, src)?;
-                let t = node_key_to_string(py, tgt)?;
-                validate_node(&gr, &s, src)?;
-                validate_node(&gr, &t, tgt)?;
+        if let Some(inner) = gr.digraph() {
+            log::info!(target: "franken_networkx", "shortest_path: directed nodes={} edges={}", inner.node_count(), inner.edge_count());
+            match (source, target) {
+                (Some(src), Some(tgt)) => {
+                    let s = node_key_to_string(py, src)?;
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &s, src)?;
+                    validate_node(&gr, &t, tgt)?;
 
-                let path = compute_single_shortest_path(py, inner, &s, &t, None, method)?;
-                match path {
-                    Some(p) => {
-                        let py_path: Vec<PyObject> =
-                            p.iter().map(|n| gr.py_node_key(py, n)).collect();
-                        Ok(py_path.into_pyobject(py)?.into_any().unbind())
+                    let path = compute_single_shortest_path_directed(py, inner, &s, &t, None, method)?;
+                    match path {
+                        Some(p) => {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            Ok(py_path.into_pyobject(py)?.into_any().unbind())
+                        }
+                        None => Err(NetworkXNoPath::new_err(format!(
+                            "No path between {} and {}.",
+                            s, t
+                        ))),
                     }
-                    None => Err(NetworkXNoPath::new_err(format!(
-                        "No path between {} and {}.",
-                        s, t
-                    ))),
                 }
-            }
-            (Some(src), None) => {
-                let s = node_key_to_string(py, src)?;
-                validate_node(&gr, &s, src)?;
-                let paths = compute_single_source_shortest_paths(py, inner, &s, None, method)?;
-                let result = PyDict::new(py);
-                for (node, p) in paths {
-                    let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
-                    result.set_item(gr.py_node_key(py, &node), py_path)?;
-                }
-                Ok(result.into_any().unbind())
-            }
-            (None, Some(tgt)) => {
-                let t = node_key_to_string(py, tgt)?;
-                validate_node(&gr, &t, tgt)?;
-                let paths = compute_single_source_shortest_paths(py, inner, &t, None, method)?;
-                let result = PyDict::new(py);
-                for (node, mut p) in paths {
-                    p.reverse();
-                    let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
-                    result.set_item(gr.py_node_key(py, &node), py_path)?;
-                }
-                Ok(result.into_any().unbind())
-            }
-            (None, None) => {
-                let result = PyDict::new(py);
-                for src_node in inner.nodes_ordered() {
-                    let inner_dict = PyDict::new(py);
-                    let paths =
-                        compute_single_source_shortest_paths(py, inner, src_node, None, method)?;
-                    for (tgt_node, p) in paths {
-                        let py_path: Vec<PyObject> =
-                            p.iter().map(|n| gr.py_node_key(py, n)).collect();
-                        inner_dict.set_item(gr.py_node_key(py, &tgt_node), py_path)?;
+                (Some(src), None) => {
+                    let s = node_key_to_string(py, src)?;
+                    validate_node(&gr, &s, src)?;
+                    let paths = compute_single_source_shortest_paths_directed(py, inner, &s, None, method)?;
+                    let result = PyDict::new(py);
+                    for (node, p) in paths {
+                        let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                        result.set_item(gr.py_node_key(py, &node), py_path)?;
                     }
-                    result.set_item(gr.py_node_key(py, src_node), inner_dict)?;
+                    Ok(result.into_any().unbind())
                 }
-                Ok(result.into_any().unbind())
+                (None, Some(tgt)) => {
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &t, tgt)?;
+                    let result = PyDict::new(py);
+                    for node in inner.nodes_ordered() {
+                        if let Some(p) = compute_single_shortest_path_directed(
+                            py,
+                            inner,
+                            node,
+                            &t,
+                            None,
+                            method,
+                        )? {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            result.set_item(gr.py_node_key(py, node), py_path)?;
+                        }
+                    }
+                    Ok(result.into_any().unbind())
+                }
+                (None, None) => {
+                    let result = PyDict::new(py);
+                    for src_node in inner.nodes_ordered() {
+                        let inner_dict = PyDict::new(py);
+                        let paths =
+                            compute_single_source_shortest_paths_directed(py, inner, src_node, None, method)?;
+                        for (tgt_node, p) in paths {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            inner_dict.set_item(gr.py_node_key(py, &tgt_node), py_path)?;
+                        }
+                        result.set_item(gr.py_node_key(py, src_node), inner_dict)?;
+                    }
+                    Ok(result.into_any().unbind())
+                }
+            }
+        } else {
+            let inner = gr.undirected();
+            log::info!(target: "franken_networkx", "shortest_path: nodes={} edges={}", inner.node_count(), inner.edge_count());
+            match (source, target) {
+                (Some(src), Some(tgt)) => {
+                    let s = node_key_to_string(py, src)?;
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &s, src)?;
+                    validate_node(&gr, &t, tgt)?;
+
+                    let path = compute_single_shortest_path(py, inner, &s, &t, None, method)?;
+                    match path {
+                        Some(p) => {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            Ok(py_path.into_pyobject(py)?.into_any().unbind())
+                        }
+                        None => Err(NetworkXNoPath::new_err(format!(
+                            "No path between {} and {}.",
+                            s, t
+                        ))),
+                    }
+                }
+                (Some(src), None) => {
+                    let s = node_key_to_string(py, src)?;
+                    validate_node(&gr, &s, src)?;
+                    let paths = compute_single_source_shortest_paths(py, inner, &s, None, method)?;
+                    let result = PyDict::new(py);
+                    for (node, p) in paths {
+                        let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                        result.set_item(gr.py_node_key(py, &node), py_path)?;
+                    }
+                    Ok(result.into_any().unbind())
+                }
+                (None, Some(tgt)) => {
+                    let t = node_key_to_string(py, tgt)?;
+                    validate_node(&gr, &t, tgt)?;
+                    let paths = compute_single_source_shortest_paths(py, inner, &t, None, method)?;
+                    let result = PyDict::new(py);
+                    for (node, mut p) in paths {
+                        p.reverse();
+                        let py_path: Vec<PyObject> = p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                        result.set_item(gr.py_node_key(py, &node), py_path)?;
+                    }
+                    Ok(result.into_any().unbind())
+                }
+                (None, None) => {
+                    let result = PyDict::new(py);
+                    for src_node in inner.nodes_ordered() {
+                        let inner_dict = PyDict::new(py);
+                        let paths =
+                            compute_single_source_shortest_paths(py, inner, src_node, None, method)?;
+                        for (tgt_node, p) in paths {
+                            let py_path: Vec<PyObject> =
+                                p.iter().map(|n| gr.py_node_key(py, n)).collect();
+                            inner_dict.set_item(gr.py_node_key(py, &tgt_node), py_path)?;
+                        }
+                        result.set_item(gr.py_node_key(py, src_node), inner_dict)?;
+                    }
+                    Ok(result.into_any().unbind())
+                }
             }
         }
     }
@@ -8398,6 +8469,162 @@ pub fn transitivity_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> 
     Ok(result.transitivity)
 }
 
+// ---------------------------------------------------------------------------
+// Generalized degree
+// ---------------------------------------------------------------------------
+
+/// Return generalized degree for each node.
+#[pyfunction]
+pub fn generalized_degree_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::generalized_degree(inner));
+    let outer = PyDict::new(py);
+    for (node, degree_dist) in &result {
+        let inner_dict = PyDict::new(py);
+        for (tri_count, count) in degree_dist {
+            inner_dict.set_item(tri_count, count)?;
+        }
+        outer.set_item(gr.py_node_key(py, node), inner_dict)?;
+    }
+    Ok(outer.unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Is strongly regular
+// ---------------------------------------------------------------------------
+
+/// Check if graph is strongly regular.
+#[pyfunction]
+pub fn is_strongly_regular_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::is_strongly_regular(inner)))
+}
+
+// ---------------------------------------------------------------------------
+// Flow hierarchy
+// ---------------------------------------------------------------------------
+
+/// Return the flow hierarchy of a directed graph.
+#[pyfunction]
+pub fn flow_hierarchy_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    let dg = gr
+        .digraph()
+        .ok_or_else(|| crate::NetworkXError::new_err("flow_hierarchy requires a DiGraph"))?;
+    Ok(py.allow_threads(|| fnx_algorithms::flow_hierarchy_directed(dg)))
+}
+
+// ---------------------------------------------------------------------------
+// Graph power
+// ---------------------------------------------------------------------------
+
+/// Return the k-th power of graph G.
+#[pyfunction]
+pub fn power_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    k: usize,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::power(inner, k));
+    // Convert Rust Graph to PyGraph
+    let pg = crate::PyGraph {
+        inner: result,
+        node_key_map: std::collections::HashMap::new(),
+        node_py_attrs: std::collections::HashMap::new(),
+        edge_py_attrs: std::collections::HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+    Ok(pg.into_pyobject(py)?.into_any().unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Square clustering
+// ---------------------------------------------------------------------------
+
+/// Return square clustering for each node.
+#[pyfunction]
+pub fn square_clustering_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::square_clustering_map(inner));
+    let dict = PyDict::new(py);
+    for (node, val) in &result {
+        dict.set_item(gr.py_node_key(py, node), val)?;
+    }
+    Ok(dict.unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Ego graph
+// ---------------------------------------------------------------------------
+
+/// Return the ego graph of center within given radius.
+#[pyfunction]
+#[pyo3(signature = (g, center, radius=1, undirected=false))]
+pub fn ego_graph_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    center: &Bound<'_, PyAny>,
+    radius: usize,
+    undirected: bool,
+) -> PyResult<PyObject> {
+    let _ = undirected;
+    let gr = extract_graph(g)?;
+    let c = node_key_to_string(py, center)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::ego_graph(inner, &c, radius));
+    let pg = crate::PyGraph {
+        inner: result,
+        node_key_map: std::collections::HashMap::new(),
+        node_py_attrs: std::collections::HashMap::new(),
+        edge_py_attrs: std::collections::HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+    Ok(pg.into_pyobject(py)?.into_any().unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Degree mixing dict
+// ---------------------------------------------------------------------------
+
+/// Return degree mixing dictionary.
+#[pyfunction]
+pub fn degree_mixing_dict_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let result = if gr.is_directed() {
+        let dg = gr.digraph().unwrap();
+        py.allow_threads(|| fnx_algorithms::degree_mixing_dict_directed(dg))
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::degree_mixing_dict(inner))
+    };
+    let dict = PyDict::new(py);
+    for ((du, dv), count) in &result {
+        dict.set_item((*du, *dv), count)?;
+    }
+    Ok(dict.unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Connected dominating set
+// ---------------------------------------------------------------------------
+
+/// Return a greedy connected dominating set.
+#[pyfunction]
+pub fn connected_dominating_set_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::connected_dominating_set(inner));
+    Ok(result.iter().map(|n| gr.py_node_key(py, n)).collect())
+}
+
 // Registration
 // ===========================================================================
 
@@ -8787,5 +9014,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(clustering_rust, m)?)?;
     m.add_function(wrap_pyfunction!(average_clustering_rust, m)?)?;
     m.add_function(wrap_pyfunction!(transitivity_rust, m)?)?;
+    // Generalized degree
+    m.add_function(wrap_pyfunction!(generalized_degree_rust, m)?)?;
+    // Is strongly regular
+    m.add_function(wrap_pyfunction!(is_strongly_regular_rust, m)?)?;
+    // Flow hierarchy
+    m.add_function(wrap_pyfunction!(flow_hierarchy_rust, m)?)?;
+    // Graph power
+    m.add_function(wrap_pyfunction!(power_rust, m)?)?;
+    // Square clustering
+    m.add_function(wrap_pyfunction!(square_clustering_rust, m)?)?;
     Ok(())
 }

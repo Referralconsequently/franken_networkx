@@ -20199,6 +20199,705 @@ pub fn reverse_digraph(digraph: &DiGraph) -> DiGraph {
     result
 }
 
+// ---------------------------------------------------------------------------
+// DFS labeled edges
+// ---------------------------------------------------------------------------
+
+/// DFS edge classification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DfsEdgeLabel {
+    TreeEdge,
+    BackEdge,
+    ForwardEdge,
+    CrossEdge,
+}
+
+/// Return DFS-labeled edges from *source*.
+///
+/// Each result is (u, v, label) where label classifies the edge type.
+#[must_use]
+pub fn dfs_labeled_edges(
+    graph: &Graph,
+    source: &str,
+) -> Vec<(String, String, DfsEdgeLabel)> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let s = match idx.get(source) {
+        Some(&i) => i,
+        None => return Vec::new(),
+    };
+
+    let mut result = Vec::new();
+    let mut visited = vec![false; n];
+    let mut finished = vec![false; n];
+    let mut stack: Vec<(usize, usize, bool)> = Vec::new(); // (parent, node, is_entry)
+
+    visited[s] = true;
+    // Push neighbors in reverse for consistent ordering
+    let nbrs: Vec<usize> = graph
+        .neighbors(nodes[s])
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|nb| idx.get(nb).copied())
+        .collect();
+    for &nb in nbrs.iter().rev() {
+        stack.push((s, nb, true));
+    }
+
+    while let Some((parent, node, is_entry)) = stack.pop() {
+        if !is_entry {
+            finished[node] = true;
+            continue;
+        }
+
+        if visited[node] {
+            let label = if finished[node] {
+                DfsEdgeLabel::CrossEdge
+            } else {
+                DfsEdgeLabel::BackEdge
+            };
+            result.push((
+                nodes[parent].to_owned(),
+                nodes[node].to_owned(),
+                label,
+            ));
+            continue;
+        }
+
+        visited[node] = true;
+        result.push((
+            nodes[parent].to_owned(),
+            nodes[node].to_owned(),
+            DfsEdgeLabel::TreeEdge,
+        ));
+
+        // Push finish marker
+        stack.push((parent, node, false));
+
+        // Push neighbors
+        let nbrs: Vec<usize> = graph
+            .neighbors(nodes[node])
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|nb| idx.get(nb).copied())
+            .filter(|&nb| nb != parent)
+            .collect();
+        for &nb in nbrs.iter().rev() {
+            stack.push((node, nb, true));
+        }
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Generalized degree
+// ---------------------------------------------------------------------------
+
+/// Generalized degree: for each node, returns a map from triangle count
+/// to the number of neighbors with that many shared triangles.
+#[must_use]
+pub fn generalized_degree(graph: &Graph) -> std::collections::HashMap<String, std::collections::HashMap<usize, usize>> {
+    let nodes = graph.nodes_ordered();
+    let mut result = std::collections::HashMap::new();
+
+    for &node in &nodes {
+        let nbrs: Vec<&str> = graph.neighbors(node).unwrap_or_default();
+        let nbr_set: std::collections::HashSet<&str> = nbrs.iter().copied().collect();
+
+        let mut degree_dist: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for &nb in &nbrs {
+            // Count triangles through this neighbor
+            let nb_nbrs: Vec<&str> = graph.neighbors(nb).unwrap_or_default();
+            let shared = nb_nbrs.iter().filter(|&&x| x != node && nbr_set.contains(x)).count();
+            *degree_dist.entry(shared).or_insert(0) += 1;
+        }
+        result.insert(node.to_owned(), degree_dist);
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Is strongly regular
+// ---------------------------------------------------------------------------
+
+/// Check if graph is strongly regular.
+///
+/// A graph is strongly regular with parameters (n, k, λ, μ) if:
+/// - Every vertex has degree k
+/// - Every pair of adjacent vertices has λ common neighbors
+/// - Every pair of non-adjacent vertices has μ common neighbors
+#[must_use]
+pub fn is_strongly_regular(graph: &Graph) -> bool {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 {
+        return n <= 1;
+    }
+
+    // Check regularity
+    let first_deg = graph.neighbors(nodes[0]).unwrap_or_default().len();
+    for &node in &nodes[1..] {
+        if graph.neighbors(node).unwrap_or_default().len() != first_deg {
+            return false;
+        }
+    }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    // Check λ and μ
+    let mut lambda: Option<usize> = None;
+    let mut mu: Option<usize> = None;
+
+    for i in 0..n {
+        let i_nbrs: std::collections::HashSet<&str> = graph
+            .neighbors(nodes[i])
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        for j in (i + 1)..n {
+            let j_nbrs: std::collections::HashSet<&str> = graph
+                .neighbors(nodes[j])
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let common = i_nbrs.intersection(&j_nbrs).count();
+
+            if i_nbrs.contains(nodes[j]) {
+                // Adjacent pair
+                match lambda {
+                    None => lambda = Some(common),
+                    Some(l) if l != common => return false,
+                    _ => {}
+                }
+            } else {
+                // Non-adjacent pair
+                match mu {
+                    None => mu = Some(common),
+                    Some(m) if m != common => return false,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    true
+}
+
+// ---------------------------------------------------------------------------
+// Flow hierarchy (Rust implementation)
+// ---------------------------------------------------------------------------
+
+/// Flow hierarchy of a directed graph.
+///
+/// Fraction of edges not in any cycle. Uses SCC decomposition.
+#[must_use]
+pub fn flow_hierarchy_directed(digraph: &DiGraph) -> f64 {
+    let m = digraph.edge_count();
+    if m == 0 {
+        return 1.0;
+    }
+
+    // Find strongly connected components
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    // Tarjan's SCC
+    let mut scc_id = vec![usize::MAX; n];
+    let mut scc_count = 0usize;
+    let mut stack: Vec<usize> = Vec::new();
+    let mut on_stack = vec![false; n];
+    let mut disc = vec![usize::MAX; n];
+    let mut low = vec![usize::MAX; n];
+    let mut timer = 0usize;
+
+    fn tarjan_dfs(
+        v: usize,
+        digraph: &DiGraph,
+        nodes: &[&str],
+        idx: &std::collections::HashMap<&str, usize>,
+        disc: &mut [usize],
+        low: &mut [usize],
+        on_stack: &mut [bool],
+        stack: &mut Vec<usize>,
+        scc_id: &mut [usize],
+        scc_count: &mut usize,
+        timer: &mut usize,
+    ) {
+        disc[v] = *timer;
+        low[v] = *timer;
+        *timer += 1;
+        stack.push(v);
+        on_stack[v] = true;
+
+        if let Some(succs) = digraph.successors(nodes[v]) {
+            for s in succs {
+                if let Some(&si) = idx.get(s) {
+                    if disc[si] == usize::MAX {
+                        tarjan_dfs(si, digraph, nodes, idx, disc, low, on_stack, stack, scc_id, scc_count, timer);
+                        low[v] = low[v].min(low[si]);
+                    } else if on_stack[si] {
+                        low[v] = low[v].min(disc[si]);
+                    }
+                }
+            }
+        }
+
+        if low[v] == disc[v] {
+            while let Some(w) = stack.pop() {
+                on_stack[w] = false;
+                scc_id[w] = *scc_count;
+                if w == v {
+                    break;
+                }
+            }
+            *scc_count += 1;
+        }
+    }
+
+    for i in 0..n {
+        if disc[i] == usize::MAX {
+            tarjan_dfs(i, digraph, &nodes, &idx, &mut disc, &mut low, &mut on_stack, &mut stack, &mut scc_id, &mut scc_count, &mut timer);
+        }
+    }
+
+    // Count SCC sizes
+    let mut scc_sizes = vec![0usize; scc_count];
+    for &id in &scc_id {
+        if id < scc_count {
+            scc_sizes[id] += 1;
+        }
+    }
+
+    // Edge is in a cycle iff both endpoints in same SCC of size > 1
+    let mut cycle_edges = 0usize;
+    for edge in digraph.edges_ordered() {
+        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str())) {
+            if scc_id[ui] == scc_id[vi] && scc_sizes[scc_id[ui]] > 1 {
+                cycle_edges += 1;
+            }
+        }
+    }
+
+    1.0 - (cycle_edges as f64 / m as f64)
+}
+
+// ---------------------------------------------------------------------------
+// Graph power
+// ---------------------------------------------------------------------------
+
+/// Return the k-th power of graph G.
+///
+/// The k-th power has the same nodes, with edges between nodes that are
+/// within distance k in the original graph.
+#[must_use]
+pub fn power(graph: &Graph, k: usize) -> Graph {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut result = Graph::new(graph.mode());
+    for &node in &nodes {
+        let _ = result.add_node(node.to_owned());
+    }
+
+    // BFS from each node up to distance k
+    for s in 0..n {
+        let mut dist = vec![usize::MAX; n];
+        dist[s] = 0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+
+        while let Some(v) = queue.pop_front() {
+            let d = dist[v];
+            if d >= k {
+                continue;
+            }
+            if let Some(nbrs) = graph.neighbors(nodes[v]) {
+                for nb in nbrs {
+                    if let Some(&ni) = idx.get(nb) {
+                        if dist[ni] == usize::MAX {
+                            dist[ni] = d + 1;
+                            queue.push_back(ni);
+                            if ni > s {
+                                let _ = result.add_edge(
+                                    nodes[s].to_owned(),
+                                    nodes[ni].to_owned(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Square clustering
+// ---------------------------------------------------------------------------
+
+/// Square clustering coefficient for each node.
+///
+/// Measures the fraction of possible squares (4-cycles) through a node.
+#[must_use]
+pub fn square_clustering_map(graph: &Graph) -> std::collections::HashMap<String, f64> {
+    let nodes = graph.nodes_ordered();
+    let mut result = std::collections::HashMap::new();
+
+    for &u in &nodes {
+        let u_nbrs: Vec<&str> = graph.neighbors(u).unwrap_or_default();
+        let u_set: std::collections::HashSet<&str> = u_nbrs.iter().copied().collect();
+        let ku = u_nbrs.len();
+
+        if ku < 2 {
+            result.insert(u.to_owned(), 0.0);
+            continue;
+        }
+
+        let mut squares = 0usize;
+        let mut possible = 0usize;
+
+        for i in 0..u_nbrs.len() {
+            let v = u_nbrs[i];
+            let v_nbrs: std::collections::HashSet<&str> = graph
+                .neighbors(v)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+
+            for j in (i + 1)..u_nbrs.len() {
+                let w = u_nbrs[j];
+                possible += 1;
+                // Square exists if v and w share a neighbor (other than u)
+                let w_nbrs: std::collections::HashSet<&str> = graph
+                    .neighbors(w)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+                let shared: usize = v_nbrs
+                    .intersection(&w_nbrs)
+                    .filter(|&&x| x != u)
+                    .count();
+                squares += shared;
+            }
+        }
+
+        let sc = if possible > 0 {
+            squares as f64 / possible as f64
+        } else {
+            0.0
+        };
+        result.insert(u.to_owned(), sc);
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Ego graph
+// ---------------------------------------------------------------------------
+
+/// Return the ego graph of *center* within radius *radius*.
+///
+/// The ego graph is the subgraph induced by the center node and all
+/// nodes within *radius* hops.
+#[must_use]
+pub fn ego_graph(graph: &Graph, center: &str, radius: usize) -> Graph {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let center_idx = match idx.get(center) {
+        Some(&i) => i,
+        None => return Graph::new(graph.mode()),
+    };
+
+    // BFS from center up to radius
+    let mut dist = vec![usize::MAX; n];
+    dist[center_idx] = 0;
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(center_idx);
+    let mut ego_nodes = vec![center_idx];
+
+    while let Some(v) = queue.pop_front() {
+        let d = dist[v];
+        if d >= radius {
+            continue;
+        }
+        if let Some(nbrs) = graph.neighbors(nodes[v]) {
+            for nb in nbrs {
+                if let Some(&ni) = idx.get(nb) {
+                    if dist[ni] == usize::MAX {
+                        dist[ni] = d + 1;
+                        ego_nodes.push(ni);
+                        queue.push_back(ni);
+                    }
+                }
+            }
+        }
+    }
+
+    // Build subgraph
+    let ego_set: std::collections::HashSet<usize> = ego_nodes.iter().copied().collect();
+    let mut result = Graph::new(graph.mode());
+    for &i in &ego_nodes {
+        let _ = result.add_node(nodes[i].to_owned());
+    }
+    for edge in graph.edges_ordered() {
+        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str())) {
+            if ego_set.contains(&ui) && ego_set.contains(&vi) {
+                let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+            }
+        }
+    }
+
+    result
+}
+
+/// Ego graph for a directed graph.
+#[must_use]
+pub fn ego_graph_directed(digraph: &DiGraph, center: &str, radius: usize) -> DiGraph {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let center_idx = match idx.get(center) {
+        Some(&i) => i,
+        None => return DiGraph::new(digraph.mode()),
+    };
+
+    let mut dist = vec![usize::MAX; n];
+    dist[center_idx] = 0;
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(center_idx);
+    let mut ego_nodes = vec![center_idx];
+
+    while let Some(v) = queue.pop_front() {
+        let d = dist[v];
+        if d >= radius {
+            continue;
+        }
+        if let Some(succs) = digraph.successors(nodes[v]) {
+            for s in succs {
+                if let Some(&si) = idx.get(s) {
+                    if dist[si] == usize::MAX {
+                        dist[si] = d + 1;
+                        ego_nodes.push(si);
+                        queue.push_back(si);
+                    }
+                }
+            }
+        }
+        if let Some(preds) = digraph.predecessors(nodes[v]) {
+            for p in preds {
+                if let Some(&pi) = idx.get(p) {
+                    if dist[pi] == usize::MAX {
+                        dist[pi] = d + 1;
+                        ego_nodes.push(pi);
+                        queue.push_back(pi);
+                    }
+                }
+            }
+        }
+    }
+
+    let ego_set: std::collections::HashSet<usize> = ego_nodes.iter().copied().collect();
+    let mut result = DiGraph::new(digraph.mode());
+    for &i in &ego_nodes {
+        result.add_node(nodes[i].to_owned());
+    }
+    for edge in digraph.edges_ordered() {
+        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str())) {
+            if ego_set.contains(&ui) && ego_set.contains(&vi) {
+                let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+            }
+        }
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Common neighbor centrality (CCPA / resource allocation index variant)
+// ---------------------------------------------------------------------------
+
+/// Common Neighbor Centrality (CCPA) link prediction index.
+///
+/// For each pair (u, v), score = |common_neighbors(u,v)| + f(shortest_path(u,v))
+/// where f(p) = alpha * (N / p) when a path exists.
+pub fn common_neighbor_centrality(
+    graph: &Graph,
+    ebunch: &[(String, String)],
+    alpha: f64,
+) -> Vec<(String, String, f64)> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut result = Vec::with_capacity(ebunch.len());
+    for (u, v) in ebunch {
+        let u_nbrs: std::collections::HashSet<&str> = graph
+            .neighbors(u)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let v_nbrs: std::collections::HashSet<&str> = graph
+            .neighbors(v)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let cn = u_nbrs.intersection(&v_nbrs).count() as f64;
+
+        // BFS shortest path length
+        let sp = if let (Some(&ui), Some(&vi)) = (idx.get(u.as_str()), idx.get(v.as_str())) {
+            let mut dist = vec![usize::MAX; n];
+            dist[ui] = 0;
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back(ui);
+            while let Some(w) = queue.pop_front() {
+                if w == vi { break; }
+                if let Some(nbrs) = graph.neighbors(nodes[w]) {
+                    for nb in nbrs {
+                        if let Some(&ni) = idx.get(nb) {
+                            if dist[ni] == usize::MAX {
+                                dist[ni] = dist[w] + 1;
+                                queue.push_back(ni);
+                            }
+                        }
+                    }
+                }
+            }
+            if dist[vi] < usize::MAX { Some(dist[vi]) } else { None }
+        } else {
+            None
+        };
+
+        let score = cn + match sp {
+            Some(p) if p > 0 => alpha * (n as f64 / p as f64),
+            _ => 0.0,
+        };
+        result.push((u.clone(), v.clone(), score));
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Degree mixing
+// ---------------------------------------------------------------------------
+
+/// Degree mixing dictionary: count edges by (source_degree, target_degree).
+#[must_use]
+pub fn degree_mixing_dict(graph: &Graph) -> std::collections::HashMap<(usize, usize), usize> {
+    let mut mixing = std::collections::HashMap::new();
+    for edge in graph.edges_ordered() {
+        let du = graph.neighbors(&edge.left).unwrap_or_default().len();
+        let dv = graph.neighbors(&edge.right).unwrap_or_default().len();
+        *mixing.entry((du, dv)).or_insert(0) += 1;
+        if du != dv {
+            *mixing.entry((dv, du)).or_insert(0) += 1;
+        }
+    }
+    mixing
+}
+
+/// Degree mixing dictionary for directed graphs.
+#[must_use]
+pub fn degree_mixing_dict_directed(digraph: &DiGraph) -> std::collections::HashMap<(usize, usize), usize> {
+    let mut mixing = std::collections::HashMap::new();
+    for edge in digraph.edges_ordered() {
+        let du = digraph.neighbor_count(&edge.left); // out-degree
+        let dv = digraph.predecessors(&edge.right).map_or(0, |p| p.len()); // in-degree of target
+        *mixing.entry((du, dv)).or_insert(0) += 1;
+    }
+    mixing
+}
+
+// ---------------------------------------------------------------------------
+// Connected dominating set (greedy)
+// ---------------------------------------------------------------------------
+
+/// Return a greedy connected dominating set.
+///
+/// Iteratively adds the node with the most uncovered neighbors.
+#[must_use]
+pub fn connected_dominating_set(graph: &Graph) -> Vec<String> {
+    let nodes = graph.nodes_ordered();
+    if nodes.is_empty() {
+        return Vec::new();
+    }
+
+    // Start with the highest-degree node
+    let start = nodes
+        .iter()
+        .max_by_key(|&&n| graph.neighbors(n).unwrap_or_default().len())
+        .unwrap();
+
+    let mut dom_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut covered: std::collections::HashSet<String> = std::collections::HashSet::new();
+    dom_set.insert((*start).to_owned());
+    covered.insert((*start).to_owned());
+    for nb in graph.neighbors(start).unwrap_or_default() {
+        covered.insert(nb.to_owned());
+    }
+
+    let all_nodes: std::collections::HashSet<String> =
+        nodes.iter().map(|&n| n.to_owned()).collect();
+
+    while covered != all_nodes {
+        // Find neighbor of dom_set that covers the most uncovered nodes
+        let mut best: Option<String> = None;
+        let mut best_count = 0;
+
+        for ds_node in &dom_set {
+            for nb in graph.neighbors(ds_node).unwrap_or_default() {
+                if dom_set.contains(nb) {
+                    continue;
+                }
+                let nb_nbrs = graph.neighbors(nb).unwrap_or_default();
+                let new_covered = nb_nbrs
+                    .iter()
+                    .filter(|&&x| !covered.contains(x))
+                    .count()
+                    + usize::from(!covered.contains(nb));
+                if new_covered > best_count {
+                    best_count = new_covered;
+                    best = Some(nb.to_owned());
+                }
+            }
+        }
+
+        match best {
+            Some(node) => {
+                covered.insert(node.clone());
+                for nb in graph.neighbors(&node).unwrap_or_default() {
+                    covered.insert(nb.to_owned());
+                }
+                dom_set.insert(node);
+            }
+            None => break, // Disconnected
+        }
+    }
+
+    let mut result: Vec<String> = dom_set.into_iter().collect();
+    result.sort();
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

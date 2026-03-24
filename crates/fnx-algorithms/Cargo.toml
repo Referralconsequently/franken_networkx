@@ -5,7 +5,8 @@ edition = "2024"
 license-file = "../../LICENSE"
 
 [dependencies]
-fnx-classes = { path = "../fnx-classes" }
+fnx-classes = { version = "0.1.0", path = "../fnx-classes" }
+fnx-runtime = { version = "0.1.0", path = "../fnx-runtime" }
 mwmatching = "0.1.1"
 serde = { version = "1.0.228", features = ["derive"] }
 
