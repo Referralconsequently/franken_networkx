@@ -19253,6 +19253,624 @@ pub fn chain_decomposition(graph: &Graph, root: Option<&str>) -> Vec<Vec<(String
     chains
 }
 
+// ---------------------------------------------------------------------------
+// All topological sorts (backtracking Kahn's)
+// ---------------------------------------------------------------------------
+
+/// Enumerate all topological orderings of a directed acyclic graph.
+pub fn all_topological_sorts(digraph: &DiGraph) -> Vec<Vec<String>> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return vec![vec![]];
+    }
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut in_deg = vec![0usize; n];
+    for i in 0..n {
+        if let Some(preds) = digraph.predecessors(nodes[i]) {
+            in_deg[i] = preds.len();
+        }
+    }
+
+    let mut results = Vec::new();
+    let mut current = Vec::with_capacity(n);
+    let mut used = vec![false; n];
+    all_topo_backtrack(digraph, &nodes, &idx, &mut in_deg, &mut used, &mut current, &mut results, n);
+    results
+}
+
+fn all_topo_backtrack(
+    digraph: &DiGraph,
+    nodes: &[&str],
+    idx: &std::collections::HashMap<&str, usize>,
+    in_deg: &mut [usize],
+    used: &mut [bool],
+    current: &mut Vec<String>,
+    results: &mut Vec<Vec<String>>,
+    n: usize,
+) {
+    if current.len() == n {
+        results.push(current.clone());
+        return;
+    }
+    for i in 0..n {
+        if !used[i] && in_deg[i] == 0 {
+            used[i] = true;
+            current.push(nodes[i].to_owned());
+            // Decrease in-degree of successors
+            let mut decremented = Vec::new();
+            if let Some(succs) = digraph.successors(nodes[i]) {
+                for s in succs {
+                    if let Some(&si) = idx.get(s) {
+                        in_deg[si] -= 1;
+                        decremented.push(si);
+                    }
+                }
+            }
+            all_topo_backtrack(digraph, nodes, idx, in_deg, used, current, results, n);
+            // Undo
+            for si in decremented {
+                in_deg[si] += 1;
+            }
+            current.pop();
+            used[i] = false;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Structural holes: constraint
+// ---------------------------------------------------------------------------
+
+/// Burt's constraint measure for each node.
+///
+/// Constraint measures how much a node's connections are concentrated
+/// in a single cluster. Returns a map from node name to constraint value.
+#[must_use]
+pub fn constraint(graph: &Graph) -> std::collections::HashMap<String, f64> {
+    let nodes = graph.nodes_ordered();
+    let mut result = std::collections::HashMap::new();
+    for &u in &nodes {
+        let u_nbrs: Vec<&str> = graph.neighbors(u).unwrap_or_default();
+        if u_nbrs.is_empty() {
+            result.insert(u.to_owned(), 0.0);
+            continue;
+        }
+        let mut total_constraint = 0.0;
+        for &v in &u_nbrs {
+            let local_c = local_constraint_inner(graph, u, v, &u_nbrs);
+            total_constraint += local_c;
+        }
+        result.insert(u.to_owned(), total_constraint);
+    }
+    result
+}
+
+/// Local constraint of node u with respect to neighbor v.
+#[must_use]
+pub fn local_constraint(graph: &Graph, u: &str, v: &str) -> f64 {
+    let u_nbrs: Vec<&str> = graph.neighbors(u).unwrap_or_default();
+    local_constraint_inner(graph, u, v, &u_nbrs)
+}
+
+fn local_constraint_inner(graph: &Graph, u: &str, v: &str, u_nbrs: &[&str]) -> f64 {
+    // p_uv = proportion of u's network invested in v
+    let deg_u = u_nbrs.len() as f64;
+    if deg_u == 0.0 {
+        return 0.0;
+    }
+    let p_uv = 1.0 / deg_u;
+
+    // Sum indirect investment through mutual neighbors
+    let v_nbrs: Vec<&str> = graph.neighbors(v).unwrap_or_default();
+    let v_set: std::collections::HashSet<&str> = v_nbrs.iter().copied().collect();
+
+    let mut indirect = 0.0;
+    for &w in u_nbrs {
+        if w == v || w == u {
+            continue;
+        }
+        // p_uw * p_wv
+        let p_uw = 1.0 / deg_u;
+        if v_set.contains(w) {
+            let deg_w = graph.neighbors(w).unwrap_or_default().len() as f64;
+            if deg_w > 0.0 {
+                let p_wv = 1.0 / deg_w;
+                indirect += p_uw * p_wv;
+            }
+        }
+    }
+
+    let total = p_uv + indirect;
+    total * total
+}
+
+// ---------------------------------------------------------------------------
+// Effective size (structural holes)
+// ---------------------------------------------------------------------------
+
+/// Burt's effective size for each node.
+///
+/// Effective size = n_i - sum_j (sum_q p_iq * m_jq) for q != i, j
+/// where p_iq = proportion of i's relations invested in q
+/// and m_jq = marginal strength of j's relation with q.
+///
+/// For unweighted: effective_size(u) = degree(u) - 2*t(u)/degree(u)
+/// where t(u) is the number of ties among u's neighbors.
+#[must_use]
+pub fn effective_size(graph: &Graph) -> std::collections::HashMap<String, f64> {
+    let nodes = graph.nodes_ordered();
+    let mut result = std::collections::HashMap::new();
+    for &u in &nodes {
+        let nbrs: Vec<&str> = graph.neighbors(u).unwrap_or_default();
+        let deg = nbrs.len();
+        if deg == 0 {
+            result.insert(u.to_owned(), 0.0);
+            continue;
+        }
+        // Count ties among neighbors (redundancy)
+        let mut ties = 0usize;
+        for i in 0..nbrs.len() {
+            for j in (i + 1)..nbrs.len() {
+                if graph.has_edge(nbrs[i], nbrs[j]) {
+                    ties += 1;
+                }
+            }
+        }
+        let eff = (deg as f64) - (2.0 * ties as f64) / (deg as f64);
+        result.insert(u.to_owned(), eff);
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Voronoi cells (multi-source shortest path partitioning)
+// ---------------------------------------------------------------------------
+
+/// Partition nodes into Voronoi cells based on nearest center.
+///
+/// Each node is assigned to its closest center node using BFS.
+/// Returns a map from center node to list of nodes in its cell.
+#[must_use]
+pub fn voronoi_cells(
+    graph: &Graph,
+    center_nodes: &[&str],
+) -> std::collections::HashMap<String, Vec<String>> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    // Multi-source BFS
+    let mut nearest: Vec<Option<usize>> = vec![None; n];
+    let mut dist = vec![usize::MAX; n];
+    let mut queue = std::collections::VecDeque::new();
+
+    for (ci, &center) in center_nodes.iter().enumerate() {
+        if let Some(&node_idx) = idx.get(center) {
+            nearest[node_idx] = Some(ci);
+            dist[node_idx] = 0;
+            queue.push_back(node_idx);
+        }
+    }
+
+    while let Some(v) = queue.pop_front() {
+        let d = dist[v];
+        if let Some(nbrs) = graph.neighbors(nodes[v]) {
+            for nb in nbrs {
+                if let Some(&ni) = idx.get(nb) {
+                    if dist[ni] > d + 1 {
+                        dist[ni] = d + 1;
+                        nearest[ni] = nearest[v];
+                        queue.push_back(ni);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut cells: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for &center in center_nodes {
+        cells.insert(center.to_owned(), Vec::new());
+    }
+    // Add unreachable sentinel
+    let unreachable_key = "unreachable".to_owned();
+
+    for (i, &node) in nodes.iter().enumerate() {
+        match nearest[i] {
+            Some(ci) => {
+                cells
+                    .entry(center_nodes[ci].to_owned())
+                    .or_default()
+                    .push(node.to_owned());
+            }
+            None => {
+                cells
+                    .entry(unreachable_key.clone())
+                    .or_default()
+                    .push(node.to_owned());
+            }
+        }
+    }
+
+    cells
+}
+
+// ---------------------------------------------------------------------------
+// D-separation test (DAGs / Bayesian networks)
+// ---------------------------------------------------------------------------
+
+/// Test whether *x* and *y* are d-separated by *z* in a DAG.
+///
+/// Uses the moralization approach: build ancestral graph of x ∪ y ∪ z,
+/// moralize (connect co-parents), drop edges, remove z, check connectivity.
+#[must_use]
+pub fn is_d_separator(
+    digraph: &DiGraph,
+    x: &std::collections::HashSet<String>,
+    y: &std::collections::HashSet<String>,
+    z: &std::collections::HashSet<String>,
+) -> bool {
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    let all_nodes: Vec<&str> = digraph.nodes_ordered();
+    let node_set: HashSet<&str> = all_nodes.iter().copied().collect();
+
+    // 1. Find ancestors of x ∪ y ∪ z
+    let mut relevant: HashSet<String> = HashSet::new();
+    relevant.extend(x.iter().cloned());
+    relevant.extend(y.iter().cloned());
+    relevant.extend(z.iter().cloned());
+
+    let mut queue: VecDeque<String> = relevant.iter().cloned().collect();
+    while let Some(node) = queue.pop_front() {
+        if let Some(preds) = digraph.predecessors(&node) {
+            for p in preds {
+                if relevant.insert(p.to_owned()) {
+                    queue.push_back(p.to_owned());
+                }
+            }
+        }
+    }
+
+    // 2. Build moralized undirected graph on relevant nodes
+    let mut adj: HashMap<String, HashSet<String>> = HashMap::new();
+    for node in &relevant {
+        adj.entry(node.clone()).or_default();
+    }
+
+    // Add undirected edges for all directed edges in ancestral subgraph
+    for node in &relevant {
+        if let Some(succs) = digraph.successors(node) {
+            for s in succs {
+                if relevant.contains(s) {
+                    adj.entry(node.clone()).or_default().insert(s.to_owned());
+                    adj.entry(s.to_owned()).or_default().insert(node.clone());
+                }
+            }
+        }
+    }
+
+    // Moralize: connect co-parents (marry parents of same child)
+    for node in &relevant {
+        if let Some(preds) = digraph.predecessors(node) {
+            let parent_list: Vec<String> = preds.into_iter().filter(|p| relevant.contains(*p)).map(|s| s.to_owned()).collect();
+            for i in 0..parent_list.len() {
+                for j in (i + 1)..parent_list.len() {
+                    adj.entry(parent_list[i].to_owned())
+                        .or_default()
+                        .insert(parent_list[j].to_owned());
+                    adj.entry(parent_list[j].to_owned())
+                        .or_default()
+                        .insert(parent_list[i].to_owned());
+                }
+            }
+        }
+    }
+
+    // 3. Remove z nodes
+    for zn in z {
+        adj.remove(zn);
+        for neighbors in adj.values_mut() {
+            neighbors.remove(zn);
+        }
+    }
+
+    // 4. Check if any x-node can reach any y-node via BFS
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut bfs: VecDeque<String> = VecDeque::new();
+    for xn in x {
+        if adj.contains_key(xn) && !z.contains(xn) {
+            visited.insert(xn.clone());
+            bfs.push_back(xn.clone());
+        }
+    }
+
+    while let Some(node) = bfs.pop_front() {
+        if y.contains(&node) {
+            return false; // Reachable → NOT d-separated
+        }
+        if let Some(neighbors) = adj.get(&node) {
+            for nb in neighbors {
+                if visited.insert(nb.clone()) {
+                    bfs.push_back(nb.clone());
+                }
+            }
+        }
+    }
+
+    true // Not reachable → d-separated
+}
+
+// ---------------------------------------------------------------------------
+// Reciprocity (directed graphs)
+// ---------------------------------------------------------------------------
+
+/// Overall reciprocity of a directed graph.
+///
+/// The fraction of edges that have a reciprocal (reverse) edge.
+/// Returns 0.0 if the graph has no edges.
+#[must_use]
+pub fn overall_reciprocity(digraph: &DiGraph) -> f64 {
+    let m = digraph.edge_count();
+    if m == 0 {
+        return 0.0;
+    }
+    let mut reciprocal_count = 0usize;
+    for edge in digraph.edges_ordered() {
+        if digraph.has_edge(&edge.target, &edge.source) {
+            reciprocal_count += 1;
+        }
+    }
+    reciprocal_count as f64 / m as f64
+}
+
+/// Per-node reciprocity: fraction of node's edges that are reciprocated.
+#[must_use]
+pub fn reciprocity(digraph: &DiGraph) -> std::collections::HashMap<String, f64> {
+    let mut result = std::collections::HashMap::new();
+    for node in digraph.nodes_ordered() {
+        let succs: Vec<&str> = digraph
+            .successors(node)
+            .map(|s| s.into_iter().collect())
+            .unwrap_or_default();
+        let out_deg = succs.len();
+        if out_deg == 0 {
+            result.insert(node.to_owned(), 0.0);
+            continue;
+        }
+        let recip = succs
+            .iter()
+            .filter(|&&s| digraph.has_edge(s, node))
+            .count();
+        result.insert(node.to_owned(), recip as f64 / out_deg as f64);
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Average degree connectivity
+// ---------------------------------------------------------------------------
+
+/// Average degree connectivity: for each degree k, the average neighbor degree.
+///
+/// Returns a map from degree k to the average degree of neighbors of
+/// degree-k nodes.
+#[must_use]
+pub fn average_degree_connectivity(graph: &Graph) -> std::collections::HashMap<usize, f64> {
+    use std::collections::HashMap;
+
+    let nodes = graph.nodes_ordered();
+    let mut degree_sum: HashMap<usize, f64> = HashMap::new();
+    let mut degree_count: HashMap<usize, usize> = HashMap::new();
+
+    for &node in &nodes {
+        let nbrs: Vec<&str> = graph.neighbors(node).unwrap_or_default();
+        let deg = nbrs.len();
+        if deg == 0 {
+            continue;
+        }
+        let avg_nbr_deg: f64 = nbrs
+            .iter()
+            .map(|nb| graph.neighbors(nb).unwrap_or_default().len() as f64)
+            .sum::<f64>()
+            / deg as f64;
+        *degree_sum.entry(deg).or_insert(0.0) += avg_nbr_deg;
+        *degree_count.entry(deg).or_insert(0) += 1;
+    }
+
+    let mut result = HashMap::new();
+    for (deg, sum) in &degree_sum {
+        let count = degree_count[deg];
+        result.insert(*deg, sum / count as f64);
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Rich club coefficient
+// ---------------------------------------------------------------------------
+
+/// Rich club coefficient for each degree k.
+///
+/// phi(k) = 2 * E_k / (N_k * (N_k - 1))
+/// where E_k is edges among nodes with degree > k, N_k is number of such nodes.
+#[must_use]
+pub fn rich_club_coefficient(graph: &Graph) -> std::collections::HashMap<usize, f64> {
+    use std::collections::HashMap;
+
+    let nodes = graph.nodes_ordered();
+    let mut degrees: Vec<(usize, &str)> = nodes
+        .iter()
+        .map(|&n| (graph.neighbors(n).unwrap_or_default().len(), n))
+        .collect();
+    degrees.sort_by(|a, b| b.0.cmp(&a.0)); // Sort by degree descending
+
+    let max_deg = degrees.first().map(|d| d.0).unwrap_or(0);
+    let mut result = HashMap::new();
+
+    for k in 0..max_deg {
+        // Nodes with degree > k
+        let rich_nodes: std::collections::HashSet<&str> = degrees
+            .iter()
+            .filter(|(d, _)| *d > k)
+            .map(|(_, n)| *n)
+            .collect();
+        let n_k = rich_nodes.len();
+        if n_k < 2 {
+            continue;
+        }
+        // Count edges among rich nodes
+        let mut e_k = 0usize;
+        for edge in graph.edges_ordered() {
+            if rich_nodes.contains(edge.left.as_str())
+                && rich_nodes.contains(edge.right.as_str())
+            {
+                e_k += 1;
+            }
+        }
+        let phi = (2.0 * e_k as f64) / (n_k * (n_k - 1)) as f64;
+        result.insert(k, phi);
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// S-metric
+// ---------------------------------------------------------------------------
+
+/// S-metric: sum of (deg(u) * deg(v)) for all edges (u, v).
+///
+/// High S-metric indicates a hub-and-spoke topology.
+#[must_use]
+pub fn s_metric(graph: &Graph) -> f64 {
+    let mut total = 0.0;
+    for edge in graph.edges_ordered() {
+        let du = graph.neighbors(&edge.left).unwrap_or_default().len() as f64;
+        let dv = graph.neighbors(&edge.right).unwrap_or_default().len() as f64;
+        total += du * dv;
+    }
+    total
+}
+
+// ---------------------------------------------------------------------------
+// Wiener index
+// ---------------------------------------------------------------------------
+
+/// Wiener index: sum of all pairwise shortest path distances.
+///
+/// Returns `None` if the graph is disconnected.
+#[must_use]
+pub fn wiener_index(graph: &Graph) -> Option<f64> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 {
+        return Some(0.0);
+    }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut total = 0.0;
+    for s in 0..n {
+        // BFS from node s
+        let mut dist = vec![usize::MAX; n];
+        dist[s] = 0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+        let mut reached = 0usize;
+
+        while let Some(v) = queue.pop_front() {
+            reached += 1;
+            if let Some(nbrs) = graph.neighbors(nodes[v]) {
+                for nb in nbrs {
+                    let ni = idx[nb];
+                    if dist[ni] == usize::MAX {
+                        dist[ni] = dist[v] + 1;
+                        queue.push_back(ni);
+                    }
+                }
+            }
+        }
+
+        if reached < n {
+            return None; // Disconnected
+        }
+
+        // Only count s < t to avoid double counting
+        for t in (s + 1)..n {
+            total += dist[t] as f64;
+        }
+    }
+
+    Some(total)
+}
+
+// ---------------------------------------------------------------------------
+// Dispersion (structural holes / tie strength)
+// ---------------------------------------------------------------------------
+
+/// Dispersion between node u and its neighbors.
+///
+/// High dispersion means u's mutual contacts with v are not well connected.
+#[must_use]
+pub fn dispersion(
+    graph: &Graph,
+    u: &str,
+    v: &str,
+) -> f64 {
+    let u_nbrs: std::collections::HashSet<&str> = graph
+        .neighbors(u)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let v_nbrs: std::collections::HashSet<&str> = graph
+        .neighbors(v)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    // Mutual neighbors (excluding u and v themselves)
+    let mut mutual: Vec<&str> = u_nbrs
+        .intersection(&v_nbrs)
+        .copied()
+        .filter(|&n| n != u && n != v)
+        .collect();
+    mutual.sort();
+
+    if mutual.is_empty() {
+        return 0.0;
+    }
+
+    // Count pairs of mutual neighbors that are NOT connected and
+    // do NOT share a neighbor (other than u, v)
+    let mut disp = 0.0;
+    for i in 0..mutual.len() {
+        for j in (i + 1)..mutual.len() {
+            let s = mutual[i];
+            let t = mutual[j];
+            if graph.has_edge(s, t) {
+                continue;
+            }
+            // Check if s and t share a neighbor in mutual set
+            let s_nbrs: std::collections::HashSet<&str> = graph
+                .neighbors(s)
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let has_common = mutual.iter().any(|&m| m != s && m != t && s_nbrs.contains(m) && graph.has_edge(m, t));
+            if !has_common {
+                disp += 1.0;
+            }
+        }
+    }
+
+    disp
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

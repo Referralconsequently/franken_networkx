@@ -1765,50 +1765,12 @@ def random_tree(n, seed=None):
 
 
 def constraint(G, nodes=None, weight=None):
-    """Return Burt's constraint for nodes in *G*.
-
-    Constraint measures how much a node's connections are to interconnected
-    alters (low constraint = structural hole position).
-
-    Parameters
-    ----------
-    G : Graph
-    nodes : iterable, optional
-    weight : str or None, optional
-
-    Returns
-    -------
-    dict
-        ``{node: constraint_value}``
-    """
-    if nodes is None:
-        nodes = list(G.nodes())
-
-    result = {}
-    for v in nodes:
-        v_nbrs = set(G.neighbors(v))
-        if not v_nbrs:
-            result[v] = 0.0
-            continue
-
-        total = 0.0
-        for w in v_nbrs:
-            # Direct proportion of v's network invested in w
-            p_vw = 1.0 / len(v_nbrs)
-            # Indirect constraint via mutual contacts
-            indirect = 0.0
-            for q in v_nbrs:
-                if q == w:
-                    continue
-                q_nbrs = set(G.neighbors(q))
-                if w in q_nbrs:
-                    p_vq = 1.0 / len(v_nbrs)
-                    q_all = set(G.neighbors(q))
-                    p_qw = 1.0 / len(q_all) if q_all else 0.0
-                    indirect += p_vq * p_qw
-            total += (p_vw + indirect) ** 2
-        result[v] = total
-
+    """Return Burt's constraint for nodes in *G*."""
+    from franken_networkx._fnx import constraint_rust as _rust_constraint
+    result = _rust_constraint(G)
+    if nodes is not None:
+        node_set = set(nodes)
+        return {k: v for k, v in result.items() if k in node_set}
     return result
 
 
@@ -1832,20 +1794,11 @@ def effective_size(G, nodes=None, weight=None):
     if nodes is None:
         nodes = list(G.nodes())
 
-    result = {}
-    for v in nodes:
-        v_nbrs = set(G.neighbors(v))
-        n = len(v_nbrs)
-        if n == 0:
-            result[v] = 0.0
-            continue
-        # Count ties among alters (excluding ego)
-        redundancy = 0.0
-        for u in v_nbrs:
-            u_nbrs = set(G.neighbors(u))
-            ties_to_alters = len(u_nbrs & v_nbrs)
-            redundancy += ties_to_alters / n if n > 0 else 0
-        result[v] = n - redundancy
+    from franken_networkx._fnx import effective_size_rust as _rust_eff_size
+    result = _rust_eff_size(G)
+    if nodes is not None:
+        node_set = set(nodes)
+        return {k: v for k, v in result.items() if k in node_set}
     return result
 
 
@@ -2659,70 +2612,14 @@ def minimum_st_node_cut(G, s, t):
 
 
 def voronoi_cells(G, center_nodes, weight="weight"):
-    """Return Voronoi cells around the given centers.
-
-    Each node is assigned to its nearest center. Uses Dijkstra from each
-    center node to determine assignment. Unreachable nodes are placed in a
-    cell keyed by ``"unreachable"``.
-
-    Parameters
-    ----------
-    G : Graph
-    center_nodes : iterable
-        Nodes used as Voronoi centers.
-    weight : str, optional
-        Edge attribute to use as weight (default ``"weight"``).
-
-    Returns
-    -------
-    dict
-        ``{center: set_of_nodes}`` mapping.
-    """
-    import heapq
-
+    """Return Voronoi cells around the given centers (Rust implementation)."""
+    from franken_networkx._fnx import voronoi_cells_rust as _rust_voronoi
     center_nodes = list(center_nodes)
     if not center_nodes:
         raise NetworkXError("center_nodes must not be empty")
-    for c in center_nodes:
-        if c not in G:
-            raise NodeNotFound(f"Node {c} is not in G")
-
-    # Multi-source Dijkstra: find nearest center for every node
-    nearest = {}   # node -> center
-    dist = {}      # node -> distance to nearest center
-    pq = []        # (distance, tie-break counter, node, center)
-    counter = 0
-    for c in center_nodes:
-        dist[c] = 0
-        nearest[c] = c
-        heapq.heappush(pq, (0, counter, c, c))
-        counter += 1
-
-    while pq:
-        d, _, u, center = heapq.heappop(pq)
-        if d > dist.get(u, float("inf")):
-            continue
-        for v in G.neighbors(u):
-            # Determine edge weight
-            edge_data = G.edges[u, v]
-            w = edge_data.get(weight, 1) if weight is not None else 1
-            new_dist = d + w
-            if new_dist < dist.get(v, float("inf")):
-                dist[v] = new_dist
-                nearest[v] = center
-                heapq.heappush(pq, (new_dist, counter, v, center))
-                counter += 1
-
-    cells = {c: set() for c in center_nodes}
-    unreachable = set()
-    for n in G.nodes():
-        if n in nearest:
-            cells[nearest[n]].add(n)
-        else:
-            unreachable.add(n)
-    if unreachable:
-        cells["unreachable"] = unreachable
-    return cells
+    result = _rust_voronoi(G, center_nodes)
+    # Convert lists to sets for NX compatibility
+    return {k: set(v) for k, v in result.items()}
 
 
 def stoer_wagner(G, weight="weight", heap=None):
@@ -4798,46 +4695,9 @@ def _path_avoiding(G, source, target, avoid):
 
 
 def is_d_separator(G, x, y, z):
-    """Check if node set *z* d-separates *x* from *y* in a DAG.
-
-    Parameters
-    ----------
-    G : DiGraph (DAG)
-    x, y : set of nodes
-    z : set of nodes (potential separator)
-
-    Returns
-    -------
-    bool
-    """
-    x, y, z = set(x), set(y), set(z)
-    # Build ancestral graph
-    relevant = x | y | z
-    for node in list(relevant):
-        relevant.update(ancestors(G, node))
-    # Moralize: connect co-parents
-    H = Graph()
-    for node in relevant:
-        H.add_node(node)
-    for node in relevant:
-        if hasattr(G, 'predecessors'):
-            preds = [p for p in G.predecessors(node) if p in relevant]
-            for i in range(len(preds)):
-                for j in range(i + 1, len(preds)):
-                    H.add_edge(preds[i], preds[j])
-    # Add undirected edges
-    for u, v in G.edges():
-        if u in relevant and v in relevant:
-            H.add_edge(u, v)
-    # Remove z nodes and check if x and y are still connected
-    for node in z:
-        if node in relevant:
-            H.remove_node(node)
-    for xn in x:
-        for yn in y:
-            if xn in H and yn in H and has_path(H, xn, yn):
-                return False
-    return True
+    """Check if node set *z* d-separates *x* from *y* in a DAG (Rust)."""
+    from franken_networkx._fnx import is_d_separator_rust as _rust_dsep
+    return _rust_dsep(G, list(x), list(y), list(z))
 
 
 def is_minimal_d_separator(G, x, y, z):

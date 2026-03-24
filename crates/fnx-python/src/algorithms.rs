@@ -8181,6 +8181,135 @@ pub fn chain_decomposition(
         .collect())
 }
 
+// ---------------------------------------------------------------------------
+// All topological sorts
+// ---------------------------------------------------------------------------
+
+/// Return all topological orderings of a directed acyclic graph.
+#[pyfunction]
+pub fn all_topological_sorts_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Vec<PyObject>>> {
+    let gr = extract_graph(g)?;
+    let dg = gr
+        .digraph()
+        .ok_or_else(|| crate::NetworkXError::new_err("all_topological_sorts requires a DiGraph"))?;
+    let result = py.allow_threads(|| fnx_algorithms::all_topological_sorts(dg));
+    Ok(result
+        .into_iter()
+        .map(|order| order.iter().map(|n| gr.py_node_key(py, n)).collect())
+        .collect())
+}
+
+// ---------------------------------------------------------------------------
+// Constraint (structural holes)
+// ---------------------------------------------------------------------------
+
+/// Return Burt's constraint for each node.
+#[pyfunction]
+pub fn constraint_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::constraint(inner));
+    let dict = PyDict::new(py);
+    for (node, val) in &result {
+        dict.set_item(gr.py_node_key(py, node), val)?;
+    }
+    Ok(dict.unbind())
+}
+
+/// Return local constraint of u with respect to v.
+#[pyfunction]
+pub fn local_constraint_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    u: &Bound<'_, PyAny>,
+    v: &Bound<'_, PyAny>,
+) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let u_key = node_key_to_string(py, u)?;
+    let v_key = node_key_to_string(py, v)?;
+    Ok(py.allow_threads(|| fnx_algorithms::local_constraint(inner, &u_key, &v_key)))
+}
+
+// ---------------------------------------------------------------------------
+// Effective size
+// ---------------------------------------------------------------------------
+
+/// Return Burt's effective size for each node.
+#[pyfunction]
+pub fn effective_size_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::effective_size(inner));
+    let dict = PyDict::new(py);
+    for (node, val) in &result {
+        dict.set_item(gr.py_node_key(py, node), val)?;
+    }
+    Ok(dict.unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Voronoi cells
+// ---------------------------------------------------------------------------
+
+/// Partition nodes into Voronoi cells based on nearest center.
+#[pyfunction]
+pub fn voronoi_cells_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    center_nodes: Vec<Bound<'_, PyAny>>,
+) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let center_keys: Vec<String> = center_nodes
+        .iter()
+        .map(|n| node_key_to_string(py, n))
+        .collect::<PyResult<_>>()?;
+    let center_refs: Vec<&str> = center_keys.iter().map(String::as_str).collect();
+    let result = py.allow_threads(|| fnx_algorithms::voronoi_cells(inner, &center_refs));
+    let dict = PyDict::new(py);
+    for (center, nodes) in &result {
+        let py_nodes: Vec<PyObject> = nodes.iter().map(|n| gr.py_node_key(py, n)).collect();
+        dict.set_item(gr.py_node_key(py, center), py_nodes)?;
+    }
+    Ok(dict.unbind())
+}
+
+// ---------------------------------------------------------------------------
+// D-separation
+// ---------------------------------------------------------------------------
+
+/// Test whether x and y are d-separated by z in a DAG.
+#[pyfunction]
+pub fn is_d_separator_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    x: Vec<Bound<'_, PyAny>>,
+    y: Vec<Bound<'_, PyAny>>,
+    z: Vec<Bound<'_, PyAny>>,
+) -> PyResult<bool> {
+    let gr = extract_graph(g)?;
+    let dg = gr
+        .digraph()
+        .ok_or_else(|| crate::NetworkXError::new_err("is_d_separator requires a DiGraph"))?;
+    let x_set: std::collections::HashSet<String> = x
+        .iter()
+        .map(|n| node_key_to_string(py, n))
+        .collect::<PyResult<_>>()?;
+    let y_set: std::collections::HashSet<String> = y
+        .iter()
+        .map(|n| node_key_to_string(py, n))
+        .collect::<PyResult<_>>()?;
+    let z_set: std::collections::HashSet<String> = z
+        .iter()
+        .map(|n| node_key_to_string(py, n))
+        .collect::<PyResult<_>>()?;
+    Ok(py.allow_threads(|| fnx_algorithms::is_d_separator(dg, &x_set, &y_set, &z_set)))
+}
+
 // Registration
 // ===========================================================================
 
@@ -8553,5 +8682,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(stoer_wagner, m)?)?;
     // Chain decomposition
     m.add_function(wrap_pyfunction!(chain_decomposition, m)?)?;
+    // All topological sorts
+    m.add_function(wrap_pyfunction!(all_topological_sorts_rust, m)?)?;
+    // Structural holes
+    m.add_function(wrap_pyfunction!(constraint_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(local_constraint_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(effective_size_rust, m)?)?;
+    // Voronoi cells
+    m.add_function(wrap_pyfunction!(voronoi_cells_rust, m)?)?;
+    // D-separation
+    m.add_function(wrap_pyfunction!(is_d_separator_rust, m)?)?;
     Ok(())
 }
