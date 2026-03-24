@@ -8115,6 +8115,72 @@ fn global_node_connectivity(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<us
 }
 
 // ===========================================================================
+// ---------------------------------------------------------------------------
+// Stoer-Wagner minimum cut
+// ---------------------------------------------------------------------------
+
+/// Return the minimum cut value and partition using the Stoer-Wagner algorithm.
+#[pyfunction]
+#[pyo3(signature = (g, weight="weight"))]
+pub fn stoer_wagner(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    weight: &str,
+) -> PyResult<(f64, (Vec<PyObject>, Vec<PyObject>))> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py
+        .allow_threads(|| fnx_algorithms::stoer_wagner(inner, weight))
+        .ok_or_else(|| {
+            crate::NetworkXError::new_err("stoer_wagner requires a connected graph with >= 2 nodes")
+        })?;
+    let part_a: Vec<PyObject> = result
+        .partition
+        .0
+        .iter()
+        .map(|n| gr.py_node_key(py, n))
+        .collect();
+    let part_b: Vec<PyObject> = result
+        .partition
+        .1
+        .iter()
+        .map(|n| gr.py_node_key(py, n))
+        .collect();
+    Ok((result.cut_value, (part_a, part_b)))
+}
+
+// ---------------------------------------------------------------------------
+// Chain decomposition
+// ---------------------------------------------------------------------------
+
+/// Return the chain decomposition of the graph.
+#[pyfunction]
+#[pyo3(signature = (g, root=None))]
+pub fn chain_decomposition(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    root: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<Vec<(PyObject, PyObject)>>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let root_key = match root {
+        Some(r) => Some(node_key_to_string(py, r)?),
+        None => None,
+    };
+    let result = py.allow_threads(|| {
+        fnx_algorithms::chain_decomposition(inner, root_key.as_deref())
+    });
+    Ok(result
+        .into_iter()
+        .map(|chain| {
+            chain
+                .into_iter()
+                .map(|(u, v)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v)))
+                .collect()
+        })
+        .collect())
+}
+
 // Registration
 // ===========================================================================
 
@@ -8483,5 +8549,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(all_pairs_dijkstra, m)?)?;
     m.add_function(wrap_pyfunction!(number_of_spanning_arborescences, m)?)?;
     m.add_function(wrap_pyfunction!(global_node_connectivity, m)?)?;
+    // Stoer-Wagner min cut
+    m.add_function(wrap_pyfunction!(stoer_wagner, m)?)?;
+    // Chain decomposition
+    m.add_function(wrap_pyfunction!(chain_decomposition, m)?)?;
     Ok(())
 }

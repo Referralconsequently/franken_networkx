@@ -590,6 +590,54 @@ class TestDelegateFixes:
             )
 
     @needs_nx
+    def test_corona_rooted_and_modular_products_delegate(self):
+        def canonical_nodes(graph):
+            return sorted(
+                ((repr(node), node_data) for node, node_data in graph.nodes(data=True)),
+                key=lambda item: item[0],
+            )
+
+        def canonical_edges(graph):
+            return sorted(
+                (
+                    tuple(sorted((repr(u), repr(v)))),
+                    edge_data,
+                )
+                for u, v, edge_data in graph.edges(data=True)
+            )
+
+        left = fnx.Graph()
+        left.add_node(0, color="red")
+        left.add_edge(0, 1, weight=2)
+
+        right = fnx.Graph()
+        right.add_node("a", label="A")
+        right.add_edge("a", "b", cost=3)
+
+        left_nx = nx.Graph()
+        left_nx.add_node(0, color="red")
+        left_nx.add_edge(0, 1, weight=2)
+
+        right_nx = nx.Graph()
+        right_nx.add_node("a", label="A")
+        right_nx.add_edge("a", "b", cost=3)
+
+        corona = fnx.corona_product(left, right)
+        corona_nx = nx.corona_product(left_nx, right_nx)
+        assert canonical_nodes(corona) == canonical_nodes(corona_nx)
+        assert canonical_edges(corona) == canonical_edges(corona_nx)
+
+        rooted = fnx.rooted_product(left, right, "a")
+        rooted_nx = nx.rooted_product(left_nx, right_nx, "a")
+        assert canonical_nodes(rooted) == canonical_nodes(rooted_nx)
+        assert canonical_edges(rooted) == canonical_edges(rooted_nx)
+
+        modular = fnx.modular_product(left, right)
+        modular_nx = nx.modular_product(left_nx, right_nx)
+        assert canonical_nodes(modular) == canonical_nodes(modular_nx)
+        assert canonical_edges(modular) == canonical_edges(modular_nx)
+
+    @needs_nx
     def test_from_nx_graph_handles_non_integer_multigraph_keys(self):
         graph_nx = nx.MultiGraph()
         graph_nx.add_edge("a", "b", key=("left", "right"), weight=7)
@@ -678,4 +726,48 @@ class TestDelegateFixes:
         )
         assert list(fnx.optimize_graph_edit_distance(fnx.path_graph(3), fnx.path_graph(3))) == list(
             nx.optimize_graph_edit_distance(nx.path_graph(3), nx.path_graph(3))
+        )
+
+    @needs_nx
+    def test_neighbors_and_describe_delegate(self, capsys):
+        graph = fnx.path_graph(3)
+        expected_graph = nx.path_graph(3)
+
+        neighbors = fnx.neighbors(graph, 1)
+        assert iter(neighbors) is neighbors
+        assert tuple(neighbors) == tuple(nx.neighbors(expected_graph, 1))
+        assert fnx.describe(graph) is None
+
+        out = capsys.readouterr().out
+        nx.describe(expected_graph)
+        expected_out = capsys.readouterr().out
+        assert out == expected_out
+
+    @needs_nx
+    def test_mixing_panther_and_resistance_helpers_delegate(self):
+        assert fnx.mixing_dict([(1, 2), (1, 2), (2, 3)], normalized=True) == nx.mixing_dict(
+            [(1, 2), (1, 2), (2, 3)],
+            normalized=True,
+        )
+
+        graph = fnx.path_graph(4)
+        expected_graph = nx.path_graph(4)
+        assert fnx.communicability_exp(graph) == nx.communicability_exp(expected_graph)
+        assert fnx.effective_graph_resistance(graph) == nx.effective_graph_resistance(expected_graph)
+        assert fnx.panther_similarity(graph, 0, k=3, seed=1) == nx.panther_similarity(
+            expected_graph,
+            0,
+            k=3,
+            seed=1,
+        )
+
+        with pytest.raises(nx.NetworkXUnfeasible):
+            fnx.panther_vector_similarity(graph, 0, k=5, seed=1)
+
+        assert fnx.panther_vector_similarity(graph, 0, D=3, k=3, seed=1) == nx.panther_vector_similarity(
+            expected_graph,
+            0,
+            D=3,
+            k=3,
+            seed=1,
         )

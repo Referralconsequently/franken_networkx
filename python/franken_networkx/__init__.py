@@ -2439,48 +2439,8 @@ def chain_decomposition(G, root=None):
     list of (u, v) tuples
         Each yielded list is a chain.
     """
-    if G.number_of_nodes() == 0:
-        return
-
-    nodes = list(G.nodes())
-    if root is None:
-        root = nodes[0]
-
-    # DFS to find back edges
-    visited = set()
-    parent = {}
-    depth = {}
-    tree_edges = []
-    back_edges = []
-
-    stack = [(root, None, 0)]
-    while stack:
-        node, par, d = stack.pop()
-        if node in visited:
-            continue
-        visited.add(node)
-        parent[node] = par
-        depth[node] = d
-        for nbr in G.neighbors(node):
-            if nbr not in visited:
-                tree_edges.append((node, nbr))
-                stack.append((nbr, node, d + 1))
-            elif nbr != par and depth.get(nbr, 0) < d:
-                back_edges.append((node, nbr))
-
-    # Each back edge starts a chain
-    for u, v in back_edges:
-        chain = []
-        current = u
-        while current != v:
-            p = parent.get(current)
-            if p is None:
-                break
-            chain.append((current, p))
-            current = p
-        chain.append((current, v) if current == v else (u, v))
-        if chain:
-            yield chain
+    from franken_networkx._fnx import chain_decomposition as _rust_chain
+    yield from _rust_chain(G, root=root)
 
 
 def bidirectional_dijkstra(G, source, target, weight='weight'):
@@ -2781,93 +2741,11 @@ def stoer_wagner(G, weight="weight", heap=None):
     -------
     cut_value : float
         Weight of the minimum cut.
-    partition : tuple of sets
-        The two sets of nodes that form the minimum cut partition.
+    partition : tuple of lists
+        The two lists of nodes that form the minimum cut partition.
     """
-    import heapq
-
-    n = G.number_of_nodes()
-    if n < 2:
-        raise NetworkXError(
-            "graph has less than two nodes; cannot compute minimum cut"
-        )
-
-    nodes = list(G.nodes())
-    # Build adjacency with weights
-    # merged[u][v] = total weight between super-nodes u and v
-    merged = {u: {} for u in nodes}
-    for u, v, d in G.edges(data=True):
-        w = d.get(weight, 1) if weight is not None else 1
-        merged[u][v] = merged[u].get(v, 0) + w
-        merged[v][u] = merged[v].get(u, 0) + w
-
-    # Track which original nodes are merged into each super-node
-    groups = {n: {n} for n in nodes}
-    active = set(nodes)
-
-    best_cut = float("inf")
-    best_partition = None
-
-    for _ in range(n - 1):
-        # Minimum cut phase: maximum adjacency ordering
-        active_list = list(active)
-        start = active_list[0]
-
-        # key[v] = total weight of edges from v to the "found" set A
-        key = {v: 0 for v in active}
-        in_A = set()
-        counter = 0
-
-        # Use a max-heap (negate weights)
-        pq = [(-key[v], counter, v) for v in active]
-        counter += 1
-        import heapq as _heapq
-        _heapq.heapify(pq)
-
-        last = None
-        second_last = None
-
-        while len(in_A) < len(active):
-            while True:
-                neg_w, _, u = _heapq.heappop(pq)
-                if u not in in_A:
-                    break
-            second_last = last
-            last = u
-            in_A.add(u)
-            for v, w in merged[u].items():
-                if v not in in_A and v in active:
-                    key[v] += w
-                    _heapq.heappush(pq, (-key[v], counter, v))
-                    counter += 1
-
-        # The cut of the phase is key[last]
-        cut_of_phase = key[last]
-        if cut_of_phase < best_cut:
-            best_cut = cut_of_phase
-            best_partition = (frozenset(groups[last]),
-                              frozenset().union(*(groups[v] for v in active if v != last)))
-
-        # Merge last into second_last
-        if second_last is None:
-            break
-        groups[second_last] |= groups[last]
-        del groups[last]
-        active.remove(last)
-
-        # Update merged adjacency
-        for v, w in merged[last].items():
-            if v == second_last or v not in active:
-                continue
-            merged[second_last][v] = merged[second_last].get(v, 0) + w
-            merged[v][second_last] = merged[v].get(second_last, 0) + w
-        # Remove last from all adjacencies
-        for v in list(merged[last]):
-            if v in merged:
-                merged[v].pop(last, None)
-        del merged[last]
-
-    return best_cut, (sorted(best_partition[0]), sorted(best_partition[1]))
+    from franken_networkx._fnx import stoer_wagner as _rust_stoer_wagner
+    return _rust_stoer_wagner(G, weight=weight or "weight")
 
 
 def dedensify(G, threshold, prefix=None, copy=True):
@@ -4993,27 +4871,12 @@ def corona_product(G, H):
     -------
     Graph
     """
-    result = Graph()
-    g_nodes = list(G.nodes())
-    h_nodes = list(H.nodes())
+    import networkx as nx
 
-    # Add G's nodes and edges
-    for n in g_nodes:
-        result.add_node(('G', n))
-    for u, v in G.edges():
-        result.add_edge(('G', u), ('G', v))
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    # For each node in G, add a copy of H connected to it
-    for g_node in g_nodes:
-        for h_node in h_nodes:
-            result.add_node((g_node, h_node))
-        for u, v in H.edges():
-            result.add_edge((g_node, u), (g_node, v))
-        # Connect g_node to all nodes in its H copy
-        for h_node in h_nodes:
-            result.add_edge(('G', g_node), (g_node, h_node))
-
-    return result
+    return _from_nx_graph(nx.corona_product(_to_nx(G), _to_nx(H)))
 
 
 def modular_product(G, H):
@@ -5023,24 +4886,12 @@ def modular_product(G, H):
     - u1-u2 is edge in G AND v1-v2 is edge in H, OR
     - u1-u2 is NOT edge in G AND v1-v2 is NOT edge in H (and u1≠u2, v1≠v2).
     """
-    result = Graph()
-    g_nodes = list(G.nodes())
-    h_nodes = list(H.nodes())
+    import networkx as nx
 
-    for u in g_nodes:
-        for v in h_nodes:
-            result.add_node((u, v))
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    for i, u1 in enumerate(g_nodes):
-        for u2 in g_nodes[i + 1:]:
-            for j, v1 in enumerate(h_nodes):
-                for v2 in h_nodes[j + 1:]:
-                    g_edge = G.has_edge(u1, u2)
-                    h_edge = H.has_edge(v1, v2)
-                    if (g_edge and h_edge) or (not g_edge and not h_edge):
-                        result.add_edge((u1, v1), (u2, v2))
-
-    return result
+    return _from_nx_graph(nx.modular_product(_to_nx(G), _to_nx(H)))
 
 
 def rooted_product(G, H, root):
@@ -5049,22 +4900,12 @@ def rooted_product(G, H, root):
     Replace each node v in G with a copy of H, connecting v's copy of
     *root* to the neighbors of v.
     """
-    result = Graph()
-    g_nodes = list(G.nodes())
-    h_nodes = list(H.nodes())
+    import networkx as nx
 
-    # Add copies of H for each node in G
-    for g_node in g_nodes:
-        for h_node in h_nodes:
-            result.add_node((g_node, h_node))
-        for u, v in H.edges():
-            result.add_edge((g_node, u), (g_node, v))
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    # Connect copies via root
-    for u, v in G.edges():
-        result.add_edge((u, root), (v, root))
-
-    return result
+    return _from_nx_graph(nx.rooted_product(_to_nx(G), _to_nx(H), root))
 
 
 def lexicographic_product(G, H):
@@ -7027,19 +6868,33 @@ def simrank_similarity(G, source=None, target=None, importance_factor=0.9, max_i
         result[u] = {nodelist[j]: float(sim[i][j]) for j in range(n)}
     return result
 
-def panther_similarity(G, source, k=5, path_length=5, c=0.5, seed=None):
-    """Panther random-walk similarity."""
-    import random as _random; from collections import Counter; rng = _random.Random(seed)
-    counts = Counter()
-    for _ in range(k * 10):
-        cur = source
-        for _ in range(path_length):
-            nbrs = list(G.neighbors(cur))
-            if not nbrs: break
-            cur = rng.choice(nbrs)
-            counts[cur] += 1
-    total = sum(counts.values()) or 1
-    return {node: counts.get(node, 0) / total for node in G.nodes()}
+def panther_similarity(
+    G,
+    source,
+    k=5,
+    path_length=5,
+    c=0.5,
+    delta=0.1,
+    eps=None,
+    weight='weight',
+    seed=None,
+):
+    """Return Panther similarity scores."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.panther_similarity(
+        _to_nx(G),
+        source,
+        k=k,
+        path_length=path_length,
+        c=c,
+        delta=delta,
+        eps=eps,
+        weight=weight,
+        seed=seed,
+    )
 
 def optimal_edit_paths(G1, G2, node_match=None, edge_match=None, node_subst_cost=None, node_del_cost=None, node_ins_cost=None, edge_subst_cost=None, edge_del_cost=None, edge_ins_cost=None, upper_bound=None):
     """Find optimal edit paths."""
@@ -7113,7 +6968,7 @@ def reverse_view(G):
 
 def neighbors(G, n):
     """Return neighbors of n (global function form)."""
-    return list(G.neighbors(n))
+    return iter(G.neighbors(n))
 
 def config():
     """Return configuration namespace (stub)."""
@@ -7123,19 +6978,17 @@ def config():
 
 def describe(G):
     """Return detailed graph description."""
-    return info(G)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.describe(_to_nx(G))
 
 def mixing_dict(xy, normalized=False):
     """Generic mixing dictionary from (x,y) iterator."""
-    result = {}
-    for x, y in xy:
-        result.setdefault(x, {}); result[x][y] = result[x].get(y, 0) + 1
-    if normalized:
-        total = sum(sum(v.values()) for v in result.values())
-        if total > 0:
-            for x in result:
-                for y in result[x]: result[x][y] /= total
-    return result
+    import networkx as nx
+
+    return nx.mixing_dict(xy, normalized=normalized)
 
 def local_constraint(G, u, v):
     """Burt's local constraint for edge (u,v)."""
@@ -7178,17 +7031,54 @@ def apply_matplotlib_colors(G, src_attr, dest_attr, map, vmin=None, vmax=None, n
 
 def communicability_exp(G):
     """Communicability via scipy.linalg.expm."""
-    return communicability(G)
+    import networkx as nx
 
-def panther_vector_similarity(G, source, k=5, path_length=5, c=0.5, seed=None):
-    """Panther similarity as vector (alias for panther_similarity)."""
-    return panther_similarity(G, source, k=k, path_length=path_length, c=c, seed=seed)
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.communicability_exp(_to_nx(G))
+
+def panther_vector_similarity(
+    G,
+    source,
+    *,
+    D=10,
+    k=5,
+    path_length=5,
+    c=0.5,
+    delta=0.1,
+    eps=None,
+    weight='weight',
+    seed=None,
+):
+    """Return Panther++ vector similarity scores."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.panther_vector_similarity(
+        _to_nx(G),
+        source,
+        D=D,
+        k=k,
+        path_length=path_length,
+        c=c,
+        delta=delta,
+        eps=eps,
+        weight=weight,
+        seed=seed,
+    )
 
 def effective_graph_resistance(G, weight=None, invert_weight=True):
     """Sum of all pairwise resistance distances."""
-    rd = resistance_distance(G, weight=weight)
-    total = sum(rd[u][v] for u in rd for v in rd[u] if u != v)
-    return total / 2.0
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.effective_graph_resistance(
+        _to_nx(G),
+        weight=weight,
+        invert_weight=invert_weight,
+    )
 
 def graph_edit_distance(G1, G2, **kwargs):
     """Return graph edit distance."""

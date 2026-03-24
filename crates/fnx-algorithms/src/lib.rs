@@ -18992,6 +18992,267 @@ pub fn is_aperiodic_digraph(digraph: &DiGraph) -> bool {
     is_aperiodic(digraph)
 }
 
+// ---------------------------------------------------------------------------
+// Stoer-Wagner minimum cut
+// ---------------------------------------------------------------------------
+
+/// Result of `stoer_wagner` minimum cut.
+#[derive(Debug, Clone)]
+pub struct StoerWagnerResult {
+    pub cut_value: f64,
+    pub partition: (Vec<String>, Vec<String>),
+}
+
+/// Compute a minimum cut using the Stoer-Wagner algorithm.
+///
+/// Returns the cut value and a partition (S, T) of the node set.
+/// The graph must be connected and undirected with non-negative edge weights.
+#[must_use]
+pub fn stoer_wagner(graph: &Graph, weight_attr: &str) -> Option<StoerWagnerResult> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 {
+        return None;
+    }
+
+    // Build adjacency with weights
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let mut w = vec![vec![0.0f64; n]; n];
+    for edge in graph.edges_ordered() {
+        let i = idx[edge.left.as_str()];
+        let j = idx[edge.right.as_str()];
+        let wt = edge
+            .attrs
+            .get(weight_attr)
+            .and_then(|v| v.as_str().parse::<f64>().ok())
+            .unwrap_or(1.0);
+        w[i][j] += wt;
+        w[j][i] += wt;
+    }
+
+    let mut best_cut = f64::MAX;
+    let mut best_partition: Option<(Vec<bool>, usize)> = None;
+    // merged[i] = which supernode i belongs to
+    let mut merged: Vec<usize> = (0..n).collect();
+    let mut active: Vec<bool> = vec![true; n];
+
+    for phase in 0..n - 1 {
+        // Maximum adjacency ordering
+        let mut key = vec![0.0f64; n];
+        let mut in_a = vec![false; n];
+        let mut order = Vec::with_capacity(n - phase);
+
+        for _ in 0..(n - phase) {
+            // Find max-key node not in A and still active
+            let mut best = None;
+            let mut best_key = -1.0;
+            for i in 0..n {
+                if active[i] && !in_a[i] && key[i] > best_key {
+                    best_key = key[i];
+                    best = Some(i);
+                }
+            }
+            // If no node found with positive key, pick any active non-A node
+            if best.is_none() {
+                for i in 0..n {
+                    if active[i] && !in_a[i] {
+                        best = Some(i);
+                        break;
+                    }
+                }
+            }
+            let v = best?;
+            in_a[v] = true;
+            order.push(v);
+            for j in 0..n {
+                if active[j] && !in_a[j] {
+                    key[j] += w[v][j];
+                }
+            }
+        }
+
+        let t = *order.last()?;
+        let s = if order.len() >= 2 {
+            order[order.len() - 2]
+        } else {
+            return None;
+        };
+
+        // Cut of the phase = key[t]
+        let cut_of_phase = key[t];
+        if cut_of_phase < best_cut {
+            best_cut = cut_of_phase;
+            // Partition: nodes merged into t vs rest
+            let mut side = vec![false; n];
+            for i in 0..n {
+                if merged[i] == merged[t] {
+                    side[i] = true;
+                }
+            }
+            best_partition = Some((side, merged[t]));
+        }
+
+        // Merge t into s
+        let mt = merged[t];
+        for i in 0..n {
+            if merged[i] == mt {
+                merged[i] = merged[s];
+            }
+        }
+        for j in 0..n {
+            w[s][j] += w[t][j];
+            w[j][s] += w[j][t];
+        }
+        active[t] = false;
+    }
+
+    let (side, _) = best_partition?;
+    let mut part_a = Vec::new();
+    let mut part_b = Vec::new();
+    for (i, node) in nodes.iter().enumerate() {
+        if side[i] {
+            part_a.push((*node).to_owned());
+        } else {
+            part_b.push((*node).to_owned());
+        }
+    }
+
+    Some(StoerWagnerResult {
+        cut_value: best_cut,
+        partition: (part_a, part_b),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Double edge swap (degree-preserving)
+// ---------------------------------------------------------------------------
+
+/// Perform a single degree-preserving double edge swap on *graph*.
+///
+/// Given two edge indices `e1_idx` and `e2_idx`, attempt the swap:
+/// `(u,v), (x,y) → (u,x), (v,y)`. Returns `true` if the swap succeeded.
+///
+/// The caller is responsible for random index selection (keeps this crate
+/// free of the `rand` dependency).
+pub fn try_double_edge_swap(
+    graph: &mut Graph,
+    e1_idx: usize,
+    e2_idx: usize,
+) -> bool {
+    let edges: Vec<(String, String)> = graph
+        .edges_ordered()
+        .iter()
+        .map(|e| (e.left.clone(), e.right.clone()))
+        .collect();
+    let m = edges.len();
+    if e1_idx >= m || e2_idx >= m || e1_idx == e2_idx {
+        return false;
+    }
+
+    let (ref u, ref v) = edges[e1_idx];
+    let (ref x, ref y) = edges[e2_idx];
+
+    // Need 4 distinct nodes
+    let mut set = std::collections::HashSet::new();
+    set.insert(u.as_str());
+    set.insert(v.as_str());
+    set.insert(x.as_str());
+    set.insert(y.as_str());
+    if set.len() < 4 {
+        return false;
+    }
+
+    // Try swap: (u,v), (x,y) → (u,x), (v,y)
+    if !graph.has_edge(u, x) && !graph.has_edge(v, y) {
+        let _ = graph.remove_edge(u, v);
+        let _ = graph.remove_edge(x, y);
+        let _ = graph.add_edge(u.clone(), x.clone());
+        let _ = graph.add_edge(v.clone(), y.clone());
+        true
+    } else {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Chain decomposition (for 2-edge-connected components)
+// ---------------------------------------------------------------------------
+
+/// Return the chain decomposition of a graph.
+///
+/// A chain is a path or cycle in the DFS tree. Every 2-edge-connected
+/// component is the union of some chains.
+#[must_use]
+pub fn chain_decomposition(graph: &Graph, root: Option<&str>) -> Vec<Vec<(String, String)>> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return Vec::new();
+    }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    // DFS to build tree edges and back edges
+    let start = root.unwrap_or(nodes[0]);
+    let start_idx = match idx.get(start) {
+        Some(&i) => i,
+        None => return Vec::new(),
+    };
+
+    let mut visited = vec![false; n];
+    let mut parent = vec![None::<usize>; n];
+    let mut depth = vec![0usize; n];
+    let mut back_edges: Vec<(usize, usize)> = Vec::new();
+    let mut dfs_stack = vec![(start_idx, false)];
+    visited[start_idx] = true;
+
+    while let Some((v, processed)) = dfs_stack.last_mut() {
+        if *processed {
+            dfs_stack.pop();
+            continue;
+        }
+        *processed = true;
+        let v_idx = *v;
+        if let Some(neighbors) = graph.neighbors(nodes[v_idx]) {
+            for nb in neighbors {
+                let nb_idx = idx[nb];
+                if !visited[nb_idx] {
+                    visited[nb_idx] = true;
+                    parent[nb_idx] = Some(v_idx);
+                    depth[nb_idx] = depth[v_idx] + 1;
+                    dfs_stack.push((nb_idx, false));
+                } else if Some(nb_idx) != parent[v_idx] && depth[nb_idx] < depth[v_idx] {
+                    back_edges.push((v_idx, nb_idx));
+                }
+            }
+        }
+    }
+
+    // Build chains from back edges
+    let mut chains = Vec::new();
+    for (v, u) in &back_edges {
+        let mut chain = Vec::new();
+        chain.push((nodes[*v].to_owned(), nodes[*u].to_owned()));
+        // Walk up from v to u via parent pointers
+        let mut current = *v;
+        while current != *u {
+            if let Some(p) = parent[current] {
+                chain.push((nodes[current].to_owned(), nodes[p].to_owned()));
+                current = p;
+            } else {
+                break;
+            }
+        }
+        if !chain.is_empty() {
+            chains.push(chain);
+        }
+    }
+
+    chains
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
