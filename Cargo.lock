@@ -521,6 +521,7 @@ version = "0.1.0"
 dependencies = [
  "fnx-classes",
  "fnx-runtime",
+ "mt19937",
  "proptest",
  "rand 0.10.0",
 ]
@@ -961,6 +962,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "mt19937"
+version = "3.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25b4ab1a6f4b7820876af86b84adf545d53a52f59c5374856225aad9562d903e"
+dependencies = [
+ "rand_core 0.10.0",
 ]
 
 [[package]]

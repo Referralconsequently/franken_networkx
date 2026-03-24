@@ -3,6 +3,7 @@
 //! Wraps `fnx_generators::GraphGenerator` methods as module-level functions.
 //! Node labels are Python integers (0, 1, 2, ...) matching NetworkX convention.
 
+use crate::digraph::{PyDiGraph, PyMultiDiGraph};
 use crate::{PyGraph, unwrap_infallible};
 use fnx_generators::GraphGenerator;
 use pyo3::prelude::*;
@@ -40,6 +41,76 @@ fn report_to_pygraph(py: Python<'_>, graph: fnx_classes::Graph) -> PyResult<PyGr
         pg.edge_py_attrs
             .entry(ek)
             .or_insert_with(|| PyDict::new(py).unbind());
+    }
+
+    Ok(pg)
+}
+
+fn report_to_pydigraph(
+    py: Python<'_>,
+    graph: fnx_classes::digraph::DiGraph,
+) -> PyResult<PyDiGraph> {
+    let mut pg = PyDiGraph {
+        inner: graph,
+        node_key_map: HashMap::new(),
+        node_py_attrs: HashMap::new(),
+        edge_py_attrs: HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+
+    for canonical in pg.inner.nodes_ordered() {
+        if let Ok(i) = canonical.parse::<i64>() {
+            pg.node_key_map.insert(
+                canonical.to_owned(),
+                unwrap_infallible(i.into_pyobject(py)).into_any().unbind(),
+            );
+        }
+        pg.node_py_attrs
+            .insert(canonical.to_owned(), PyDict::new(py).unbind());
+    }
+
+    for source in pg.inner.nodes_ordered() {
+        for target in pg.inner.successors(source).unwrap_or_default() {
+            pg.edge_py_attrs
+                .entry((source.to_owned(), target.to_owned()))
+                .or_insert_with(|| PyDict::new(py).unbind());
+        }
+    }
+
+    Ok(pg)
+}
+
+fn report_to_pymultidigraph(
+    py: Python<'_>,
+    graph: fnx_classes::digraph::MultiDiGraph,
+) -> PyResult<PyMultiDiGraph> {
+    let mut pg = PyMultiDiGraph {
+        inner: graph,
+        node_key_map: HashMap::new(),
+        node_py_attrs: HashMap::new(),
+        edge_py_attrs: HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+
+    for canonical in pg.inner.nodes_ordered() {
+        if let Ok(i) = canonical.parse::<i64>() {
+            pg.node_key_map.insert(
+                canonical.to_owned(),
+                unwrap_infallible(i.into_pyobject(py)).into_any().unbind(),
+            );
+        }
+        pg.node_py_attrs
+            .insert(canonical.to_owned(), PyDict::new(py).unbind());
+    }
+
+    for source in pg.inner.nodes_ordered() {
+        for target in pg.inner.successors(source).unwrap_or_default() {
+            for key in pg.inner.edge_keys(source, target).unwrap_or_default() {
+                pg.edge_py_attrs
+                    .entry((source.to_owned(), target.to_owned(), key))
+                    .or_insert_with(|| PyDict::new(py).unbind());
+            }
+        }
     }
 
     Ok(pg)
@@ -284,14 +355,14 @@ pub fn gn_graph(
     n: usize,
     seed: Option<u64>,
     create_using: Option<&Bound<'_, PyAny>>,
-) -> PyResult<PyGraph> {
+) -> PyResult<Py<PyDiGraph>> {
     let _ = create_using;
     let actual_seed = seed.unwrap_or(0);
     let mut gg = GraphGenerator::strict();
     let report = gg
         .gn_graph(n, actual_seed)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e:?}")))?;
-    report_to_pygraph(py, report.graph)
+    Py::new(py, report_to_pydigraph(py, report.graph)?)
 }
 
 /// Return a growing network with redirection digraph (GNR model).
@@ -303,14 +374,14 @@ pub fn gnr_graph(
     p: f64,
     seed: Option<u64>,
     create_using: Option<&Bound<'_, PyAny>>,
-) -> PyResult<PyGraph> {
+) -> PyResult<Py<PyDiGraph>> {
     let _ = create_using;
     let actual_seed = seed.unwrap_or(0);
     let mut gg = GraphGenerator::strict();
     let report = gg
         .gnr_graph(n, p, actual_seed)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e:?}")))?;
-    report_to_pygraph(py, report.graph)
+    Py::new(py, report_to_pydigraph(py, report.graph)?)
 }
 
 /// Return a growing network with copying digraph (GNC model).
@@ -321,35 +392,37 @@ pub fn gnc_graph(
     n: usize,
     seed: Option<u64>,
     create_using: Option<&Bound<'_, PyAny>>,
-) -> PyResult<PyGraph> {
+) -> PyResult<Py<PyDiGraph>> {
     let _ = create_using;
     let actual_seed = seed.unwrap_or(0);
     let mut gg = GraphGenerator::strict();
     let report = gg
         .gnc_graph(n, actual_seed)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e:?}")))?;
-    report_to_pygraph(py, report.graph)
+    Py::new(py, report_to_pydigraph(py, report.graph)?)
 }
 
 /// Return a scale-free directed graph.
 #[pyfunction]
-#[pyo3(signature = (n, alpha=0.41, beta=0.54, gamma=0.05, seed=None, create_using=None))]
+#[pyo3(signature = (n, alpha=0.41, beta=0.54, gamma=0.05, delta_in=0.2, delta_out=0.0, seed=None, create_using=None))]
 pub fn scale_free_graph(
     py: Python<'_>,
     n: usize,
     alpha: f64,
     beta: f64,
     gamma: f64,
+    delta_in: f64,
+    delta_out: f64,
     seed: Option<u64>,
     create_using: Option<&Bound<'_, PyAny>>,
-) -> PyResult<PyGraph> {
+) -> PyResult<Py<PyMultiDiGraph>> {
     let _ = create_using;
     let actual_seed = seed.unwrap_or(0);
     let mut gg = GraphGenerator::strict();
     let report = gg
-        .scale_free_graph(n, alpha, beta, gamma, actual_seed)
+        .scale_free_graph(n, alpha, beta, gamma, delta_in, delta_out, actual_seed)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e:?}")))?;
-    report_to_pygraph(py, report.graph)
+    Py::new(py, report_to_pymultidigraph(py, report.graph)?)
 }
 
 // ---------------------------------------------------------------------------

@@ -8004,6 +8004,8 @@ def gnc_graph(n, create_using=None, seed=None):
     """Return a growing network with copying (GNC) digraph."""
     import networkx as nx
     from franken_networkx.readwrite import _from_nx_graph
+    if create_using is None:
+        return _fnx.gnc_graph(n, seed=seed, create_using=None)
     return _from_nx_graph(nx.gnc_graph(n, create_using=None, seed=seed), create_using=create_using)
 
 
@@ -8011,6 +8013,8 @@ def gnr_graph(n, p, create_using=None, seed=None):
     """Return a growing network with redirection (GNR) digraph."""
     import networkx as nx
     from franken_networkx.readwrite import _from_nx_graph
+    if create_using is None:
+        return _fnx.gnr_graph(n, p, seed=seed, create_using=None)
     return _from_nx_graph(nx.gnr_graph(n, p, create_using=None, seed=seed), create_using=create_using)
 
 
@@ -8074,6 +8078,18 @@ def scale_free_graph(
     from franken_networkx.drawing.layout import _to_nx
     from franken_networkx.readwrite import _from_nx_graph
 
+    if initial_graph is None:
+        return _fnx.scale_free_graph(
+            n,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+            delta_in=delta_in,
+            delta_out=delta_out,
+            seed=seed,
+            create_using=None,
+        )
+
     return _from_nx_graph(
         nx.scale_free_graph(
             n,
@@ -8115,6 +8131,8 @@ def gn_graph(n, kernel=None, create_using=None, seed=None):
     """Return a growing network (GN) digraph."""
     import networkx as nx
     from franken_networkx.readwrite import _from_nx_graph
+    if kernel is None and create_using is None:
+        return _fnx.gn_graph(n, seed=seed, create_using=None)
     return _from_nx_graph(nx.gn_graph(n, kernel=kernel, create_using=None, seed=seed), create_using=create_using)
 
 

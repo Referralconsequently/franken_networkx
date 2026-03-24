@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
 use fnx_classes::Graph;
+use fnx_classes::digraph::{DiGraph, MultiDiGraph};
 use fnx_runtime::{
     CompatibilityMode, DecisionAction, DecisionRecord, EvidenceLedger, EvidenceTerm,
     decision_theoretic_action, unix_time_ms,
 };
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use mt19937::{MT19937, gen_res53};
+use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 use std::fmt;
 
 const MAX_N_GENERIC: usize = 100_000;
@@ -16,6 +18,18 @@ const MAX_N_GNP: usize = 20_000;
 #[derive(Debug, Clone)]
 pub struct GenerationReport {
     pub graph: Graph,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiGenerationReport {
+    pub graph: DiGraph,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MultiDiGenerationReport {
+    pub graph: MultiDiGraph,
     pub warnings: Vec<String>,
 }
 
@@ -925,28 +939,49 @@ impl GraphGenerator {
     /// Generate a growing network digraph (GN model).
     ///
     /// Nodes are added one at a time. Each new node connects to an existing
-    /// node chosen uniformly at random from all existing nodes.
-    pub fn gn_graph(
-        &mut self,
-        n: usize,
-        seed: u64,
-    ) -> Result<GenerationReport, GenerationError> {
+    /// node chosen with probability proportional to its current degree.
+    pub fn gn_graph(&mut self, n: usize, seed: u64) -> Result<DiGenerationReport, GenerationError> {
         let (n, warnings) = self.validate_n("gn_graph", n, MAX_N_GENERIC)?;
-        let mut graph = Graph::new(self.mode);
+        let mut graph = DiGraph::new(self.mode);
         if n == 0 {
-            self.record("gn_graph", DecisionAction::Allow, 0.05, "gn_graph n=0".to_owned());
-            return Ok(GenerationReport { graph, warnings });
+            self.record(
+                "gn_graph",
+                DecisionAction::Allow,
+                0.05,
+                "gn_graph n=0".to_owned(),
+            );
+            return Ok(DiGenerationReport { graph, warnings });
         }
         let _ = graph.add_node("0".to_owned());
-        let mut rng = StdRng::seed_from_u64(seed);
-        for i in 1..n {
-            let target = rng.random_range(0..i);
+        if n == 1 {
+            self.record(
+                "gn_graph",
+                DecisionAction::Allow,
+                0.05,
+                "gn_graph n=1".to_owned(),
+            );
+            return Ok(DiGenerationReport { graph, warnings });
+        }
+
+        let mut rng = PythonRandom::new(seed);
+        graph
+            .add_edge("1".to_owned(), "0".to_owned())
+            .map_err(|err| GenerationError::FailClosed {
+                operation: "gn_graph",
+                reason: err.to_string(),
+            })?;
+        let mut degree_sequence = vec![1.0_f64, 1.0_f64];
+
+        for i in 2..n {
+            let target = weighted_choice_python(&degree_sequence, &mut rng);
             graph
                 .add_edge(i.to_string(), target.to_string())
                 .map_err(|err| GenerationError::FailClosed {
                     operation: "gn_graph",
                     reason: err.to_string(),
                 })?;
+            degree_sequence.push(1.0);
+            degree_sequence[target] += 1.0;
         }
 
         self.record(
@@ -955,44 +990,53 @@ impl GraphGenerator {
             0.08,
             format!("generated gn_graph: n={n}, seed={seed}"),
         );
-        Ok(GenerationReport { graph, warnings })
+        Ok(DiGenerationReport { graph, warnings })
     }
 
     /// Generate a growing network with redirection digraph (GNR model).
     ///
     /// Each new node tries to connect to a random existing node; with
-    /// probability `p`, it redirects to that node's predecessor instead.
+    /// probability `p`, it redirects to that node's successor instead.
     pub fn gnr_graph(
         &mut self,
         n: usize,
         p: f64,
         seed: u64,
-    ) -> Result<GenerationReport, GenerationError> {
+    ) -> Result<DiGenerationReport, GenerationError> {
         let (n, warnings) = self.validate_n("gnr_graph", n, MAX_N_GENERIC)?;
-        let mut graph = Graph::new(self.mode);
+        let mut graph = DiGraph::new(self.mode);
         if n == 0 {
-            self.record("gnr_graph", DecisionAction::Allow, 0.05, "gnr_graph n=0".to_owned());
-            return Ok(GenerationReport { graph, warnings });
+            self.record(
+                "gnr_graph",
+                DecisionAction::Allow,
+                0.05,
+                "gnr_graph n=0".to_owned(),
+            );
+            return Ok(DiGenerationReport { graph, warnings });
         }
         let _ = graph.add_node("0".to_owned());
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rng = PythonRandom::new(seed);
         for i in 1..n {
             let src = i.to_string();
             let _ = graph.add_node(src.clone());
-            let mut target = rng.random_range(0..i);
-            let draw: f64 = rng.random();
-            if draw < p {
-                // Redirect to predecessor of target (first in-neighbor)
+            let mut target = rng.randrange(i);
+            let draw = rng.random();
+            if draw < p && target != 0 {
+                // Redirect to the target's successor, matching NetworkX.
                 let target_name = target.to_string();
-                if let Some(predecessors) = graph.neighbors(&target_name) {
-                    if let Some(pred) = predecessors.first() {
-                        if let Ok(pred_idx) = pred.parse::<usize>() {
-                            target = pred_idx;
-                        }
-                    }
+                if let Some(successors) = graph.successors(&target_name)
+                    && let Some(succ) = successors.first()
+                    && let Ok(pred_idx) = succ.parse::<usize>()
+                {
+                    target = pred_idx;
                 }
             }
-            let _ = graph.add_edge(src, target.to_string());
+            graph
+                .add_edge(src, target.to_string())
+                .map_err(|err| GenerationError::FailClosed {
+                    operation: "gnr_graph",
+                    reason: err.to_string(),
+                })?;
         }
 
         self.record(
@@ -1001,41 +1045,56 @@ impl GraphGenerator {
             0.08,
             format!("generated gnr_graph: n={n}, p={p}, seed={seed}"),
         );
-        Ok(GenerationReport { graph, warnings })
+        Ok(DiGenerationReport { graph, warnings })
     }
 
     /// Generate a growing network with copying digraph (GNC model).
     ///
-    /// Each new node connects to a random existing node AND to all of
-    /// that node's predecessors.
+    /// Each new node connects to a random existing node and to all of
+    /// that node's successors.
     pub fn gnc_graph(
         &mut self,
         n: usize,
         seed: u64,
-    ) -> Result<GenerationReport, GenerationError> {
+    ) -> Result<DiGenerationReport, GenerationError> {
         let (n, warnings) = self.validate_n("gnc_graph", n, MAX_N_GENERIC)?;
-        let mut graph = Graph::new(self.mode);
+        let mut graph = DiGraph::new(self.mode);
         if n == 0 {
-            self.record("gnc_graph", DecisionAction::Allow, 0.05, "gnc_graph n=0".to_owned());
-            return Ok(GenerationReport { graph, warnings });
+            self.record(
+                "gnc_graph",
+                DecisionAction::Allow,
+                0.05,
+                "gnc_graph n=0".to_owned(),
+            );
+            return Ok(DiGenerationReport { graph, warnings });
         }
         let _ = graph.add_node("0".to_owned());
-        let mut rng = StdRng::seed_from_u64(seed);
+        let mut rng = PythonRandom::new(seed);
         for i in 1..n {
             let src = i.to_string();
             let _ = graph.add_node(src.clone());
-            let target = rng.random_range(0..i);
+            let target = rng.randrange(i);
             let target_name = target.to_string();
-            let _ = graph.add_edge(src.clone(), target_name.clone());
-            // Copy: connect to all predecessors of target
-            if let Some(preds) = graph.neighbors(&target_name) {
-                let preds_owned: Vec<String> = preds.into_iter().map(|s| s.to_owned()).collect();
-                for pred in preds_owned {
-                    if pred != src {
-                        let _ = graph.add_edge(src.clone(), pred);
-                    }
-                }
+            let successors = graph
+                .successors(&target_name)
+                .unwrap_or_default()
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<String>>();
+            for succ in successors {
+                graph
+                    .add_edge(src.clone(), succ)
+                    .map_err(|err| GenerationError::FailClosed {
+                        operation: "gnc_graph",
+                        reason: err.to_string(),
+                    })?;
             }
+            graph
+                .add_edge(src, target_name)
+                .map_err(|err| GenerationError::FailClosed {
+                    operation: "gnc_graph",
+                    reason: err.to_string(),
+                })?;
         }
 
         self.record(
@@ -1044,7 +1103,7 @@ impl GraphGenerator {
             0.08,
             format!("generated gnc_graph: n={n}, seed={seed}"),
         );
-        Ok(GenerationReport { graph, warnings })
+        Ok(DiGenerationReport { graph, warnings })
     }
 
     /// Generate a scale-free directed graph using Bollobás's model.
@@ -1052,15 +1111,49 @@ impl GraphGenerator {
     /// At each step, add a new node→existing (prob α), existing→new (prob β),
     /// or existing→existing (prob γ). Target selection uses preferential
     /// attachment via in-degree. α + β + γ must equal 1.
+    #[allow(clippy::too_many_arguments)]
     pub fn scale_free_graph(
         &mut self,
         n: usize,
         alpha: f64,
         beta: f64,
         gamma: f64,
+        delta_in: f64,
+        delta_out: f64,
         seed: u64,
-    ) -> Result<GenerationReport, GenerationError> {
+    ) -> Result<MultiDiGenerationReport, GenerationError> {
         let (n, warnings) = self.validate_n("scale_free_graph", n, MAX_N_GNP)?;
+        if alpha <= 0.0 {
+            return Err(GenerationError::FailClosed {
+                operation: "scale_free_graph",
+                reason: "alpha must be > 0".to_owned(),
+            });
+        }
+        if beta <= 0.0 {
+            return Err(GenerationError::FailClosed {
+                operation: "scale_free_graph",
+                reason: "beta must be > 0".to_owned(),
+            });
+        }
+        if gamma <= 0.0 {
+            return Err(GenerationError::FailClosed {
+                operation: "scale_free_graph",
+                reason: "gamma must be > 0".to_owned(),
+            });
+        }
+        if delta_in < 0.0 {
+            return Err(GenerationError::FailClosed {
+                operation: "scale_free_graph",
+                reason: "delta_in must be >= 0".to_owned(),
+            });
+        }
+        if delta_out < 0.0 {
+            return Err(GenerationError::FailClosed {
+                operation: "scale_free_graph",
+                reason: "delta_out must be >= 0".to_owned(),
+            });
+        }
+
         let sum = alpha + beta + gamma;
         if (sum - 1.0).abs() > 1e-6 {
             return Err(GenerationError::FailClosed {
@@ -1068,69 +1161,76 @@ impl GraphGenerator {
                 reason: format!("alpha + beta + gamma must = 1.0, got {sum}"),
             });
         }
-        if n < 3 {
-            return Err(GenerationError::FailClosed {
+
+        let mut graph = MultiDiGraph::new(self.mode);
+        graph
+            .add_edge_with_attrs("0".to_owned(), "1".to_owned(), fnx_classes::AttrMap::new())
+            .map_err(|err| GenerationError::FailClosed {
                 operation: "scale_free_graph",
-                reason: "n must be >= 3".to_owned(),
-            });
-        }
+                reason: err.to_string(),
+            })?;
+        graph
+            .add_edge_with_attrs("1".to_owned(), "2".to_owned(), fnx_classes::AttrMap::new())
+            .map_err(|err| GenerationError::FailClosed {
+                operation: "scale_free_graph",
+                reason: err.to_string(),
+            })?;
+        graph
+            .add_edge_with_attrs("2".to_owned(), "0".to_owned(), fnx_classes::AttrMap::new())
+            .map_err(|err| GenerationError::FailClosed {
+                operation: "scale_free_graph",
+                reason: err.to_string(),
+            })?;
 
-        let mut graph = Graph::new(self.mode);
-        // Initial triangle: 0→1, 2→0
-        let _ = graph.add_node("0".to_owned());
-        let _ = graph.add_node("1".to_owned());
-        let _ = graph.add_node("2".to_owned());
-        let _ = graph.add_edge("0".to_owned(), "1".to_owned());
-        let _ = graph.add_edge("2".to_owned(), "0".to_owned());
+        let mut rng = PythonRandom::new(seed);
+        let mut out_state = vec![0usize, 1, 2];
+        let mut in_state = vec![0usize, 1, 2];
+        let mut node_list = vec![0usize, 1, 2];
+        let mut cursor = 3usize;
 
-        let mut rng = StdRng::seed_from_u64(seed);
-        // Track in-degree + out-degree for preferential attachment
-        let mut in_deg: Vec<usize> = vec![1, 1, 0]; // in-degree of each node
-        let mut out_deg: Vec<usize> = vec![1, 0, 1]; // out-degree of each node
-        let mut node_count = 3usize;
-
-        while node_count < n {
-            let r: f64 = rng.random();
-            if r < alpha {
-                // New node → existing (preferential by in-degree)
-                let target = weighted_choice(&in_deg, &mut rng);
-                let src = node_count;
-                let _ = graph.add_edge(src.to_string(), target.to_string());
-                in_deg[target] += 1;
-                in_deg.push(0);
-                out_deg.push(1);
-                node_count += 1;
+        while graph.node_count() < n.max(3) {
+            let r = rng.random();
+            let (source, target) = if r < alpha {
+                let source = cursor;
+                cursor = cursor.saturating_add(1);
+                node_list.push(source);
+                let target = choose_scale_free_node(&in_state, &node_list, delta_in, &mut rng);
+                (source, target)
             } else if r < alpha + beta {
-                // Existing → existing (src by out-degree, target by in-degree)
-                if node_count < 2 {
-                    continue;
-                }
-                let src = weighted_choice(&out_deg, &mut rng);
-                let target = weighted_choice(&in_deg, &mut rng);
-                if src != target {
-                    let _ = graph.add_edge(src.to_string(), target.to_string());
-                    out_deg[src] += 1;
-                    in_deg[target] += 1;
-                }
+                let source = choose_scale_free_node(&out_state, &node_list, delta_out, &mut rng);
+                let target = choose_scale_free_node(&in_state, &node_list, delta_in, &mut rng);
+                (source, target)
             } else {
-                // Existing → new (preferential by out-degree)
-                let src = weighted_choice(&out_deg, &mut rng);
-                let target = node_count;
-                let _ = graph.add_edge(src.to_string(), target.to_string());
-                out_deg[src] += 1;
-                in_deg.push(1);
-                out_deg.push(0);
-                node_count += 1;
-            }
+                let source = choose_scale_free_node(&out_state, &node_list, delta_out, &mut rng);
+                let target = cursor;
+                cursor = cursor.saturating_add(1);
+                node_list.push(target);
+                (source, target)
+            };
+
+            graph
+                .add_edge_with_attrs(
+                    source.to_string(),
+                    target.to_string(),
+                    fnx_classes::AttrMap::new(),
+                )
+                .map_err(|err| GenerationError::FailClosed {
+                    operation: "scale_free_graph",
+                    reason: err.to_string(),
+                })?;
+            out_state.push(source);
+            in_state.push(target);
         }
 
         self.record(
             "scale_free_graph",
             DecisionAction::Allow,
             0.08,
-            format!("generated scale_free_graph: n={n}, α={alpha}, β={beta}, γ={gamma}, seed={seed}"),
+            format!(
+                "generated scale_free_graph: n={n}, α={alpha}, β={beta}, γ={gamma}, δ_in={delta_in}, δ_out={delta_out}, seed={seed}"
+            ),
         );
-        Ok(GenerationReport { graph, warnings })
+        Ok(MultiDiGenerationReport { graph, warnings })
     }
 
     fn record(
@@ -1160,21 +1260,107 @@ impl GraphGenerator {
     }
 }
 
-/// Weighted random choice: select index with probability proportional to weights.
-/// Falls back to uniform if all weights are zero.
-fn weighted_choice(weights: &[usize], rng: &mut StdRng) -> usize {
-    let total: usize = weights.iter().sum();
-    if total == 0 {
-        return rng.random_range(0..weights.len());
-    }
-    let mut r = rng.random_range(0..total);
-    for (i, &w) in weights.iter().enumerate() {
-        if r < w {
-            return i;
+#[derive(Debug)]
+struct PythonRandom {
+    inner: MT19937,
+}
+
+impl PythonRandom {
+    fn new(seed: u64) -> Self {
+        let words = if seed <= u64::from(u32::MAX) {
+            vec![seed as u32]
+        } else {
+            let low = seed as u32;
+            let high = (seed >> 32) as u32;
+            vec![low, high]
+        };
+        Self {
+            inner: MT19937::new_with_slice_seed(&words),
         }
-        r -= w;
     }
-    weights.len() - 1
+
+    fn random(&mut self) -> f64 {
+        gen_res53(&mut self.inner)
+    }
+
+    fn randrange(&mut self, stop: usize) -> usize {
+        self.randbelow(stop)
+    }
+
+    fn choice_index(&mut self, len: usize) -> usize {
+        self.randbelow(len)
+    }
+
+    fn randbelow(&mut self, upper: usize) -> usize {
+        debug_assert!(upper > 0);
+        let bit_count = usize::BITS - upper.leading_zeros();
+        loop {
+            let candidate = self.getrandbits(bit_count);
+            if candidate < upper {
+                return candidate;
+            }
+        }
+    }
+
+    fn getrandbits(&mut self, bit_count: u32) -> usize {
+        if bit_count == 0 {
+            return 0;
+        }
+
+        let mut remaining = bit_count;
+        let mut result: usize = 0;
+        while remaining >= 32 {
+            result = (result << 32) | self.inner.next_u32() as usize;
+            remaining -= 32;
+        }
+        if remaining > 0 {
+            let word = self.inner.next_u32() >> (32 - remaining);
+            result = (result << remaining) | word as usize;
+        }
+        result
+    }
+}
+
+fn weighted_choice_python(weights: &[f64], rng: &mut PythonRandom) -> usize {
+    let total: f64 = weights.iter().sum();
+    if total <= 0.0 {
+        return rng.choice_index(weights.len());
+    }
+
+    let mut cdf = Vec::with_capacity(weights.len() + 1);
+    cdf.push(0.0);
+    let mut cumulative = 0.0;
+    for &weight in weights {
+        cumulative += weight;
+        cdf.push(cumulative / total);
+    }
+
+    let sample = rng.random();
+    let insertion = cdf.partition_point(|value| *value < sample);
+    if insertion == 0 {
+        weights.len() - 1
+    } else {
+        insertion - 1
+    }
+}
+
+fn choose_scale_free_node(
+    candidates: &[usize],
+    node_list: &[usize],
+    delta: f64,
+    rng: &mut PythonRandom,
+) -> usize {
+    if delta > 0.0 {
+        let bias_sum = node_list.len() as f64 * delta;
+        let p_delta = bias_sum / (bias_sum + candidates.len() as f64);
+        if rng.random() < p_delta {
+            return node_list[rng.choice_index(node_list.len())];
+        }
+    }
+    if candidates.is_empty() {
+        return node_list[rng.choice_index(node_list.len())];
+    }
+    candidates[rng.choice_index(candidates.len())]
 }
 
 fn graph_with_n_nodes(mode: CompatibilityMode, n: usize) -> (Graph, Vec<String>) {
@@ -1507,6 +1693,155 @@ mod tests {
         assert_eq!(report.graph.node_count(), 10);
         // Initial star(1) has 1 edge; 8 new nodes each attach 1 edge → 1 + 8 = 9 edges.
         assert_eq!(report.graph.edge_count(), 9);
+    }
+
+    #[test]
+    fn directed_growth_generators_are_directed_and_seed_reproducible() {
+        let mut gg = GraphGenerator::strict();
+
+        let gn = gg.gn_graph(6, 1).expect("gn_graph should succeed");
+        assert!(gn.graph.is_directed());
+        assert_eq!(gn.graph.node_count(), 6);
+        assert_eq!(gn.graph.edge_count(), 5);
+        let gn_again = gg.gn_graph(6, 1).expect("gn_graph replay should succeed");
+        assert_eq!(gn.graph.snapshot(), gn_again.graph.snapshot());
+
+        let gnr = gg.gnr_graph(6, 0.5, 1).expect("gnr_graph should succeed");
+        assert!(gnr.graph.is_directed());
+        assert_eq!(gnr.graph.node_count(), 6);
+        assert_eq!(gnr.graph.edge_count(), 5);
+        let gnr_again = gg
+            .gnr_graph(6, 0.5, 1)
+            .expect("gnr_graph replay should succeed");
+        assert_eq!(gnr.graph.snapshot(), gnr_again.graph.snapshot());
+
+        let gnc = gg.gnc_graph(6, 1).expect("gnc_graph should succeed");
+        assert!(gnc.graph.is_directed());
+        assert_eq!(gnc.graph.node_count(), 6);
+        assert!(gnc.graph.edge_count() >= 5);
+        let gnc_again = gg.gnc_graph(6, 1).expect("gnc_graph replay should succeed");
+        assert_eq!(gnc.graph.snapshot(), gnc_again.graph.snapshot());
+    }
+
+    #[test]
+    fn directed_growth_generators_match_networkx_seeded_examples() {
+        let mut gg = GraphGenerator::strict();
+
+        let gn = gg.gn_graph(6, 1).expect("gn_graph should succeed");
+        let gn_edges = gn
+            .graph
+            .snapshot()
+            .edges
+            .into_iter()
+            .map(|edge| (edge.left, edge.right))
+            .collect::<Vec<(String, String)>>();
+        assert_eq!(
+            gn_edges,
+            vec![
+                ("1".to_owned(), "0".to_owned()),
+                ("2".to_owned(), "0".to_owned()),
+                ("3".to_owned(), "2".to_owned()),
+                ("4".to_owned(), "2".to_owned()),
+                ("5".to_owned(), "1".to_owned()),
+            ]
+        );
+
+        let gnr = gg.gnr_graph(6, 0.5, 1).expect("gnr_graph should succeed");
+        let gnr_edges = gnr
+            .graph
+            .snapshot()
+            .edges
+            .into_iter()
+            .map(|edge| (edge.left, edge.right))
+            .collect::<Vec<(String, String)>>();
+        assert_eq!(
+            gnr_edges,
+            vec![
+                ("1".to_owned(), "0".to_owned()),
+                ("2".to_owned(), "0".to_owned()),
+                ("3".to_owned(), "1".to_owned()),
+                ("4".to_owned(), "3".to_owned()),
+                ("5".to_owned(), "0".to_owned()),
+            ]
+        );
+
+        let gnc = gg.gnc_graph(6, 1).expect("gnc_graph should succeed");
+        let gnc_edges = gnc
+            .graph
+            .snapshot()
+            .edges
+            .into_iter()
+            .map(|edge| (edge.left, edge.right))
+            .collect::<Vec<(String, String)>>();
+        assert_eq!(
+            gnc_edges,
+            vec![
+                ("1".to_owned(), "0".to_owned()),
+                ("2".to_owned(), "0".to_owned()),
+                ("3".to_owned(), "0".to_owned()),
+                ("3".to_owned(), "1".to_owned()),
+                ("4".to_owned(), "0".to_owned()),
+                ("5".to_owned(), "0".to_owned()),
+                ("5".to_owned(), "1".to_owned()),
+                ("5".to_owned(), "3".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn scale_free_graph_is_directed_multigraph_and_seed_reproducible() {
+        let mut gg = GraphGenerator::strict();
+        let report = gg
+            .scale_free_graph(6, 0.41, 0.54, 0.05, 0.2, 0.0, 1)
+            .expect("scale_free_graph should succeed");
+        assert!(report.graph.is_directed());
+        assert!(report.graph.is_multigraph());
+
+        let snapshot = report.graph.snapshot();
+        assert_eq!(snapshot.nodes, vec!["0", "1", "2", "3", "4", "5"]);
+        let edge_set = snapshot
+            .edges
+            .iter()
+            .map(|edge| (edge.source.clone(), edge.target.clone(), edge.key))
+            .collect::<std::collections::HashSet<(String, String, usize)>>();
+        assert!(edge_set.contains(&("0".to_owned(), "1".to_owned(), 0)));
+        assert!(edge_set.contains(&("1".to_owned(), "2".to_owned(), 0)));
+        assert!(edge_set.contains(&("2".to_owned(), "0".to_owned(), 0)));
+
+        let report_again = gg
+            .scale_free_graph(6, 0.41, 0.54, 0.05, 0.2, 0.0, 1)
+            .expect("scale_free_graph replay should succeed");
+        assert_eq!(snapshot, report_again.graph.snapshot());
+    }
+
+    #[test]
+    fn scale_free_graph_matches_networkx_seeded_example() {
+        let mut gg = GraphGenerator::strict();
+        let report = gg
+            .scale_free_graph(6, 0.41, 0.54, 0.05, 0.2, 0.0, 1)
+            .expect("scale_free_graph should succeed");
+        let edges = report
+            .graph
+            .snapshot()
+            .edges
+            .into_iter()
+            .map(|edge| (edge.source, edge.target, edge.key))
+            .collect::<Vec<(String, String, usize)>>();
+        assert_eq!(
+            edges,
+            vec![
+                ("0".to_owned(), "1".to_owned(), 0),
+                ("1".to_owned(), "2".to_owned(), 0),
+                ("1".to_owned(), "0".to_owned(), 0),
+                ("2".to_owned(), "0".to_owned(), 0),
+                ("2".to_owned(), "1".to_owned(), 0),
+                ("3".to_owned(), "0".to_owned(), 0),
+                ("3".to_owned(), "0".to_owned(), 1),
+                ("3".to_owned(), "0".to_owned(), 2),
+                ("4".to_owned(), "0".to_owned(), 0),
+                ("5".to_owned(), "0".to_owned(), 0),
+            ]
+        );
     }
 
     #[test]

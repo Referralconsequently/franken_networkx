@@ -43,3 +43,21 @@ def test_gn_graph_matches_networkx():
 
     assert graph.is_directed()
     assert sorted(_to_nx(graph).edges()) == sorted(graph_nx.edges())
+
+
+def test_native_scale_free_and_gn_graphs_do_not_fallback_to_networkx(monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("networkx fallback was used")
+
+    monkeypatch.setattr(nx, "scale_free_graph", fail)
+    monkeypatch.setattr(nx, "gn_graph", fail)
+
+    gn_graph = fnx.gn_graph(6, seed=1)
+    scale_free = fnx.scale_free_graph(6, seed=1)
+
+    assert sorted(gn_graph.edges()) == [(1, 0), (2, 0), (3, 2), (4, 2), (5, 1)]
+    assert scale_free.is_directed()
+    assert scale_free.is_multigraph()
+    assert Counter(list(scale_free.edges())) == Counter(
+        [(0, 1), (1, 2), (1, 0), (2, 0), (2, 1), (3, 0), (3, 0), (3, 0), (4, 0), (5, 0)]
+    )

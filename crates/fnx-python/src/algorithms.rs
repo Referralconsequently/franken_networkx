@@ -857,11 +857,11 @@ fn directed_branching_to_pydigraph(
         tree.inner.add_node(node);
     }
     for edge in edges {
-        let _ = tree.inner.add_edge(&edge.source, &edge.target);
+        let _ = tree.inner.add_edge(&edge.left, &edge.right);
         let attrs = if preserve_attrs {
             match dg
                 .edge_py_attrs
-                .get(&(edge.source.clone(), edge.target.clone()))
+                .get(&(edge.left.clone(), edge.right.clone()))
             {
                 Some(dict) => dict.bind(py).copy()?,
                 None => PyDict::new(py),
@@ -871,7 +871,7 @@ fn directed_branching_to_pydigraph(
         };
         attrs.set_item(attr, edge.weight)?;
         tree.edge_py_attrs
-            .insert((edge.source.clone(), edge.target.clone()), attrs.unbind());
+            .insert((edge.left.clone(), edge.right.clone()), attrs.unbind());
     }
     Ok(tree)
 }

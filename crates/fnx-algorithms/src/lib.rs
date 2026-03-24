@@ -457,8 +457,8 @@ pub struct MstEdge {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BranchingEdge {
-    pub source: String,
-    pub target: String,
+    pub left: String,
+    pub right: String,
     pub weight: f64,
 }
 
@@ -5551,22 +5551,22 @@ pub fn random_spanning_tree_from_samples(
 
 #[derive(Debug, Clone, PartialEq)]
 struct ContractedBranchingEdge {
-    source: String,
-    target: String,
+    left: String,
+    right: String,
     weight: f64,
-    repr_source: String,
-    repr_target: String,
+    repr_left: String,
+    repr_right: String,
     repr_weight: f64,
 }
 
 fn sort_branching_edges(edges: &mut [BranchingEdge]) {
-    edges.sort_by(|left, right| {
-        left.source
-            .cmp(&right.source)
-            .then_with(|| left.target.cmp(&right.target))
+    edges.sort_by(|a, b| {
+        a.left
+            .cmp(&b.left)
+            .then_with(|| a.right.cmp(&b.right))
             .then_with(|| {
-                left.weight
-                    .partial_cmp(&right.weight)
+                a.weight
+                    .partial_cmp(&b.weight)
                     .unwrap_or(std::cmp::Ordering::Equal)
             })
     });
@@ -5585,15 +5585,15 @@ fn better_contracted_edge_for_max(
         std::cmp::Ordering::Less => false,
         std::cmp::Ordering::Equal => {
             (
-                candidate.repr_source.as_str(),
-                candidate.repr_target.as_str(),
-                candidate.source.as_str(),
-                candidate.target.as_str(),
+                candidate.repr_left.as_str(),
+                candidate.repr_right.as_str(),
+                candidate.left.as_str(),
+                candidate.right.as_str(),
             ) < (
-                current.repr_source.as_str(),
-                current.repr_target.as_str(),
-                current.source.as_str(),
-                current.target.as_str(),
+                current.repr_left.as_str(),
+                current.repr_right.as_str(),
+                current.left.as_str(),
+                current.right.as_str(),
             )
         }
     }
@@ -5609,12 +5609,12 @@ fn better_branching_result_for_max(candidate: &BranchingResult, current: &Branch
     candidate
         .edges
         .iter()
-        .map(|edge| (edge.source.as_str(), edge.target.as_str()))
+        .map(|edge| (edge.left.as_str(), edge.right.as_str()))
         .collect::<Vec<_>>()
         < current
             .edges
             .iter()
-            .map(|edge| (edge.source.as_str(), edge.target.as_str()))
+            .map(|edge| (edge.left.as_str(), edge.right.as_str()))
             .collect::<Vec<_>>()
 }
 
@@ -5628,12 +5628,12 @@ fn better_branching_result_for_min(candidate: &BranchingResult, current: &Branch
     candidate
         .edges
         .iter()
-        .map(|edge| (edge.source.as_str(), edge.target.as_str()))
+        .map(|edge| (edge.left.as_str(), edge.right.as_str()))
         .collect::<Vec<_>>()
         < current
             .edges
             .iter()
-            .map(|edge| (edge.source.as_str(), edge.target.as_str()))
+            .map(|edge| (edge.left.as_str(), edge.right.as_str()))
             .collect::<Vec<_>>()
 }
 
@@ -5663,7 +5663,7 @@ fn find_selected_cycle(
             positions.insert(current.clone(), path.len());
             path.push(current.clone());
             let edge = selected_incoming.get(&current)?;
-            current = edge.source.clone();
+            current = edge.left.clone();
         }
         globally_done.extend(path);
     }
@@ -5698,7 +5698,7 @@ fn maximum_rooted_arborescence_current(
     for node in nodes.iter().filter(|node| node.as_str() != root) {
         let mut best_edge: Option<ContractedBranchingEdge> = None;
         for edge in &edges {
-            if edge.target != *node || edge.source == *node {
+            if edge.right != *node || edge.left == *node {
                 continue;
             }
             if best_edge
@@ -5734,29 +5734,29 @@ fn maximum_rooted_arborescence_current(
 
     let mut contracted_edges = Vec::<ContractedBranchingEdge>::new();
     for edge in &edges {
-        let source_in_cycle = cycle_set.contains(&edge.source);
-        let target_in_cycle = cycle_set.contains(&edge.target);
+        let source_in_cycle = cycle_set.contains(&edge.left);
+        let target_in_cycle = cycle_set.contains(&edge.right);
         match (source_in_cycle, target_in_cycle) {
             (true, true) => {}
             (false, false) => contracted_edges.push(edge.clone()),
             (false, true) => {
-                let incoming = selected_incoming.get(&edge.target)?;
+                let incoming = selected_incoming.get(&edge.right)?;
                 contracted_edges.push(ContractedBranchingEdge {
-                    source: edge.source.clone(),
-                    target: supernode.clone(),
+                    left: edge.left.clone(),
+                    right: supernode.clone(),
                     weight: edge.weight - incoming.weight,
-                    repr_source: edge.source.clone(),
-                    repr_target: edge.target.clone(),
+                    repr_left: edge.left.clone(),
+                    repr_right: edge.right.clone(),
                     repr_weight: edge.weight,
                 });
             }
             (true, false) => {
                 contracted_edges.push(ContractedBranchingEdge {
-                    source: supernode.clone(),
-                    target: edge.target.clone(),
+                    left: supernode.clone(),
+                    right: edge.right.clone(),
                     weight: edge.weight,
-                    repr_source: edge.source.clone(),
-                    repr_target: edge.target.clone(),
+                    repr_left: edge.left.clone(),
+                    repr_right: edge.right.clone(),
                     repr_weight: edge.weight,
                 });
             }
@@ -5770,17 +5770,17 @@ fn maximum_rooted_arborescence_current(
     let mut cycle_entry_target: Option<String> = None;
 
     for edge in contracted_solution {
-        if edge.source == supernode || edge.target == supernode {
+        if edge.left == supernode || edge.right == supernode {
             let restored = ContractedBranchingEdge {
-                source: edge.repr_source.clone(),
-                target: edge.repr_target.clone(),
+                left: edge.repr_left.clone(),
+                right: edge.repr_right.clone(),
                 weight: edge.repr_weight,
-                repr_source: edge.repr_source,
-                repr_target: edge.repr_target,
+                repr_left: edge.repr_left,
+                repr_right: edge.repr_right,
                 repr_weight: edge.repr_weight,
             };
-            if edge.target == supernode {
-                cycle_entry_target = Some(restored.target.clone());
+            if edge.right == supernode {
+                cycle_entry_target = Some(restored.right.clone());
             }
             expanded.push(restored);
         } else {
@@ -5816,8 +5816,8 @@ fn collect_directed_branching_edges(
             default_weight,
         );
         edges.push(BranchingEdge {
-            source: edge.left,
-            target: edge.right,
+            left: edge.left,
+            right: edge.right,
             weight,
         });
     }
@@ -5836,19 +5836,19 @@ fn maximum_rooted_arborescence(
     let contracted_edges = edges
         .iter()
         .map(|edge| ContractedBranchingEdge {
-            source: edge.source.clone(),
-            target: edge.target.clone(),
+            left: edge.left.clone(),
+            right: edge.right.clone(),
             weight: edge.weight,
-            repr_source: edge.source.clone(),
-            repr_target: edge.target.clone(),
+            repr_left: edge.left.clone(),
+            repr_right: edge.right.clone(),
             repr_weight: edge.weight,
         })
         .collect::<Vec<_>>();
     let mut restored = maximum_rooted_arborescence_current(nodes.to_vec(), contracted_edges, root)?
         .into_iter()
         .map(|edge| BranchingEdge {
-            source: edge.source,
-            target: edge.target,
+            left: edge.left,
+            right: edge.right,
             weight: edge.weight,
         })
         .collect::<Vec<_>>();
@@ -5900,8 +5900,8 @@ pub fn maximum_branching(
         collect_directed_branching_edges(digraph, weight_attr, default_weight);
     for node in &nodes {
         augmented_edges.push(BranchingEdge {
-            source: super_root.clone(),
-            target: node.clone(),
+            left: super_root.clone(),
+            right: node.clone(),
             weight: 0.0,
         });
     }
@@ -5910,7 +5910,7 @@ pub fn maximum_branching(
     let mut edges = maximum_rooted_arborescence(&augmented_nodes, &augmented_edges, &super_root)
         .unwrap_or_default()
         .into_iter()
-        .filter(|edge| edge.source != super_root)
+        .filter(|edge| edge.left != super_root)
         .collect::<Vec<_>>();
     sort_branching_edges(&mut edges);
     branching_result(
@@ -5940,8 +5940,8 @@ pub fn minimum_branching(
     let transformed_edges = collect_directed_branching_edges(digraph, weight_attr, default_weight)
         .into_iter()
         .map(|edge| BranchingEdge {
-            source: edge.source,
-            target: edge.target,
+            left: edge.left,
+            right: edge.right,
             weight: -edge.weight,
         })
         .collect::<Vec<_>>();
@@ -5953,8 +5953,8 @@ pub fn minimum_branching(
     let mut augmented_edges = transformed_edges;
     for node in &nodes {
         augmented_edges.push(BranchingEdge {
-            source: super_root.clone(),
-            target: node.clone(),
+            left: super_root.clone(),
+            right: node.clone(),
             weight: 0.0,
         });
     }
@@ -5963,10 +5963,10 @@ pub fn minimum_branching(
     let mut edges = maximum_rooted_arborescence(&augmented_nodes, &augmented_edges, &super_root)
         .unwrap_or_default()
         .into_iter()
-        .filter(|edge| edge.source != super_root)
+        .filter(|edge| edge.left != super_root)
         .map(|edge| BranchingEdge {
-            source: edge.source,
-            target: edge.target,
+            left: edge.left,
+            right: edge.right,
             weight: -edge.weight,
         })
         .collect::<Vec<_>>();
@@ -6035,8 +6035,8 @@ pub fn minimum_spanning_arborescence(
     let transformed_edges = collect_directed_branching_edges(digraph, weight_attr, default_weight)
         .into_iter()
         .map(|edge| BranchingEdge {
-            source: edge.source,
-            target: edge.target,
+            left: edge.left,
+            right: edge.right,
             weight: -edge.weight,
         })
         .collect::<Vec<_>>();
@@ -6050,8 +6050,8 @@ pub fn minimum_spanning_arborescence(
         let mut restored_edges = candidate_edges
             .into_iter()
             .map(|edge| BranchingEdge {
-                source: edge.source,
-                target: edge.target,
+                left: edge.left,
+                right: edge.right,
                 weight: -edge.weight,
             })
             .collect::<Vec<_>>();
@@ -19516,8 +19516,7 @@ pub fn is_d_separator(
 ) -> bool {
     use std::collections::{HashMap, HashSet, VecDeque};
 
-    let all_nodes: Vec<&str> = digraph.nodes_ordered();
-    let node_set: HashSet<&str> = all_nodes.iter().copied().collect();
+    let _all_nodes: Vec<&str> = digraph.nodes_ordered();
 
     // 1. Find ancestors of x ∪ y ∪ z
     let mut relevant: HashSet<String> = HashSet::new();
@@ -19606,218 +19605,16 @@ pub fn is_d_separator(
 }
 
 // ---------------------------------------------------------------------------
-// Reciprocity (directed graphs)
-// ---------------------------------------------------------------------------
-
-/// Overall reciprocity of a directed graph.
-///
-/// The fraction of edges that have a reciprocal (reverse) edge.
-/// Returns 0.0 if the graph has no edges.
-#[must_use]
-pub fn overall_reciprocity(digraph: &DiGraph) -> f64 {
-    let m = digraph.edge_count();
-    if m == 0 {
-        return 0.0;
-    }
-    let mut reciprocal_count = 0usize;
-    for edge in digraph.edges_ordered() {
-        if digraph.has_edge(&edge.target, &edge.source) {
-            reciprocal_count += 1;
-        }
-    }
-    reciprocal_count as f64 / m as f64
-}
-
-/// Per-node reciprocity: fraction of node's edges that are reciprocated.
-#[must_use]
-pub fn reciprocity(digraph: &DiGraph) -> std::collections::HashMap<String, f64> {
-    let mut result = std::collections::HashMap::new();
-    for node in digraph.nodes_ordered() {
-        let succs: Vec<&str> = digraph
-            .successors(node)
-            .map(|s| s.into_iter().collect())
-            .unwrap_or_default();
-        let out_deg = succs.len();
-        if out_deg == 0 {
-            result.insert(node.to_owned(), 0.0);
-            continue;
-        }
-        let recip = succs
-            .iter()
-            .filter(|&&s| digraph.has_edge(s, node))
-            .count();
-        result.insert(node.to_owned(), recip as f64 / out_deg as f64);
-    }
-    result
-}
-
-// ---------------------------------------------------------------------------
-// Average degree connectivity
-// ---------------------------------------------------------------------------
-
-/// Average degree connectivity: for each degree k, the average neighbor degree.
-///
-/// Returns a map from degree k to the average degree of neighbors of
-/// degree-k nodes.
-#[must_use]
-pub fn average_degree_connectivity(graph: &Graph) -> std::collections::HashMap<usize, f64> {
-    use std::collections::HashMap;
-
-    let nodes = graph.nodes_ordered();
-    let mut degree_sum: HashMap<usize, f64> = HashMap::new();
-    let mut degree_count: HashMap<usize, usize> = HashMap::new();
-
-    for &node in &nodes {
-        let nbrs: Vec<&str> = graph.neighbors(node).unwrap_or_default();
-        let deg = nbrs.len();
-        if deg == 0 {
-            continue;
-        }
-        let avg_nbr_deg: f64 = nbrs
-            .iter()
-            .map(|nb| graph.neighbors(nb).unwrap_or_default().len() as f64)
-            .sum::<f64>()
-            / deg as f64;
-        *degree_sum.entry(deg).or_insert(0.0) += avg_nbr_deg;
-        *degree_count.entry(deg).or_insert(0) += 1;
-    }
-
-    let mut result = HashMap::new();
-    for (deg, sum) in &degree_sum {
-        let count = degree_count[deg];
-        result.insert(*deg, sum / count as f64);
-    }
-    result
-}
-
-// ---------------------------------------------------------------------------
-// Rich club coefficient
-// ---------------------------------------------------------------------------
-
-/// Rich club coefficient for each degree k.
-///
-/// phi(k) = 2 * E_k / (N_k * (N_k - 1))
-/// where E_k is edges among nodes with degree > k, N_k is number of such nodes.
-#[must_use]
-pub fn rich_club_coefficient(graph: &Graph) -> std::collections::HashMap<usize, f64> {
-    use std::collections::HashMap;
-
-    let nodes = graph.nodes_ordered();
-    let mut degrees: Vec<(usize, &str)> = nodes
-        .iter()
-        .map(|&n| (graph.neighbors(n).unwrap_or_default().len(), n))
-        .collect();
-    degrees.sort_by(|a, b| b.0.cmp(&a.0)); // Sort by degree descending
-
-    let max_deg = degrees.first().map(|d| d.0).unwrap_or(0);
-    let mut result = HashMap::new();
-
-    for k in 0..max_deg {
-        // Nodes with degree > k
-        let rich_nodes: std::collections::HashSet<&str> = degrees
-            .iter()
-            .filter(|(d, _)| *d > k)
-            .map(|(_, n)| *n)
-            .collect();
-        let n_k = rich_nodes.len();
-        if n_k < 2 {
-            continue;
-        }
-        // Count edges among rich nodes
-        let mut e_k = 0usize;
-        for edge in graph.edges_ordered() {
-            if rich_nodes.contains(edge.left.as_str())
-                && rich_nodes.contains(edge.right.as_str())
-            {
-                e_k += 1;
-            }
-        }
-        let phi = (2.0 * e_k as f64) / (n_k * (n_k - 1)) as f64;
-        result.insert(k, phi);
-    }
-    result
-}
-
-// ---------------------------------------------------------------------------
-// S-metric
-// ---------------------------------------------------------------------------
-
-/// S-metric: sum of (deg(u) * deg(v)) for all edges (u, v).
-///
-/// High S-metric indicates a hub-and-spoke topology.
-#[must_use]
-pub fn s_metric(graph: &Graph) -> f64 {
-    let mut total = 0.0;
-    for edge in graph.edges_ordered() {
-        let du = graph.neighbors(&edge.left).unwrap_or_default().len() as f64;
-        let dv = graph.neighbors(&edge.right).unwrap_or_default().len() as f64;
-        total += du * dv;
-    }
-    total
-}
-
-// ---------------------------------------------------------------------------
-// Wiener index
-// ---------------------------------------------------------------------------
-
-/// Wiener index: sum of all pairwise shortest path distances.
-///
-/// Returns `None` if the graph is disconnected.
-#[must_use]
-pub fn wiener_index(graph: &Graph) -> Option<f64> {
-    let nodes = graph.nodes_ordered();
-    let n = nodes.len();
-    if n < 2 {
-        return Some(0.0);
-    }
-
-    let idx: std::collections::HashMap<&str, usize> =
-        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
-
-    let mut total = 0.0;
-    for s in 0..n {
-        // BFS from node s
-        let mut dist = vec![usize::MAX; n];
-        dist[s] = 0;
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(s);
-        let mut reached = 0usize;
-
-        while let Some(v) = queue.pop_front() {
-            reached += 1;
-            if let Some(nbrs) = graph.neighbors(nodes[v]) {
-                for nb in nbrs {
-                    let ni = idx[nb];
-                    if dist[ni] == usize::MAX {
-                        dist[ni] = dist[v] + 1;
-                        queue.push_back(ni);
-                    }
-                }
-            }
-        }
-
-        if reached < n {
-            return None; // Disconnected
-        }
-
-        // Only count s < t to avoid double counting
-        for t in (s + 1)..n {
-            total += dist[t] as f64;
-        }
-    }
-
-    Some(total)
-}
-
-// ---------------------------------------------------------------------------
 // Dispersion (structural holes / tie strength)
 // ---------------------------------------------------------------------------
 
-/// Dispersion between node u and its neighbors.
+/// Dispersion between node u and node v.
 ///
-/// High dispersion means u's mutual contacts with v are not well connected.
+/// Counts pairs of mutual neighbors that are NOT connected to each other
+/// and do NOT share a neighbor in the mutual set. High dispersion means
+/// u and v's mutual contacts are spread across different social contexts.
 #[must_use]
-pub fn dispersion(
+pub fn dispersion_pair(
     graph: &Graph,
     u: &str,
     v: &str,
@@ -19833,7 +19630,6 @@ pub fn dispersion(
         .into_iter()
         .collect();
 
-    // Mutual neighbors (excluding u and v themselves)
     let mut mutual: Vec<&str> = u_nbrs
         .intersection(&v_nbrs)
         .copied()
@@ -19845,8 +19641,6 @@ pub fn dispersion(
         return 0.0;
     }
 
-    // Count pairs of mutual neighbors that are NOT connected and
-    // do NOT share a neighbor (other than u, v)
     let mut disp = 0.0;
     for i in 0..mutual.len() {
         for j in (i + 1)..mutual.len() {
@@ -19855,13 +19649,14 @@ pub fn dispersion(
             if graph.has_edge(s, t) {
                 continue;
             }
-            // Check if s and t share a neighbor in mutual set
             let s_nbrs: std::collections::HashSet<&str> = graph
                 .neighbors(s)
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
-            let has_common = mutual.iter().any(|&m| m != s && m != t && s_nbrs.contains(m) && graph.has_edge(m, t));
+            let has_common = mutual
+                .iter()
+                .any(|&m| m != s && m != t && s_nbrs.contains(m) && graph.has_edge(m, t));
             if !has_common {
                 disp += 1.0;
             }
@@ -19869,6 +19664,159 @@ pub fn dispersion(
     }
 
     disp
+}
+
+// ---------------------------------------------------------------------------
+// Min-cost flow (successive shortest paths / Bellman-Ford)
+// ---------------------------------------------------------------------------
+
+/// Result of min-cost flow computation.
+#[derive(Debug, Clone)]
+pub struct MinCostFlowResult {
+    /// Flow on each edge: (source, target) → flow value
+    pub flow: std::collections::HashMap<(String, String), f64>,
+    /// Total cost of the flow
+    pub cost: f64,
+}
+
+/// Compute minimum cost flow using successive shortest paths.
+///
+/// Nodes have demand attributes (positive = supply, negative = demand).
+/// Edges have capacity and cost (weight) attributes.
+pub fn min_cost_flow(
+    digraph: &DiGraph,
+    demand_attr: &str,
+    capacity_attr: &str,
+    weight_attr: &str,
+) -> Option<MinCostFlowResult> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return Some(MinCostFlowResult {
+            flow: std::collections::HashMap::new(),
+            cost: 0.0,
+        });
+    }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    // Parse demands
+    let mut demand = vec![0.0f64; n];
+    for (i, &node) in nodes.iter().enumerate() {
+        if let Some(attrs) = digraph.node_attrs(node) {
+            if let Some(d) = attrs.get(demand_attr) {
+                demand[i] = d.as_str().parse::<f64>().unwrap_or(0.0);
+            }
+        }
+    }
+
+    // Build residual graph
+    // For each edge (u,v) with capacity c and cost w:
+    //   forward: capacity c, cost w
+    //   backward: capacity 0, cost -w
+    let mut cap = vec![vec![0.0f64; n]; n];
+    let mut cost_mat = vec![vec![0.0f64; n]; n];
+    let mut flow_mat = vec![vec![0.0f64; n]; n];
+
+    for edge in digraph.edges_ordered() {
+        let i = idx[edge.left.as_str()];
+        let j = idx[edge.right.as_str()];
+        let c = edge
+            .attrs
+            .get(capacity_attr)
+            .map(|v| v.as_str().parse::<f64>().unwrap_or(f64::MAX))
+            .unwrap_or(f64::MAX);
+        let w = edge
+            .attrs
+            .get(weight_attr)
+            .map(|v| v.as_str().parse::<f64>().unwrap_or(0.0))
+            .unwrap_or(0.0);
+        cap[i][j] += c;
+        cost_mat[i][j] = w;
+        cost_mat[j][i] = -w;
+    }
+
+    // Add source/sink for excess supply/demand
+    // Successive shortest path: route flow along shortest augmenting paths
+    let total_supply: f64 = demand.iter().filter(|&&d| d > 0.0).sum();
+    let total_demand: f64 = demand.iter().filter(|&&d| d < 0.0).map(|d| -d).sum();
+    if (total_supply - total_demand).abs() > 1e-10 {
+        return None; // Infeasible: supply != demand
+    }
+
+    // Route flow from supply to demand nodes using Bellman-Ford shortest paths
+    let mut remaining_supply = demand.clone();
+    let mut total_cost = 0.0;
+
+    for _ in 0..n * n {
+        // Find a supply node and demand node
+        let supply_node = (0..n).find(|&i| remaining_supply[i] > 1e-10);
+        let demand_node = (0..n).find(|&i| remaining_supply[i] < -1e-10);
+        if supply_node.is_none() || demand_node.is_none() {
+            break;
+        }
+        let s = supply_node.unwrap();
+        let t = demand_node.unwrap();
+
+        // Bellman-Ford from s in residual graph
+        let mut dist = vec![f64::MAX; n];
+        let mut prev = vec![None::<usize>; n];
+        dist[s] = 0.0;
+        for _ in 0..n {
+            for i in 0..n {
+                if dist[i] >= f64::MAX {
+                    continue;
+                }
+                for j in 0..n {
+                    let residual = cap[i][j] - flow_mat[i][j];
+                    if residual > 1e-10 && dist[i] + cost_mat[i][j] < dist[j] - 1e-10 {
+                        dist[j] = dist[i] + cost_mat[i][j];
+                        prev[j] = Some(i);
+                    }
+                }
+            }
+        }
+
+        if dist[t] >= f64::MAX {
+            return None; // No path → infeasible
+        }
+
+        // Find bottleneck flow along the path
+        let mut path_flow = remaining_supply[s].min(-remaining_supply[t]);
+        let mut node = t;
+        while let Some(p) = prev[node] {
+            let residual = cap[p][node] - flow_mat[p][node];
+            path_flow = path_flow.min(residual);
+            node = p;
+        }
+
+        // Augment flow
+        node = t;
+        while let Some(p) = prev[node] {
+            flow_mat[p][node] += path_flow;
+            flow_mat[node][p] -= path_flow;
+            total_cost += path_flow * cost_mat[p][node];
+            node = p;
+        }
+        remaining_supply[s] -= path_flow;
+        remaining_supply[t] += path_flow;
+    }
+
+    // Build result
+    let mut flow = std::collections::HashMap::new();
+    for edge in digraph.edges_ordered() {
+        let i = idx[edge.left.as_str()];
+        let j = idx[edge.right.as_str()];
+        if flow_mat[i][j] > 1e-10 {
+            flow.insert(
+                (edge.left.clone(), edge.right.clone()),
+                flow_mat[i][j],
+            );
+        }
+    }
+
+    Some(MinCostFlowResult { flow, cost: total_cost })
 }
 
 #[cfg(test)]
@@ -27237,13 +27185,13 @@ mod tests {
             result.edges,
             vec![
                 BranchingEdge {
-                    source: "a".to_owned(),
-                    target: "b".to_owned(),
+                    left: "a".to_owned(),
+                    right: "b".to_owned(),
                     weight: 5.0,
                 },
                 BranchingEdge {
-                    source: "b".to_owned(),
-                    target: "d".to_owned(),
+                    left: "b".to_owned(),
+                    right: "d".to_owned(),
                     weight: 4.0,
                 },
             ]
@@ -27265,8 +27213,8 @@ mod tests {
         assert_eq!(
             result.edges,
             vec![BranchingEdge {
-                source: "b".to_owned(),
-                target: "c".to_owned(),
+                left: "b".to_owned(),
+                right: "c".to_owned(),
                 weight: -10.0,
             }]
         );
@@ -27291,18 +27239,18 @@ mod tests {
             result.edges,
             vec![
                 BranchingEdge {
-                    source: "a".to_owned(),
-                    target: "b".to_owned(),
+                    left: "a".to_owned(),
+                    right: "b".to_owned(),
                     weight: 5.0,
                 },
                 BranchingEdge {
-                    source: "a".to_owned(),
-                    target: "d".to_owned(),
+                    left: "a".to_owned(),
+                    right: "d".to_owned(),
                     weight: 2.0,
                 },
                 BranchingEdge {
-                    source: "b".to_owned(),
-                    target: "c".to_owned(),
+                    left: "b".to_owned(),
+                    right: "c".to_owned(),
                     weight: 4.0,
                 },
             ]
@@ -27339,18 +27287,18 @@ mod tests {
             result.edges,
             vec![
                 BranchingEdge {
-                    source: "a".to_owned(),
-                    target: "b".to_owned(),
+                    left: "a".to_owned(),
+                    right: "b".to_owned(),
                     weight: 1.0,
                 },
                 BranchingEdge {
-                    source: "b".to_owned(),
-                    target: "c".to_owned(),
+                    left: "b".to_owned(),
+                    right: "c".to_owned(),
                     weight: 1.0,
                 },
                 BranchingEdge {
-                    source: "s".to_owned(),
-                    target: "a".to_owned(),
+                    left: "s".to_owned(),
+                    right: "a".to_owned(),
                     weight: 2.0,
                 },
             ]

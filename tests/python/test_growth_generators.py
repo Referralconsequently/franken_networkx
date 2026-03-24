@@ -1,5 +1,7 @@
 """Tests for growth-model and degree-model generator wrappers."""
 
+import networkx as nx
+
 import franken_networkx as fnx
 
 
@@ -45,3 +47,17 @@ def test_expected_degree_graph_returns_graph():
     graph = fnx.expected_degree_graph([1.0, 1.5, 2.0], seed=1, selfloops=False)
 
     assert graph.number_of_nodes() == 3
+
+
+def test_native_gnc_and_gnr_graphs_do_not_fallback_to_networkx(monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("networkx fallback was used")
+
+    monkeypatch.setattr(nx, "gnc_graph", fail)
+    monkeypatch.setattr(nx, "gnr_graph", fail)
+
+    gnc = fnx.gnc_graph(6, seed=1)
+    gnr = fnx.gnr_graph(6, 0.5, seed=1)
+
+    assert sorted(gnc.edges()) == [(1, 0), (2, 0), (3, 0), (3, 1), (4, 0), (5, 0), (5, 1), (5, 3)]
+    assert sorted(gnr.edges()) == [(1, 0), (2, 0), (3, 1), (4, 3), (5, 0)]
