@@ -9024,5 +9024,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(power_rust, m)?)?;
     // Square clustering
     m.add_function(wrap_pyfunction!(square_clustering_rust, m)?)?;
+    // Ego graph
+    m.add_function(wrap_pyfunction!(ego_graph_rust, m)?)?;
+    // Degree mixing
+    m.add_function(wrap_pyfunction!(degree_mixing_dict_rust, m)?)?;
+    // Connected dominating set
+    m.add_function(wrap_pyfunction!(connected_dominating_set_rust, m)?)?;
     Ok(())
 }
