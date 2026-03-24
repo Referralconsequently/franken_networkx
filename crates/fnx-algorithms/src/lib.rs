@@ -1681,7 +1681,44 @@ pub fn degree_centrality(graph: &Graph) -> DegreeCentralityResult {
 
 #[must_use]
 pub fn degree_centrality_directed(graph: &DiGraph) -> DegreeCentralityResult {
-    degree_centrality_generic(graph)
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return DegreeCentralityResult {
+            scores: Vec::new(),
+            witness: ComplexityWitness {
+                algorithm: "degree_centrality_directed".to_owned(),
+                complexity_claim: "O(|V| + |E|)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+    let denominator = if n <= 1 { 1.0 } else { (n - 1) as f64 };
+    let mut edges_scanned = 0usize;
+    let mut scores = Vec::with_capacity(n);
+    for node in &nodes {
+        let out_deg = graph.neighbor_count(node);
+        let in_deg = graph.predecessors(node).map_or(0, |p| p.len());
+        let degree = in_deg + out_deg;
+        edges_scanned += degree;
+        let score = (degree as f64) / denominator;
+        scores.push(CentralityScore {
+            node: (*node).to_owned(),
+            score,
+        });
+    }
+    DegreeCentralityResult {
+        scores,
+        witness: ComplexityWitness {
+            algorithm: "degree_centrality_directed".to_owned(),
+            complexity_claim: "O(|V| + |E|)".to_owned(),
+            nodes_touched: n,
+            edges_scanned,
+            queue_peak: 0,
+        },
+    }
 }
 
 fn degree_centrality_generic<G: GraphView>(graph: &G) -> DegreeCentralityResult {
@@ -1709,11 +1746,7 @@ fn degree_centrality_generic<G: GraphView>(graph: &G) -> DegreeCentralityResult 
         let self_loop_extra = usize::from(graph.has_edge(node, node));
         let degree = neighbor_count + self_loop_extra;
         edges_scanned += degree;
-        let score = if n == 1 && degree == 0 {
-            1.0
-        } else {
-            (degree as f64) / denominator
-        };
+        let score = (degree as f64) / denominator;
         scores.push(CentralityScore {
             node: node.to_owned(),
             score,
@@ -1779,6 +1812,10 @@ fn closeness_centrality_generic<G: GraphView>(graph: &G) -> ClosenessCentralityR
             let d = distance[v].unwrap();
             sum_dist += d;
 
+            // For directed graphs, in_neighbors_iter returns predecessors,
+            // which gives us the reverse BFS needed by NX's closeness
+            // centrality convention (sum of distances from all nodes TO s).
+            // For undirected graphs, in_neighbors_iter == neighbors_iter.
             if let Some(neighbors) = graph.in_neighbors_iter(nodes[v]) {
                 for w_name in neighbors {
                     total_edges_scanned += 1;
@@ -4130,7 +4167,9 @@ pub fn clustering_coefficient(graph: &Graph) -> ClusteringCoefficientResult {
 
     for node in &nodes {
         nodes_touched += 1;
-        let neighbors = graph.neighbors(node).unwrap_or_default();
+        let all_neighbors = graph.neighbors(node).unwrap_or_default();
+        // Exclude self-loops from clustering (NetworkX convention)
+        let neighbors: Vec<&str> = all_neighbors.into_iter().filter(|n| *n != *node).collect();
         let degree = neighbors.len();
 
         if degree < 2 {
@@ -21077,13 +21116,14 @@ mod tests {
     }
 
     #[test]
-    fn degree_centrality_singleton_is_one() {
+    fn degree_centrality_singleton_is_zero() {
         let mut graph = Graph::strict();
         let _ = graph.add_node("solo");
         let result = degree_centrality(&graph);
         assert_eq!(result.scores.len(), 1);
         assert_eq!(result.scores[0].node, "solo");
-        assert!((result.scores[0].score - 1.0).abs() <= 1e-12);
+        // NetworkX returns 0.0 for isolated singleton (degree=0, denominator=1)
+        assert!((result.scores[0].score - 0.0).abs() <= 1e-12);
     }
 
     #[test]

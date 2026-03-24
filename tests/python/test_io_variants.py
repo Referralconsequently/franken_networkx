@@ -27,6 +27,13 @@ def test_parse_and_generate_edgelist_round_trip_with_attrs():
     assert parsed["b"]["c"]["weight"] == 1.5
 
 
+def test_parse_edgelist_dict_literal_attrs_uses_safe_literal_parser():
+    parsed = fnx.parse_edgelist(["a b {'weight': 2.5, 'color': 'blue'}"], data=True)
+
+    assert parsed["a"]["b"]["weight"] == 2.5
+    assert parsed["a"]["b"]["color"] == "blue"
+
+
 def test_parse_and_generate_gml_round_trip():
     graph = fnx.Graph()
     graph.add_node("a", label="A")

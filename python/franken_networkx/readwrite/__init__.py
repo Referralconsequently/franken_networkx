@@ -1,5 +1,6 @@
 """Pure-Python graph I/O helpers layered on top of the core bindings."""
 
+import ast
 from io import BytesIO
 
 from franken_networkx.drawing.layout import _to_nx
@@ -61,7 +62,13 @@ def _from_nx_graph(graph, create_using=None):
 
     if graph.is_multigraph():
         for left, right, key, attrs in graph.edges(keys=True, data=True):
-            result.add_edge(left, right, key=key, **attrs)
+            if isinstance(key, int) and not isinstance(key, bool):
+                result.add_edge(left, right, key=key, **attrs)
+            else:
+                # Franken multigraph bindings currently only accept integer keys.
+                # Preserve the edge payload and deterministic iteration order even
+                # when NetworkX produced a richer key type.
+                result.add_edge(left, right, **attrs)
     else:
         for left, right, attrs in graph.edges(data=True):
             result.add_edge(left, right, **attrs)
@@ -118,7 +125,7 @@ def parse_edgelist(
                 head = line[:brace].strip()
                 tail = line[brace:]
                 tokens = head.split(delimiter)
-                edgedata = dict(eval(tail))  # noqa: S307
+                edgedata = dict(ast.literal_eval(tail))
             else:
                 tokens = line.strip().split(delimiter)
                 edgedata = {}

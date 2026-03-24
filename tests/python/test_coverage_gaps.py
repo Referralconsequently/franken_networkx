@@ -557,6 +557,50 @@ class TestDelegateFixes:
             frozen.add_edge(1, 2)
 
     @needs_nx
+    def test_graph_products_delegate_for_multigraph_attrs(self):
+        left = fnx.MultiGraph()
+        left.add_node(0, a1=True)
+        left.add_edge(0, 1, key=7, w=2)
+
+        right = fnx.MultiGraph()
+        right.add_node("a", a2="Spam")
+        right.add_edge("a", "b", key=3, c=4)
+
+        left_nx = nx.MultiGraph()
+        left_nx.add_node(0, a1=True)
+        left_nx.add_edge(0, 1, key=7, w=2)
+
+        right_nx = nx.MultiGraph()
+        right_nx.add_node("a", a2="Spam")
+        right_nx.add_edge("a", "b", key=3, c=4)
+
+        for name in (
+            "cartesian_product",
+            "tensor_product",
+            "strong_product",
+            "lexicographic_product",
+        ):
+            graph = getattr(fnx, name)(left, right)
+            expected = getattr(nx, name)(left_nx, right_nx)
+
+            assert graph.is_multigraph()
+            assert sorted(graph.nodes(data=True)) == sorted(expected.nodes(data=True))
+            assert sorted((u, v, data) for u, v, _, data in graph.edges(keys=True, data=True)) == sorted(
+                (u, v, data) for u, v, _, data in expected.edges(keys=True, data=True)
+            )
+
+    @needs_nx
+    def test_from_nx_graph_handles_non_integer_multigraph_keys(self):
+        graph_nx = nx.MultiGraph()
+        graph_nx.add_edge("a", "b", key=("left", "right"), weight=7)
+
+        converted = fnx.readwrite._from_nx_graph(graph_nx)
+
+        assert converted.is_multigraph()
+        assert converted.number_of_edges("a", "b") == 1
+        assert next(iter(converted["a"]["b"].values()))["weight"] == 7
+
+    @needs_nx
     def test_graph_atlas_helpers_match_networkx(self):
         atlas = fnx.graph_atlas(6)
         atlas_nx = nx.graph_atlas(6)

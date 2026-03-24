@@ -1084,23 +1084,12 @@ def cartesian_product(G, H):
     ``(v1, v2)`` is an edge in *H*, or ``v1 == v2`` and ``(u1, u2)``
     is an edge in *G*.
     """
-    result = Graph()
-    g_nodes = list(G.nodes())
-    h_nodes = list(H.nodes())
+    import networkx as nx
 
-    for u in g_nodes:
-        for v in h_nodes:
-            result.add_node((u, v))
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    for u in g_nodes:
-        for v1, v2 in H.edges():
-            result.add_edge((u, v1), (u, v2))
-
-    for v in h_nodes:
-        for u1, u2 in G.edges():
-            result.add_edge((u1, v), (u2, v))
-
-    return result
+    return _from_nx_graph(nx.cartesian_product(_to_nx(G), _to_nx(H)))
 
 
 def tensor_product(G, H):
@@ -1109,20 +1098,12 @@ def tensor_product(G, H):
     Two nodes ``(u1, v1)`` and ``(u2, v2)`` are adjacent iff
     ``(u1, u2)`` is an edge in *G* AND ``(v1, v2)`` is an edge in *H*.
     """
-    result = Graph()
-    g_nodes = list(G.nodes())
-    h_nodes = list(H.nodes())
+    import networkx as nx
 
-    for u in g_nodes:
-        for v in h_nodes:
-            result.add_node((u, v))
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    for u1, u2 in G.edges():
-        for v1, v2 in H.edges():
-            result.add_edge((u1, v1), (u2, v2))
-            result.add_edge((u1, v2), (u2, v1))
-
-    return result
+    return _from_nx_graph(nx.tensor_product(_to_nx(G), _to_nx(H)))
 
 
 def strong_product(G, H):
@@ -1130,12 +1111,12 @@ def strong_product(G, H):
 
     Union of Cartesian and tensor products.
     """
-    result = cartesian_product(G, H)
-    for u1, u2 in G.edges():
-        for v1, v2 in H.edges():
-            result.add_edge((u1, v1), (u2, v2))
-            result.add_edge((u1, v2), (u2, v1))
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.strong_product(_to_nx(G), _to_nx(H)))
 
 
 # ---------------------------------------------------------------------------
@@ -4088,7 +4069,7 @@ def attr_matrix(G, edge_attr=None, node_attr=None, normalized=False, rc_order=No
         if rc_order is not None:
             labels = list(rc_order)
         else:
-            labels = sorted(set(node_attrs.values()))
+            labels = sorted(set(node_attrs.values()), key=str)
         label_idx = {lab: i for i, lab in enumerate(labels)}
         n = len(labels)
         M = np.zeros((n, n), dtype=dtype or np.float64)
@@ -4379,7 +4360,7 @@ def max_flow_min_cost(G, s, t, capacity='capacity', weight='weight'):
         Flow dictionary.
     """
     # Get max flow value
-    max_val = maximum_flow_value(G, s, t)
+    max_val = maximum_flow_value(G, s, t, capacity=capacity)
 
     # Set up demands: source supplies max_val, sink demands max_val
     H = G.copy()
@@ -4452,25 +4433,23 @@ def flow_hierarchy(G, weight=None):
     float
         Value in [0, 1]. 1 means no edges are in cycles (DAG).
     """
-    if G.number_of_edges() == 0:
+    m = G.number_of_edges()
+    if m == 0:
         return 1.0
 
-    # Count edges in cycles
-    try:
-        cycles = simple_cycles(G)
-        cycle_edges = set()
-        for cycle in cycles:
-            for i in range(len(cycle)):
-                u = cycle[i]
-                v = cycle[(i + 1) % len(cycle)]
-                cycle_edges.add((u, v))
-            # Limit to avoid exponential blowup
-            if len(cycle_edges) >= G.number_of_edges():
-                break
-    except Exception:
-        cycle_edges = set()
+    # An edge is in a cycle iff both endpoints are in the same SCC of size > 1.
+    sccs = strongly_connected_components(G)
+    nontrivial_scc_nodes = set()
+    for scc in sccs:
+        if len(scc) > 1:
+            nontrivial_scc_nodes.update(scc)
 
-    return 1.0 - len(cycle_edges) / G.number_of_edges()
+    cycle_edge_count = sum(
+        1 for u, v in G.edges()
+        if u in nontrivial_scc_nodes and v in nontrivial_scc_nodes
+    )
+
+    return 1.0 - cycle_edge_count / m
 
 
 # ---------------------------------------------------------------------------
@@ -5094,26 +5073,12 @@ def lexicographic_product(G, H):
     (u1,v1) and (u2,v2) are adjacent iff u1-u2 is an edge in G,
     OR u1==u2 and v1-v2 is an edge in H.
     """
-    result = Graph()
-    g_nodes = list(G.nodes())
-    h_nodes = list(H.nodes())
+    import networkx as nx
 
-    for u in g_nodes:
-        for v in h_nodes:
-            result.add_node((u, v))
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    # Edges from G (connects all H-pairs)
-    for u1, u2 in G.edges():
-        for v1 in h_nodes:
-            for v2 in h_nodes:
-                result.add_edge((u1, v1), (u2, v2))
-
-    # Edges from H (within same G-node)
-    for u in g_nodes:
-        for v1, v2 in H.edges():
-            result.add_edge((u, v1), (u, v2))
-
-    return result
+    return _from_nx_graph(nx.lexicographic_product(_to_nx(G), _to_nx(H)))
 
 
 # ---------------------------------------------------------------------------
@@ -5584,7 +5549,7 @@ def edge_current_flow_betweenness_centrality(G, normalized=True, weight=None):
             for u, v in G.edges():
                 i, j = idx[u], idx[v]
                 flow = abs(p[i] - p[j])
-                key = (u, v) if u <= v else (v, u)
+                key = tuple(sorted((u, v), key=str))
                 ebc[key] = ebc.get(key, 0.0) + flow
     if normalized and n > 1:
         factor = 2.0 / (n * (n - 1))
@@ -5614,40 +5579,20 @@ def current_flow_closeness_centrality(G, weight=None, solver='full'):
 
 def betweenness_centrality_subset(G, sources, targets, normalized=False, weight=None):
     """Betweenness centrality restricted to source/target subsets."""
-    bc = {node: 0.0 for node in G.nodes()}
-    for s in sources:
-        paths_from_s = single_source_shortest_path(G, s)
-        for t in targets:
-            if t == s or t not in paths_from_s:
-                continue
-            path = paths_from_s[t]
-            for node in path[1:-1]:
-                bc[node] += 1.0
-    if normalized and G.number_of_nodes() > 2:
-        n = G.number_of_nodes()
-        factor = 1.0 / ((n - 1) * (n - 2))
-        bc = {k: v * factor for k, v in bc.items()}
-    return bc
+    import networkx as nx
+    from franken_networkx.drawing.layout import _to_nx
+    return dict(nx.betweenness_centrality_subset(
+        _to_nx(G), sources, targets, normalized=normalized, weight=weight
+    ))
 
 
 def edge_betweenness_centrality_subset(G, sources, targets, normalized=False, weight=None):
     """Edge betweenness restricted to source/target subsets."""
-    ebc = {}
-    for s in sources:
-        paths_from_s = single_source_shortest_path(G, s)
-        for t in targets:
-            if t == s or t not in paths_from_s:
-                continue
-            path = paths_from_s[t]
-            for i in range(len(path) - 1):
-                e = (path[i], path[i+1])
-                key = tuple(sorted(e)) if not G.is_directed() else e
-                ebc[key] = ebc.get(key, 0.0) + 1.0
-    if normalized and G.number_of_nodes() > 1:
-        n = G.number_of_nodes()
-        factor = 1.0 / (n * (n - 1))
-        ebc = {k: v * factor for k, v in ebc.items()}
-    return ebc
+    import networkx as nx
+    from franken_networkx.drawing.layout import _to_nx
+    return dict(nx.edge_betweenness_centrality_subset(
+        _to_nx(G), sources, targets, normalized=normalized, weight=weight
+    ))
 
 
 def edge_load_centrality(G, cutoff=None):
@@ -5676,13 +5621,11 @@ def laplacian_centrality(G, normalized=True, nodelist=None, weight='weight'):
 
 def percolation_centrality(G, attribute='percolation', states=None, weight=None):
     """Percolation centrality based on percolation states."""
-    bc = betweenness_centrality(G)
-    if states is None:
-        return bc
-    total_state = sum(states.get(n, 0) for n in G.nodes())
-    if total_state == 0:
-        return {n: 0.0 for n in G.nodes()}
-    return {n: bc.get(n, 0) * states.get(n, 0) / total_state for n in G.nodes()}
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.percolation_centrality(_to_nx(G), states=states, weight=weight)
 
 
 def information_centrality(G, weight=None, solver='full'):
@@ -5734,15 +5677,16 @@ def communicability_betweenness_centrality(G, normalized=True):
     expA = _matrix_exp(A)
     cbc = {}
     for r_idx, node in enumerate(nodelist):
+        A_mod = A.copy()
+        A_mod[r_idx, :] = 0
+        A_mod[:, r_idx] = 0
+        expA_mod = _matrix_exp(A_mod)
         total = 0.0
         for p in range(n):
             for q in range(p + 1, n):
                 if p == r_idx or q == r_idx:
                     continue
                 if expA[p, q] > 1e-15:
-                    A_mod = A.copy()
-                    A_mod[r_idx, :] = 0; A_mod[:, r_idx] = 0
-                    expA_mod = _matrix_exp(A_mod)
                     total += (expA[p, q] - expA_mod[p, q]) / expA[p, q]
         if normalized:
             total /= ((n - 1) * (n - 2) / 2)
@@ -5965,7 +5909,7 @@ def cn_soundarajan_hopcroft(G, ebunch=None, community='community'):
         for w in common:
             w_attrs = G.nodes[w] if hasattr(G.nodes, '__getitem__') else {}
             w_comm = w_attrs.get(community) if isinstance(w_attrs, dict) else None
-            if u_comm is not None and u_comm == w_comm:
+            if u_comm is not None and u_comm == w_comm and u_comm == v_comm:
                 score += 1
         yield (u, v, score)
 
@@ -5982,12 +5926,13 @@ def ra_index_soundarajan_hopcroft(G, ebunch=None, community='community'):
         u_attrs = G.nodes[u] if hasattr(G.nodes, '__getitem__') else {}
         v_attrs = G.nodes[v] if hasattr(G.nodes, '__getitem__') else {}
         u_comm = u_attrs.get(community) if isinstance(u_attrs, dict) else None
+        v_comm = v_attrs.get(community) if isinstance(v_attrs, dict) else None
         for w in common:
             w_attrs = G.nodes[w] if hasattr(G.nodes, '__getitem__') else {}
             w_comm = w_attrs.get(community) if isinstance(w_attrs, dict) else None
             deg_w = G.degree[w]
             if deg_w > 0:
-                bonus = 1.0 if (u_comm is not None and u_comm == w_comm) else 0.0
+                bonus = 1.0 if (u_comm is not None and u_comm == w_comm and u_comm == v_comm) else 0.0
                 score += (1.0 + bonus) / deg_w
         yield (u, v, score)
 
@@ -6006,10 +5951,27 @@ def node_attribute_xy(G, attribute):
 
 def node_degree_xy(G, x='out', y='in', weight=None, nodes=None):
     """Yield (degree_x, degree_y) for each edge."""
+    directed = G.is_directed()
     for u, v in G.edges():
         if nodes and (u not in nodes and v not in nodes):
             continue
-        yield (G.degree[u], G.degree[v])
+        if directed:
+            if x == 'in':
+                du = G.in_degree(u, weight=weight)
+            elif x == 'out':
+                du = G.out_degree(u, weight=weight)
+            else:
+                du = G.degree(u, weight=weight)
+            if y == 'in':
+                dv = G.in_degree(v, weight=weight)
+            elif y == 'out':
+                dv = G.out_degree(v, weight=weight)
+            else:
+                dv = G.degree(v, weight=weight)
+        else:
+            du = G.degree(u, weight=weight)
+            dv = G.degree(v, weight=weight)
+        yield (du, dv)
 
 
 def number_of_walks(G, walk_length):
@@ -6129,26 +6091,12 @@ def intersection_array(G):
 
 def eulerize(G):
     """Add minimum edges to make G Eulerian. Returns copy with added edges."""
-    H = G.copy()
-    odd_nodes = [n for n in H.nodes() if H.degree[n] % 2 != 0]
-    if not odd_nodes:
-        return H
-    # Match odd-degree nodes and add shortcut edges
-    while len(odd_nodes) >= 2:
-        u = odd_nodes.pop(0)
-        best_v, best_dist = None, float('inf')
-        for v in odd_nodes:
-            try:
-                d = shortest_path_length(G, u, v)
-                if d < best_dist:
-                    best_dist, best_v = d, v
-            except Exception:
-                pass
-        if best_v is not None:
-            odd_nodes.remove(best_v)
-            # Add direct edge (may create parallel edge if already exists)
-            H.add_edge(u, best_v)
-    return H
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.eulerize(_to_nx(G)))
 
 
 def moral_graph(G):
@@ -6187,31 +6135,20 @@ def equivalence_classes(iterable, relation):
 
 def minimum_cycle_basis(G, weight=None):
     """Find minimum weight cycle basis."""
-    return cycle_basis(G)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.minimum_cycle_basis(_to_nx(G), weight=weight)
 
 
 def chordless_cycles(G, length_bound=None):
     """Find all chordless (induced) cycles."""
-    result = []
-    # Use cycle_basis and filter to chordless
-    for cycle in cycle_basis(G):
-        if length_bound and len(cycle) > length_bound:
-            continue
-        # Check if cycle is chordless (no chord connects non-adjacent vertices)
-        cycle_set = set(cycle)
-        has_chord = False
-        for i in range(len(cycle)):
-            for j in range(i + 2, len(cycle)):
-                if j == (i + len(cycle) - 1) % len(cycle):
-                    continue
-                if G.has_edge(cycle[i], cycle[j]):
-                    has_chord = True
-                    break
-            if has_chord:
-                break
-        if not has_chord:
-            result.append(cycle)
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return list(nx.chordless_cycles(_to_nx(G), length_bound=length_bound))
 
 
 def to_undirected(G):
@@ -6487,32 +6424,20 @@ def triad_graph(triad_type_str):
 
 def weisfeiler_lehman_graph_hash(G, edge_attr=None, node_attr=None, iterations=3, digest_size=16):
     """WL graph hash for isomorphism testing."""
-    import hashlib
-    nodelist = sorted(G.nodes(), key=str)
-    labels = {n: str(G.degree[n]) for n in nodelist}
-    for _ in range(iterations):
-        new_labels = {}
-        for node in nodelist:
-            nbr_labels = sorted(labels[nb] for nb in G.neighbors(node))
-            new_labels[node] = hashlib.blake2b((labels[node]+''.join(nbr_labels)).encode(), digest_size=digest_size).hexdigest()
-        labels = new_labels
-    return hashlib.blake2b(''.join(sorted(labels.values())).encode(), digest_size=digest_size).hexdigest()
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.weisfeiler_lehman_graph_hash(_to_nx(G), edge_attr=edge_attr, node_attr=node_attr, iterations=iterations, digest_size=digest_size)
 
 
 def weisfeiler_lehman_subgraph_hashes(G, edge_attr=None, node_attr=None, iterations=3, digest_size=16):
     """Per-node WL hashes at each iteration."""
-    import hashlib
-    nodelist = sorted(G.nodes(), key=str)
-    labels = {n: str(G.degree[n]) for n in nodelist}
-    result = {n: set() for n in nodelist}
-    for _ in range(iterations):
-        new_labels = {}
-        for node in nodelist:
-            nbr_labels = sorted(labels[nb] for nb in G.neighbors(node))
-            h = hashlib.blake2b((labels[node]+''.join(nbr_labels)).encode(), digest_size=digest_size).hexdigest()
-            new_labels[node] = h; result[node].add(h)
-        labels = new_labels
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.weisfeiler_lehman_subgraph_hashes(_to_nx(G), edge_attr=edge_attr, node_attr=node_attr, iterations=iterations, digest_size=digest_size)
 
 
 def lexicographical_topological_sort(G, key=None):
@@ -6563,13 +6488,11 @@ def onion_layers(G):
 
 def k_edge_components(G, k):
     """Partition into k-edge-connected components."""
-    if k <= 1: return connected_components(G)
-    if k == 2:
-        b = set(tuple(sorted(e)) for e in bridges(G))
-        H = G.copy()
-        for u,v in b: H.remove_edge(u,v)
-        return connected_components(H)
-    return connected_components(G)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return list(nx.k_edge_components(_to_nx(G), k))
 
 
 def k_edge_subgraphs(G, k):
@@ -6713,8 +6636,8 @@ def eigenvector_centrality_numpy(G, weight='weight', max_iter=50, tol=0):
     vals, vecs = np.linalg.eig(A)
     idx = np.argmax(np.real(vals))
     ev = np.abs(np.real(vecs[:, idx]))
-    s = ev.sum()
-    if s > 0: ev /= s
+    norm = np.linalg.norm(ev)
+    if norm > 0: ev /= norm
     return {nodelist[i]: float(ev[i]) for i in range(n)}
 
 def katz_centrality_numpy(G, alpha=0.1, beta=1.0, weight='weight'):
@@ -6726,8 +6649,6 @@ def katz_centrality_numpy(G, alpha=0.1, beta=1.0, weight='weight'):
     try: M = np.linalg.inv(np.eye(n) - alpha * A)
     except np.linalg.LinAlgError: M = np.linalg.pinv(np.eye(n) - alpha * A)
     c = M.sum(axis=1) * beta
-    norm = np.linalg.norm(c)
-    if norm > 0: c /= norm
     return {nodelist[i]: float(c[i]) for i in range(n)}
 
 def incremental_closeness_centrality(G, u, prev_cc=None, insertion=True, wt_attr=None):
@@ -6893,21 +6814,19 @@ def vf2pp_is_isomorphic(G1, G2, node_label=None, default_label=None):
 
 def vf2pp_isomorphism(G1, G2, node_label=None, default_label=None):
     """Find one isomorphism mapping using VF2++."""
-    if not is_isomorphic(G1, G2): return None
-    n1 = sorted(G1.nodes(), key=str); n2 = sorted(G2.nodes(), key=str)
-    d1 = sorted([(G1.degree[n], str(n)) for n in n1])
-    d2 = sorted([(G2.degree[n], str(n)) for n in n2])
-    mapping = {}
-    for (_, sn1), (_, sn2) in zip(d1, d2):
-        node1 = next(n for n in n1 if str(n) == sn1)
-        node2 = next(n for n in n2 if str(n) == sn2)
-        mapping[node1] = node2
-    return mapping
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.vf2pp_isomorphism(_to_nx(G1), _to_nx(G2), node_label=node_label, default_label=default_label)
 
 def vf2pp_all_isomorphisms(G1, G2, node_label=None, default_label=None):
-    """Generate all isomorphism mappings (yields one heuristic mapping)."""
-    m = vf2pp_isomorphism(G1, G2, node_label, default_label)
-    if m: yield m
+    """Generate all isomorphism mappings using VF2++."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    yield from nx.vf2pp_all_isomorphisms(_to_nx(G1), _to_nx(G2), node_label=node_label, default_label=default_label)
 
 # Tree/Forest Utilities (br-xkr)
 def junction_tree(G):
@@ -7081,14 +7000,21 @@ def simrank_similarity(G, source=None, target=None, importance_factor=0.9, max_i
     """SimRank similarity between nodes."""
     import numpy as np
     nodelist = list(G.nodes()); n = len(nodelist); idx = {nd: i for i, nd in enumerate(nodelist)}
+    directed = G.is_directed()
     sim = np.eye(n)
     for _ in range(max_iterations):
         new_sim = np.eye(n)
         for i in range(n):
-            nbrs_i = [idx[nb] for nb in G.neighbors(nodelist[i])]
+            if directed:
+                nbrs_i = [idx[nb] for nb in G.predecessors(nodelist[i])]
+            else:
+                nbrs_i = [idx[nb] for nb in G.neighbors(nodelist[i])]
             for j in range(i+1, n):
                 if not nbrs_i: continue
-                nbrs_j = [idx[nb] for nb in G.neighbors(nodelist[j])]
+                if directed:
+                    nbrs_j = [idx[nb] for nb in G.predecessors(nodelist[j])]
+                else:
+                    nbrs_j = [idx[nb] for nb in G.neighbors(nodelist[j])]
                 if not nbrs_j: continue
                 s = importance_factor * sum(sim[a][b] for a in nbrs_i for b in nbrs_j) / (len(nbrs_i) * len(nbrs_j))
                 new_sim[i][j] = new_sim[j][i] = s
@@ -7213,8 +7139,11 @@ def mixing_dict(xy, normalized=False):
 
 def local_constraint(G, u, v):
     """Burt's local constraint for edge (u,v)."""
-    c = constraint(G, nodes=[u])
-    return c.get(u, 0.0)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.local_constraint(_to_nx(G), u, v)
 
 def apply_matplotlib_colors(G, src_attr, dest_attr, map, vmin=None, vmax=None, nodes=True):
     """Apply matplotlib colors to graph."""
@@ -7279,14 +7208,11 @@ def optimize_graph_edit_distance(G1, G2, **kwargs):
 
 def cd_index(G, node, c=None):
     """Consolidation-diffusion index."""
-    if hasattr(G, 'predecessors'):
-        preds = set(G.predecessors(node))
-        succs = set(G.successors(node))
-    else:
-        preds = succs = set(G.neighbors(node))
-    if not preds or not succs: return 0.0
-    ni = len(preds); nj = len(succs)
-    return (ni - nj) / (ni + nj) if (ni + nj) > 0 else 0.0
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.cd_index(_to_nx(G), node, c=c)
 
 def goldberg_radzik(G, source, weight='weight'):
     """Compute shortest-path predecessors and distances via Goldberg-Radzik."""
@@ -7339,13 +7265,12 @@ def generate_graphml(
 # Generators
 def mycielskian(G):
     """Return the Mycielskian of G (increases chromatic number by 1)."""
-    H = G.copy(); n = G.number_of_nodes(); nodes = list(G.nodes())
-    for i, node in enumerate(nodes):
-        mirror = f"m_{node}"; H.add_node(mirror)
-        for nb in G.neighbors(node): H.add_edge(mirror, nb)
-    apex = "apex"; H.add_node(apex)
-    for i, node in enumerate(nodes): H.add_edge(apex, f"m_{node}")
-    return H
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.mycielskian(_to_nx(G)))
 
 def mycielski_graph(n):
     """Return the n-th Mycielski graph (starting from K2)."""
@@ -7369,17 +7294,11 @@ def prefix_tree_recursive(paths):
 
 def nonisomorphic_trees(order):
     """Generate all non-isomorphic trees on n nodes."""
-    if order <= 0: return
-    if order == 1: yield Graph(); return
-    if order == 2:
-        G = Graph(); G.add_edge(0, 1); yield G; return
-    seen_hashes = set()
-    import random as _random
-    for seed in range(order * 100):
-        T = random_tree(order, seed=seed)
-        h = weisfeiler_lehman_graph_hash(T)
-        if h not in seen_hashes:
-            seen_hashes.add(h); yield T
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    yield from (_from_nx_graph(t) for t in nx.nonisomorphic_trees(order))
 
 def number_of_nonisomorphic_trees(order):
     """Count non-isomorphic trees on n nodes."""
@@ -7548,10 +7467,10 @@ def find_asteroidal_triple(G):
     return None
 
 def is_perfect_graph(G):
-    """Check if G is perfect (no odd holes or odd anti-holes ≥ 5)."""
-    n = G.number_of_nodes()
-    if n <= 4: return True
-    return is_chordal(G)  # chordal ⊂ perfect (conservative approximation)
+    """Check if G is perfect (no odd holes or odd anti-holes >= 5)."""
+    import networkx as nx
+    from franken_networkx.drawing.layout import _to_nx
+    return nx.is_perfect_graph(_to_nx(G))
 
 def is_regular_expander(G, epsilon=0):
     """Check if G is a regular expander graph."""
@@ -7599,9 +7518,10 @@ def k_components(G):
 
 def k_factor(G, k):
     """Return k-regular spanning subgraph (if exists)."""
-    if any(G.degree[n] < k for n in G.nodes()):
-        raise NetworkXUnfeasible(f"Graph has nodes with degree < {k}")
-    return G.copy()
+    import networkx as nx
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+    return _from_nx_graph(nx.k_factor(_to_nx(G), k))
 
 def spectral_graph_forge(G, alpha=0.8, seed=None):
     """Graph with prescribed spectral properties."""
