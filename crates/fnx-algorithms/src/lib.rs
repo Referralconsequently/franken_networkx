@@ -21740,43 +21740,6 @@ pub fn convert_node_labels_to_integers(graph: &Graph) -> (Graph, std::collection
 }
 
 // ---------------------------------------------------------------------------
-// Node/edge attribute setters (bulk)
-// ---------------------------------------------------------------------------
-
-/// Set attributes on multiple nodes from a map.
-///
-/// `values` maps node names to attribute values. If `name` is provided,
-/// sets `node_attrs[name] = value` for each node.
-pub fn set_node_attributes(
-    graph: &mut Graph,
-    values: &std::collections::HashMap<String, CgseValue>,
-    name: &str,
-) {
-    for (node, value) in values {
-        if graph.has_node(node) {
-            if let Some(attrs) = graph.node_attrs_mut(node) {
-                attrs.insert(name.to_owned(), value.clone());
-            }
-        }
-    }
-}
-
-/// Set attributes on multiple edges from a map.
-///
-/// `values` maps (left, right) to attribute values.
-pub fn set_edge_attributes(
-    graph: &mut Graph,
-    values: &std::collections::HashMap<(String, String), CgseValue>,
-    name: &str,
-) {
-    for ((left, right), value) in values {
-        if let Some(attrs) = graph.edge_attrs_mut(left, right) {
-            attrs.insert(name.to_owned(), value.clone());
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Identified nodes (contract)
 // ---------------------------------------------------------------------------
 
