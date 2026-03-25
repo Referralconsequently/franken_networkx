@@ -275,8 +275,8 @@ from franken_networkx._fnx import (
 # Classic graph generators
 from franken_networkx._fnx import (
     balanced_tree as _rust_balanced_tree,
-    barbell_graph,
-    bull_graph,
+    barbell_graph as _rust_barbell_graph,
+    bull_graph as _rust_bull_graph,
     chvatal_graph,
     cubical_graph,
     desargues_graph,
@@ -299,11 +299,11 @@ from franken_networkx._fnx import (
     tutte_graph,
     hoffman_singleton_graph,
     generalized_petersen_graph,
-    wheel_graph,
-    ladder_graph,
-    circular_ladder_graph,
-    lollipop_graph,
-    tadpole_graph,
+    wheel_graph as _rust_wheel_graph,
+    ladder_graph as _rust_ladder_graph,
+    circular_ladder_graph as _rust_circular_ladder_graph,
+    lollipop_graph as _rust_lollipop_graph,
+    tadpole_graph as _rust_tadpole_graph,
     turan_graph,
     windmill_graph,
     hypercube_graph,
@@ -2442,6 +2442,90 @@ def grid_2d_graph(m, n, periodic=False, create_using=None):
         return _rust_grid_2d_graph(m, n)
 
     graph = nx.grid_2d_graph(m, n, periodic=periodic, create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def barbell_graph(m1, m2, create_using=None):
+    """Return the barbell graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_barbell_graph(m1, m2)
+
+    graph = nx.barbell_graph(m1, m2, create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def bull_graph(create_using=None):
+    """Return the bull graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_bull_graph()
+
+    graph = nx.bull_graph(create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def circular_ladder_graph(n, create_using=None):
+    """Return the circular ladder graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_circular_ladder_graph(n)
+
+    graph = nx.circular_ladder_graph(n, create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def ladder_graph(n, create_using=None):
+    """Return the ladder graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_ladder_graph(n)
+
+    graph = nx.ladder_graph(n, create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def lollipop_graph(m, n, create_using=None):
+    """Return the lollipop graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_lollipop_graph(m, n)
+
+    graph = nx.lollipop_graph(m, n, create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def tadpole_graph(m, n, create_using=None):
+    """Return the tadpole graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_tadpole_graph(m, n)
+
+    graph = nx.tadpole_graph(m, n, create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def wheel_graph(n, create_using=None):
+    """Return the wheel graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_wheel_graph(n)
+
+    graph = nx.wheel_graph(n, create_using=None)
     return _from_nx_graph(graph, create_using=create_using)
 
 

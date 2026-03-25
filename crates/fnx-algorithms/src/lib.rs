@@ -12,16 +12,63 @@ pub const CGSE_WITNESS_POLICY_SPEC_PATH: &str =
     "artifacts/cgse/v1/cgse_deterministic_policy_spec_v1.json";
 pub const CGSE_WITNESS_LEDGER_PATH: &str =
     "artifacts/cgse/v1/cgse_legacy_tiebreak_ordering_ledger_v1.json";
+/// PageRank damping factor. NetworkX default: 0.85.
+/// At each step, a random walker follows a link with probability alpha
+/// and teleports uniformly with probability (1 - alpha).
+/// Do not change without updating conformance fixtures.
 const PAGERANK_DEFAULT_ALPHA: f64 = 0.85;
+
+/// Maximum power-iteration steps for PageRank convergence. NX default: 100.
+/// Raise only if large/dense graphs fail to converge within tolerance.
 const PAGERANK_DEFAULT_MAX_ITERATIONS: usize = 100;
+
+/// L1-norm convergence tolerance for PageRank. NX default: 1e-6.
+/// Tighter values improve accuracy but increase iteration count.
 const PAGERANK_DEFAULT_TOLERANCE: f64 = 1.0e-6;
+
+/// Katz centrality attenuation factor. NX default: 0.1.
+/// Must be less than 1/spectral_radius(A) for convergence.
 const KATZ_DEFAULT_ALPHA: f64 = 0.1;
+
+/// Katz centrality exogenous weight. NX default: 1.0.
+/// Scales the constant term in (I - alpha*A)^{-1} * beta * ones.
 const KATZ_DEFAULT_BETA: f64 = 1.0;
+
+/// Maximum iterations for Katz centrality. NX default: 1000.
+/// Higher than PageRank because convergence can be slower near the
+/// spectral radius boundary.
 const KATZ_DEFAULT_MAX_ITERATIONS: usize = 1000;
+
+/// Convergence tolerance for Katz centrality. NX default: 1e-6.
 const KATZ_DEFAULT_TOLERANCE: f64 = 1.0e-6;
+
+/// Maximum iterations for HITS (hub/authority) scores. NX default: 100.
 const HITS_DEFAULT_MAX_ITERATIONS: usize = 100;
+
+/// Convergence tolerance for HITS. NX default: 1e-8.
+/// Tighter than PageRank/Katz because HITS normalizes by L2 norm,
+/// so small absolute changes matter more.
 const HITS_DEFAULT_TOLERANCE: f64 = 1.0e-8;
+
+/// Epsilon for floating-point distance/weight comparisons.
+/// Used in shortest-path tie-breaking and min-cut value comparison.
+/// Tight enough to distinguish genuinely different weights but loose
+/// enough to absorb IEEE 754 rounding in path-length sums.
 const DISTANCE_COMPARISON_EPSILON: f64 = 1.0e-12;
+
+/// Epsilon for flow algorithm numerical stability.
+/// Used in min-cost flow to detect zero-residual edges, supply/demand
+/// balance, and Bellman-Ford relaxation. Looser than distance epsilon
+/// because flow values accumulate more rounding error through
+/// successive augmenting paths.
+const FLOW_EPSILON: f64 = 1.0e-10;
+
+/// Epsilon for near-zero denominators in assortativity coefficients.
+/// Very tight (1e-15) because assortativity operates on normalized
+/// mixing matrices where legitimate values can be extremely small.
+/// A looser epsilon would incorrectly classify near-assortative
+/// graphs as perfectly assortative (r=1.0).
+const ASSORTATIVITY_EPSILON: f64 = 1.0e-15;
 
 #[derive(Copy, Clone, PartialEq)]
 struct DijkstraState<T: Copy + PartialEq> {
@@ -2257,15 +2304,16 @@ fn hits_centrality_generic<G: GraphView>(graph: &G) -> HitsCentralityResult {
 
 #[must_use]
 pub fn pagerank(graph: &Graph) -> PageRankResult {
-    pagerank_generic(graph)
+    pagerank_with_params(graph, PAGERANK_DEFAULT_ALPHA, PAGERANK_DEFAULT_MAX_ITERATIONS, PAGERANK_DEFAULT_TOLERANCE)
 }
 
 #[must_use]
 pub fn pagerank_directed(graph: &DiGraph) -> PageRankResult {
-    pagerank_generic(graph)
+    pagerank_with_params(graph, PAGERANK_DEFAULT_ALPHA, PAGERANK_DEFAULT_MAX_ITERATIONS, PAGERANK_DEFAULT_TOLERANCE)
 }
 
-fn pagerank_generic<G: GraphView>(graph: &G) -> PageRankResult {
+/// PageRank with explicit parameters.
+pub fn pagerank_with_params<G: GraphView>(graph: &G, alpha: f64, max_iter: usize, tol: f64) -> PageRankResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -2324,20 +2372,20 @@ fn pagerank_generic<G: GraphView>(graph: &G) -> PageRankResult {
         .collect::<Vec<usize>>();
 
     let n_f64 = n as f64;
-    let base = (1.0 - PAGERANK_DEFAULT_ALPHA) / n_f64;
+    let base = (1.0 - alpha) / n_f64;
     let mut ranks = vec![1.0 / n_f64; n];
     let mut next_ranks = vec![0.0_f64; n];
     let mut iterations = 0usize;
     let mut edges_scanned = 0usize;
 
-    for _ in 0..PAGERANK_DEFAULT_MAX_ITERATIONS {
+    for _ in 0..max_iter {
         iterations += 1;
         let dangling_mass = ranks
             .iter()
             .enumerate()
             .filter_map(|(idx, value)| (out_degree[idx] == 0).then_some(*value))
             .sum::<f64>();
-        let dangling_term = PAGERANK_DEFAULT_ALPHA * dangling_mass / n_f64;
+        let dangling_term = alpha * dangling_mass / n_f64;
 
         for (v_idx, _v) in canonical_nodes.iter().enumerate() {
             let in_neighbors = &canonical_in_neighbors[v_idx];
@@ -2355,7 +2403,7 @@ fn pagerank_generic<G: GraphView>(graph: &G) -> PageRankResult {
                 }
             });
 
-            next_ranks[v_idx] = base + dangling_term + (PAGERANK_DEFAULT_ALPHA * inbound);
+            next_ranks[v_idx] = base + dangling_term + (alpha * inbound);
         }
 
         let total_mass = next_ranks.iter().sum::<f64>();
@@ -2371,7 +2419,7 @@ fn pagerank_generic<G: GraphView>(graph: &G) -> PageRankResult {
             .map(|(left, right)| (left - right).abs())
             .sum::<f64>();
         ranks.copy_from_slice(&next_ranks);
-        if delta < n_f64 * PAGERANK_DEFAULT_TOLERANCE {
+        if delta < n_f64 * tol {
             break;
         }
     }
@@ -2454,6 +2502,10 @@ fn eigenvector_centrality_generic<G: GraphView>(graph: &G) -> EigenvectorCentral
 
     for _ in 0..PAGERANK_DEFAULT_MAX_ITERATIONS {
         iterations += 1;
+        // Initialize next_scores with current scores, then ADD neighbor
+        // contributions. This computes (I+A)*x per iteration, which has the
+        // same dominant eigenvector as A but avoids oscillation on bipartite
+        // graphs (where pure A*x alternates between two states).
         next_scores.copy_from_slice(&scores);
 
         for (source_idx, source) in canonical_nodes.iter().enumerate() {
@@ -3191,10 +3243,10 @@ pub fn global_minimum_edge_cut_edmonds_karp(
             let should_replace = match (&best_pair, &best_cut) {
                 (None, None) => true,
                 (Some(current_pair), Some(current_cut)) => {
-                    if cut.value + 1e-12 < current_cut.value {
+                    if cut.value + DISTANCE_COMPARISON_EPSILON < current_cut.value {
                         true
                     } else {
-                        (cut.value - current_cut.value).abs() <= 1e-12
+                        (cut.value - current_cut.value).abs() <= DISTANCE_COMPARISON_EPSILON
                             && candidate_pair < *current_pair
                     }
                 }
@@ -6890,7 +6942,7 @@ pub fn degree_assortativity_coefficient(graph: &Graph) -> DegreeAssortativityRes
     let denom_y = (mf * sum_y2 - sum_y * sum_y).sqrt();
     let denominator = denom_x * denom_y;
 
-    let coefficient = if denominator.abs() < 1e-15 {
+    let coefficient = if denominator.abs() < ASSORTATIVITY_EPSILON {
         0.0
     } else {
         numerator / denominator
@@ -17711,23 +17763,32 @@ pub fn generalized_petersen_graph(n: usize, k: usize) -> Result<Graph, String> {
     Ok(g)
 }
 
-/// Return the wheel graph W_n (n+1 nodes: hub + n rim nodes).
+/// Return the wheel graph W_n using NetworkX semantics.
 pub fn wheel_graph(n: usize) -> Result<Graph, String> {
-    if n < 1 {
-        return Err("n must be >= 1".to_owned());
+    if n == 0 {
+        return Ok(Graph::strict());
+    }
+    if n == 1 {
+        let mut g = Graph::strict();
+        gen_nodes(&mut g, 1);
+        return Ok(g);
+    }
+    if n == 2 {
+        let mut g = Graph::strict();
+        gen_nodes(&mut g, 2);
+        gen_edge(&mut g, 0, 1);
+        return Ok(g);
     }
     let mut g = Graph::strict();
-    gen_nodes(&mut g, n + 1);
-    // Hub is node 0, rim is 1..n
-    for i in 1..=n {
+    gen_nodes(&mut g, n);
+    // Hub is node 0, rim is 1..(n-1)
+    for i in 1..n {
         gen_edge(&mut g, 0, i);
     }
-    for i in 1..n {
+    for i in 1..(n - 1) {
         gen_edge(&mut g, i, i + 1);
     }
-    if n > 1 {
-        gen_edge(&mut g, n, 1);
-    }
+    gen_edge(&mut g, n - 1, 1);
     Ok(g)
 }
 
@@ -19740,7 +19801,7 @@ pub fn min_cost_flow(
     // Successive shortest path: route flow along shortest augmenting paths
     let total_supply: f64 = demand.iter().filter(|&&d| d > 0.0).sum();
     let total_demand: f64 = demand.iter().filter(|&&d| d < 0.0).map(|d| -d).sum();
-    if (total_supply - total_demand).abs() > 1e-10 {
+    if (total_supply - total_demand).abs() > FLOW_EPSILON {
         return None; // Infeasible: supply != demand
     }
 
@@ -19750,8 +19811,8 @@ pub fn min_cost_flow(
 
     for _ in 0..n * n {
         // Find a supply node and demand node
-        let supply_node = (0..n).find(|&i| remaining_supply[i] > 1e-10);
-        let demand_node = (0..n).find(|&i| remaining_supply[i] < -1e-10);
+        let supply_node = (0..n).find(|&i| remaining_supply[i] > FLOW_EPSILON);
+        let demand_node = (0..n).find(|&i| remaining_supply[i] < -FLOW_EPSILON);
         if supply_node.is_none() || demand_node.is_none() {
             break;
         }
@@ -19769,7 +19830,7 @@ pub fn min_cost_flow(
                 }
                 for j in 0..n {
                     let residual = cap[i][j] - flow_mat[i][j];
-                    if residual > 1e-10 && dist[i] + cost_mat[i][j] < dist[j] - 1e-10 {
+                    if residual > FLOW_EPSILON && dist[i] + cost_mat[i][j] < dist[j] - FLOW_EPSILON {
                         dist[j] = dist[i] + cost_mat[i][j];
                         prev[j] = Some(i);
                     }
@@ -19807,7 +19868,7 @@ pub fn min_cost_flow(
     for edge in digraph.edges_ordered() {
         let i = idx[edge.left.as_str()];
         let j = idx[edge.right.as_str()];
-        if flow_mat[i][j] > 1e-10 {
+        if flow_mat[i][j] > FLOW_EPSILON {
             flow.insert(
                 (edge.left.clone(), edge.right.clone()),
                 flow_mat[i][j],
@@ -21139,7 +21200,7 @@ pub fn attribute_assortativity(
     let col_sums: Vec<f64> = (0..k).map(|j| (0..k).map(|i| e[i][j]).sum::<f64>()).collect();
     let e_squared: f64 = (0..k).map(|i| row_sums[i] * col_sums[i]).sum();
 
-    if (1.0 - e_squared).abs() < 1e-15 {
+    if (1.0 - e_squared).abs() < ASSORTATIVITY_EPSILON {
         1.0
     } else {
         (trace - e_squared) / (1.0 - e_squared)
@@ -21245,6 +21306,506 @@ fn bfs_avoiding(
         }
     }
     false
+}
+
+// ---------------------------------------------------------------------------
+// Double edge swap (full implementation with RNG)
+// ---------------------------------------------------------------------------
+
+/// Perform `nswap` degree-preserving double edge swaps.
+///
+/// Uses a simple LCG RNG (no rand dependency). Returns number of
+/// successful swaps.
+pub fn double_edge_swap_seeded(
+    graph: &mut Graph,
+    nswap: usize,
+    max_tries: usize,
+    seed: u64,
+) -> usize {
+    if graph.edge_count() < 2 {
+        return 0;
+    }
+
+    let mut rng_state = seed.wrapping_add(1);
+    let mut next_rand = || -> usize {
+        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (rng_state >> 33) as usize
+    };
+
+    let mut swaps_done = 0usize;
+    let total_tries = nswap.saturating_mul(max_tries);
+
+    for _ in 0..total_tries {
+        if swaps_done >= nswap {
+            break;
+        }
+        let edges: Vec<(String, String)> = graph
+            .edges_ordered()
+            .iter()
+            .map(|e| (e.left.clone(), e.right.clone()))
+            .collect();
+        let m = edges.len();
+        if m < 2 {
+            break;
+        }
+        let i1 = next_rand() % m;
+        let i2 = next_rand() % m;
+        if i1 == i2 {
+            continue;
+        }
+
+        let (ref u, ref v) = edges[i1];
+        let (ref x, ref y) = edges[i2];
+
+        let mut nodes = std::collections::HashSet::new();
+        nodes.insert(u.as_str());
+        nodes.insert(v.as_str());
+        nodes.insert(x.as_str());
+        nodes.insert(y.as_str());
+        if nodes.len() < 4 {
+            continue;
+        }
+
+        if !graph.has_edge(u, x) && !graph.has_edge(v, y) {
+            let _ = graph.remove_edge(u, v);
+            let _ = graph.remove_edge(x, y);
+            let _ = graph.add_edge(u.clone(), x.clone());
+            let _ = graph.add_edge(v.clone(), y.clone());
+            swaps_done += 1;
+        }
+    }
+    swaps_done
+}
+
+/// Directed edge swap preserving in/out degree sequences.
+pub fn directed_edge_swap_seeded(
+    digraph: &mut DiGraph,
+    nswap: usize,
+    max_tries: usize,
+    seed: u64,
+) -> usize {
+    if digraph.edge_count() < 2 {
+        return 0;
+    }
+
+    let mut rng_state = seed.wrapping_add(1);
+    let mut next_rand = || -> usize {
+        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (rng_state >> 33) as usize
+    };
+
+    let mut swaps_done = 0usize;
+    let total_tries = nswap.saturating_mul(max_tries);
+
+    for _ in 0..total_tries {
+        if swaps_done >= nswap {
+            break;
+        }
+        let edges: Vec<(String, String)> = digraph
+            .edges_ordered()
+            .iter()
+            .map(|e| (e.left.clone(), e.right.clone()))
+            .collect();
+        let m = edges.len();
+        if m < 2 {
+            break;
+        }
+        let i1 = next_rand() % m;
+        let i2 = next_rand() % m;
+        if i1 == i2 {
+            continue;
+        }
+
+        let (ref u, ref v) = edges[i1]; // u→v
+        let (ref x, ref y) = edges[i2]; // x→y
+
+        // Swap to u→y, x→v
+        if u == x || v == y || u == y || x == v {
+            continue;
+        }
+        if !digraph.has_edge(u, y) && !digraph.has_edge(x, v) {
+            let _ = digraph.remove_edge(u, v);
+            let _ = digraph.remove_edge(x, y);
+            let _ = digraph.add_edge(u.clone(), y.clone());
+            let _ = digraph.add_edge(x.clone(), v.clone());
+            swaps_done += 1;
+        }
+    }
+    swaps_done
+}
+
+// ---------------------------------------------------------------------------
+// Global parameters (distance-regular graphs)
+// ---------------------------------------------------------------------------
+
+/// Return the global parameters of a distance-regular graph.
+///
+/// Returns `Some((b, c))` where b[k] is the number of neighbors at distance k+1
+/// and c[k] is the number at distance k-1, for each distance k.
+/// Returns `None` if the graph is not distance-regular.
+#[must_use]
+pub fn global_parameters(graph: &Graph) -> Option<(Vec<usize>, Vec<usize>)> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 {
+        return Some((Vec::new(), Vec::new()));
+    }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    // Compute all-pairs distances via BFS
+    let mut all_dist = vec![vec![usize::MAX; n]; n];
+    let mut diameter = 0usize;
+
+    for s in 0..n {
+        all_dist[s][s] = 0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+        while let Some(v) = queue.pop_front() {
+            if let Some(nbrs) = graph.neighbors(nodes[v]) {
+                for nb in nbrs {
+                    if let Some(&ni) = idx.get(nb) {
+                        if all_dist[s][ni] == usize::MAX {
+                            all_dist[s][ni] = all_dist[s][v] + 1;
+                            diameter = diameter.max(all_dist[s][ni]);
+                            queue.push_back(ni);
+                        }
+                    }
+                }
+            }
+        }
+        // Check connectivity
+        if all_dist[s].iter().any(|&d| d == usize::MAX) {
+            return None; // Not connected
+        }
+    }
+
+    let mut b_params = Vec::with_capacity(diameter + 1);
+    let mut c_params = Vec::with_capacity(diameter + 1);
+
+    for k in 0..=diameter {
+        let mut b_vals = std::collections::HashSet::new();
+        let mut c_vals = std::collections::HashSet::new();
+
+        for i in 0..n {
+            for j in 0..n {
+                if all_dist[i][j] != k {
+                    continue;
+                }
+                // Count neighbors of j at distance k+1 from i (b_k)
+                // Count neighbors of j at distance k-1 from i (c_k)
+                let mut b_count = 0usize;
+                let mut c_count = 0usize;
+                if let Some(nbrs) = graph.neighbors(nodes[j]) {
+                    for nb in nbrs {
+                        if let Some(&ni) = idx.get(nb) {
+                            if k + 1 <= diameter && all_dist[i][ni] == k + 1 {
+                                b_count += 1;
+                            }
+                            if k > 0 && all_dist[i][ni] == k - 1 {
+                                c_count += 1;
+                            }
+                        }
+                    }
+                }
+                b_vals.insert(b_count);
+                c_vals.insert(c_count);
+            }
+        }
+
+        if b_vals.len() > 1 || c_vals.len() > 1 {
+            return None; // Not distance-regular
+        }
+        b_params.push(b_vals.into_iter().next().unwrap_or(0));
+        c_params.push(c_vals.into_iter().next().unwrap_or(0));
+    }
+
+    Some((b_params, c_params))
+}
+
+// ---------------------------------------------------------------------------
+// To dict of dicts (adjacency representation)
+// ---------------------------------------------------------------------------
+
+/// Convert graph to adjacency dict-of-dicts representation.
+///
+/// Returns `{u: {v: edge_attrs, ...}, ...}` for all nodes.
+#[must_use]
+pub fn to_dict_of_dicts(graph: &Graph) -> std::collections::HashMap<String, std::collections::HashMap<String, std::collections::BTreeMap<String, String>>> {
+    let mut result = std::collections::HashMap::new();
+    for node in graph.nodes_ordered() {
+        let mut adj = std::collections::HashMap::new();
+        if let Some(nbrs) = graph.neighbors(node) {
+            for nb in nbrs {
+                let edge_attrs: std::collections::BTreeMap<String, String> = graph
+                    .edge_attrs(node, nb)
+                    .map(|attrs| attrs.iter().map(|(k, v)| (k.clone(), v.as_str())).collect())
+                    .unwrap_or_default();
+                adj.insert(nb.to_owned(), edge_attrs);
+            }
+        }
+        result.insert(node.to_owned(), adj);
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// BFS labeled edges
+// ---------------------------------------------------------------------------
+
+/// BFS with edge labeling: tree edges, non-tree edges, and reverse edges.
+#[must_use]
+pub fn bfs_labeled_edges(
+    graph: &Graph,
+    source: &str,
+) -> Vec<(String, String, String)> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let s = match idx.get(source) {
+        Some(&i) => i,
+        None => return Vec::new(),
+    };
+
+    let mut result = Vec::new();
+    let mut visited = vec![false; n];
+    visited[s] = true;
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(s);
+
+    // Emit forward edge for source
+    result.push((nodes[s].to_owned(), nodes[s].to_owned(), "forward".to_owned()));
+
+    while let Some(v) = queue.pop_front() {
+        if let Some(nbrs) = graph.neighbors(nodes[v]) {
+            for nb in nbrs {
+                if let Some(&ni) = idx.get(nb) {
+                    if !visited[ni] {
+                        visited[ni] = true;
+                        queue.push_back(ni);
+                        result.push((nodes[v].to_owned(), nodes[ni].to_owned(), "forward".to_owned()));
+                    } else {
+                        result.push((nodes[v].to_owned(), nodes[ni].to_owned(), "nontree".to_owned()));
+                    }
+                }
+            }
+        }
+        result.push((nodes[v].to_owned(), nodes[v].to_owned(), "reverse".to_owned()));
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Graph set operations
+// ---------------------------------------------------------------------------
+
+/// Return the union of two undirected graphs.
+///
+/// Nodes and edges from both graphs are combined. Raises an error if
+/// node sets overlap (use `disjoint_union` for overlapping graphs).
+pub fn graph_union(g1: &Graph, g2: &Graph) -> Result<Graph, String> {
+    let mut result = Graph::new(g1.mode());
+    for node in g1.nodes_ordered() {
+        let _ = result.add_node(node.to_owned());
+    }
+    for node in g2.nodes_ordered() {
+        if result.has_node(node) {
+            return Err(format!("Node {} exists in both graphs. Use rename.", node));
+        }
+        let _ = result.add_node(node.to_owned());
+    }
+    for edge in g1.edges_ordered() {
+        let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+    }
+    for edge in g2.edges_ordered() {
+        let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+    }
+    Ok(result)
+}
+
+/// Return the intersection of two undirected graphs.
+///
+/// Keeps only nodes present in both and edges present in both.
+#[must_use]
+pub fn graph_intersection(g1: &Graph, g2: &Graph) -> Graph {
+    let mut result = Graph::new(g1.mode());
+    // Nodes in both
+    for node in g1.nodes_ordered() {
+        if g2.has_node(node) {
+            let _ = result.add_node(node.to_owned());
+        }
+    }
+    // Edges in both
+    for edge in g1.edges_ordered() {
+        if g2.has_edge(&edge.left, &edge.right) && result.has_node(&edge.left) && result.has_node(&edge.right) {
+            let _ = result.add_edge(edge.left.clone(), edge.right.clone());
+        }
+    }
+    result
+}
+
+/// Return the full join of two graphs.
+///
+/// Union of both graphs plus all cross-edges between G1 and G2 nodes.
+#[must_use]
+pub fn full_join(g1: &Graph, g2: &Graph) -> Graph {
+    let mut result = Graph::new(g1.mode());
+    let g1_nodes: Vec<&str> = g1.nodes_ordered();
+    let g2_nodes: Vec<&str> = g2.nodes_ordered();
+
+    for &node in &g1_nodes {
+        let _ = result.add_node(node.to_owned());
+    }
+    for &node in &g2_nodes {
+        let _ = result.add_node(node.to_owned());
+    }
+    for edge in g1.edges_ordered() {
+        let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+    }
+    for edge in g2.edges_ordered() {
+        let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+    }
+    // Cross-edges
+    for &u in &g1_nodes {
+        for &v in &g2_nodes {
+            let _ = result.add_edge(u.to_owned(), v.to_owned());
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Relabel nodes
+// ---------------------------------------------------------------------------
+
+/// Relabel graph nodes according to a mapping.
+///
+/// Returns a new graph with nodes renamed per the mapping. Nodes not
+/// in the mapping keep their original labels.
+#[must_use]
+pub fn relabel_nodes(graph: &Graph, mapping: &std::collections::HashMap<String, String>) -> Graph {
+    let mut result = Graph::new(graph.mode());
+
+    // Add nodes with new labels
+    for node in graph.nodes_ordered() {
+        let new_label = mapping.get(node).cloned().unwrap_or_else(|| node.to_owned());
+        let _ = result.add_node(new_label);
+    }
+
+    // Add edges with remapped endpoints
+    for edge in graph.edges_ordered() {
+        let new_left = mapping.get(&edge.left).cloned().unwrap_or_else(|| edge.left.clone());
+        let new_right = mapping.get(&edge.right).cloned().unwrap_or_else(|| edge.right.clone());
+        let _ = result.add_edge_with_attrs(new_left, new_right, edge.attrs.clone());
+    }
+
+    result
+}
+
+/// Relabel directed graph nodes.
+#[must_use]
+pub fn relabel_nodes_directed(digraph: &DiGraph, mapping: &std::collections::HashMap<String, String>) -> DiGraph {
+    let mut result = DiGraph::new(digraph.mode());
+
+    for node in digraph.nodes_ordered() {
+        let new_label = mapping.get(node).cloned().unwrap_or_else(|| node.to_owned());
+        result.add_node(new_label);
+    }
+
+    for edge in digraph.edges_ordered() {
+        let new_left = mapping.get(&edge.left).cloned().unwrap_or_else(|| edge.left.clone());
+        let new_right = mapping.get(&edge.right).cloned().unwrap_or_else(|| edge.right.clone());
+        let _ = result.add_edge_with_attrs(new_left, new_right, edge.attrs.clone());
+    }
+
+    result
+}
+
+/// Convert node labels to integers (0, 1, 2, ...).
+///
+/// Returns the relabeled graph and the mapping from old to new labels.
+#[must_use]
+pub fn convert_node_labels_to_integers(graph: &Graph) -> (Graph, std::collections::HashMap<String, String>) {
+    let nodes = graph.nodes_ordered();
+    let mut mapping = std::collections::HashMap::new();
+    for (i, node) in nodes.iter().enumerate() {
+        mapping.insert((*node).to_owned(), i.to_string());
+    }
+    let result = relabel_nodes(graph, &mapping);
+    (result, mapping)
+}
+
+// ---------------------------------------------------------------------------
+// Node/edge attribute setters (bulk)
+// ---------------------------------------------------------------------------
+
+/// Set attributes on multiple nodes from a map.
+///
+/// `values` maps node names to attribute values. If `name` is provided,
+/// sets `node_attrs[name] = value` for each node.
+pub fn set_node_attributes(
+    graph: &mut Graph,
+    values: &std::collections::HashMap<String, CgseValue>,
+    name: &str,
+) {
+    for (node, value) in values {
+        if graph.has_node(node) {
+            if let Some(attrs) = graph.node_attrs_mut(node) {
+                attrs.insert(name.to_owned(), value.clone());
+            }
+        }
+    }
+}
+
+/// Set attributes on multiple edges from a map.
+///
+/// `values` maps (left, right) to attribute values.
+pub fn set_edge_attributes(
+    graph: &mut Graph,
+    values: &std::collections::HashMap<(String, String), CgseValue>,
+    name: &str,
+) {
+    for ((left, right), value) in values {
+        if let Some(attrs) = graph.edge_attrs_mut(left, right) {
+            attrs.insert(name.to_owned(), value.clone());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Identified nodes (contract)
+// ---------------------------------------------------------------------------
+
+/// Contract two nodes into one, merging their edges.
+///
+/// Node `v` is merged into node `u`. All edges incident to `v` are
+/// redirected to `u`. Self-loops from the contraction are discarded.
+#[must_use]
+pub fn identified_nodes(graph: &Graph, u: &str, v: &str) -> Graph {
+    let mut result = Graph::new(graph.mode());
+
+    // Add all nodes except v
+    for node in graph.nodes_ordered() {
+        if node != v {
+            let _ = result.add_node(node.to_owned());
+        }
+    }
+
+    // Add edges, redirecting v → u
+    for edge in graph.edges_ordered() {
+        let new_left = if edge.left == v { u.to_owned() } else { edge.left.clone() };
+        let new_right = if edge.right == v { u.to_owned() } else { edge.right.clone() };
+        // Skip self-loops created by contraction
+        if new_left != new_right && !result.has_edge(&new_left, &new_right) {
+            let _ = result.add_edge_with_attrs(new_left, new_right, edge.attrs.clone());
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
@@ -21571,6 +22132,37 @@ mod tests {
     use proptest::prelude::*;
     use std::collections::{BTreeMap, BTreeSet, HashSet};
 
+    /// Standard tolerance for floating-point assertions in tests.
+    /// Matches DISTANCE_COMPARISON_EPSILON from the production constants.
+    const TEST_TOLERANCE: f64 = 1e-12;
+
+    /// Verify all default constants match NetworkX exactly.
+    /// If any of these fail, the constant was changed without updating
+    /// conformance fixtures — which breaks NX parity.
+    #[test]
+    fn default_constants_match_networkx() {
+        use super::{
+            PAGERANK_DEFAULT_ALPHA, PAGERANK_DEFAULT_MAX_ITERATIONS, PAGERANK_DEFAULT_TOLERANCE,
+            KATZ_DEFAULT_ALPHA, KATZ_DEFAULT_BETA, KATZ_DEFAULT_MAX_ITERATIONS, KATZ_DEFAULT_TOLERANCE,
+            HITS_DEFAULT_MAX_ITERATIONS, HITS_DEFAULT_TOLERANCE,
+        };
+
+        // NetworkX source: networkx/algorithms/link_analysis/pagerank_alg.py
+        assert!((PAGERANK_DEFAULT_ALPHA - 0.85).abs() < 1e-15, "PageRank alpha drift");
+        assert_eq!(PAGERANK_DEFAULT_MAX_ITERATIONS, 100, "PageRank max_iter drift");
+        assert!((PAGERANK_DEFAULT_TOLERANCE - 1.0e-6).abs() < 1e-20, "PageRank tol drift");
+
+        // NetworkX source: networkx/algorithms/centrality/katz_centrality.py
+        assert!((KATZ_DEFAULT_ALPHA - 0.1).abs() < 1e-15, "Katz alpha drift");
+        assert!((KATZ_DEFAULT_BETA - 1.0).abs() < 1e-15, "Katz beta drift");
+        assert_eq!(KATZ_DEFAULT_MAX_ITERATIONS, 1000, "Katz max_iter drift");
+        assert!((KATZ_DEFAULT_TOLERANCE - 1.0e-6).abs() < 1e-20, "Katz tol drift");
+
+        // NetworkX source: networkx/algorithms/link_analysis/hits_alg.py
+        assert_eq!(HITS_DEFAULT_MAX_ITERATIONS, 100, "HITS max_iter drift");
+        assert!((HITS_DEFAULT_TOLERANCE - 1.0e-8).abs() < 1e-20, "HITS tol drift");
+    }
+
     fn packet_005_forensics_bundle(
         run_id: &str,
         test_id: &str,
@@ -21850,11 +22442,11 @@ mod tests {
             .iter()
             .map(|entry| (entry.node.as_str(), entry.distance))
             .collect::<BTreeMap<&str, f64>>();
-        assert!((distance_map.get("a").copied().unwrap_or_default() - 0.0).abs() <= 1e-12);
-        assert!((distance_map.get("b").copied().unwrap_or_default() - 1.0).abs() <= 1e-12);
-        assert!((distance_map.get("c").copied().unwrap_or_default() - 0.0).abs() <= 1e-12);
-        assert!((distance_map.get("d").copied().unwrap_or_default() - 1.0).abs() <= 1e-12);
-        assert!((distance_map.get("e").copied().unwrap_or_default() - 2.0).abs() <= 1e-12);
+        assert!((distance_map.get("a").copied().unwrap_or_default() - 0.0).abs() <= TEST_TOLERANCE);
+        assert!((distance_map.get("b").copied().unwrap_or_default() - 1.0).abs() <= TEST_TOLERANCE);
+        assert!((distance_map.get("c").copied().unwrap_or_default() - 0.0).abs() <= TEST_TOLERANCE);
+        assert!((distance_map.get("d").copied().unwrap_or_default() - 1.0).abs() <= TEST_TOLERANCE);
+        assert!((distance_map.get("e").copied().unwrap_or_default() - 2.0).abs() <= TEST_TOLERANCE);
 
         let predecessor_map = result
             .predecessors
@@ -21916,9 +22508,9 @@ mod tests {
             .iter()
             .map(|entry| (entry.node.as_str(), entry.distance))
             .collect::<BTreeMap<&str, f64>>();
-        assert!((distance_map.get("a").copied().unwrap_or_default() - 0.0).abs() <= 1e-12);
-        assert!((distance_map.get("b").copied().unwrap_or_default() - 2.0).abs() <= 1e-12);
-        assert!((distance_map.get("c").copied().unwrap_or_default() - 3.0).abs() <= 1e-12);
+        assert!((distance_map.get("a").copied().unwrap_or_default() - 0.0).abs() <= TEST_TOLERANCE);
+        assert!((distance_map.get("b").copied().unwrap_or_default() - 2.0).abs() <= TEST_TOLERANCE);
+        assert!((distance_map.get("c").copied().unwrap_or_default() - 3.0).abs() <= TEST_TOLERANCE);
         assert!(!result.negative_cycle_detected);
         assert_eq!(result.witness.algorithm, "bellman_ford_shortest_paths");
     }
@@ -21969,7 +22561,7 @@ mod tests {
 
         let result = max_flow_edmonds_karp(&graph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((result.value - 5.0).abs() <= 1e-12);
+        assert!((result.value - 5.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             result.flows,
             vec![
@@ -22026,7 +22618,7 @@ mod tests {
             .expect("flow algorithm should succeed");
         let right = max_flow_edmonds_karp(&graph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((left.value - right.value).abs() <= 1e-12);
+        assert!((left.value - right.value).abs() <= TEST_TOLERANCE);
         assert_eq!(left.witness, right.witness);
     }
 
@@ -22059,7 +22651,7 @@ mod tests {
 
         let result = max_flow_edmonds_karp_directed(&digraph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((result.value - 5.0).abs() <= 1e-12);
+        assert!((result.value - 5.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             result.flows,
             vec![
@@ -22105,7 +22697,7 @@ mod tests {
 
         let result = max_flow_edmonds_karp_directed(&digraph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((result.value - 0.0).abs() <= 1e-12);
+        assert!((result.value - 0.0).abs() <= TEST_TOLERANCE);
         assert!(result.flows.is_empty());
     }
 
@@ -22130,7 +22722,7 @@ mod tests {
 
         let result = minimum_cut_edmonds_karp(&graph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((result.value - 5.0).abs() <= 1e-12);
+        assert!((result.value - 5.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             result.source_partition,
             vec!["s".to_owned(), "a".to_owned(), "b".to_owned()]
@@ -22186,7 +22778,7 @@ mod tests {
 
         let result = minimum_cut_edmonds_karp_directed(&digraph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((result.value - 5.0).abs() <= 1e-12);
+        assert!((result.value - 5.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             result.source_partition,
             vec!["s".to_owned(), "a".to_owned(), "b".to_owned()]
@@ -22224,7 +22816,7 @@ mod tests {
 
         let result = minimum_st_edge_cut_edmonds_karp(&graph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((result.value - 5.0).abs() <= 1e-12);
+        assert!((result.value - 5.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             result.cut_edges,
             vec![
@@ -22289,7 +22881,7 @@ mod tests {
             .expect("flow algorithm should succeed");
         let connectivity = edge_connectivity_edmonds_karp(&graph, "s", "t", "capacity")
             .expect("flow algorithm should succeed");
-        assert!((connectivity.value - cut.value).abs() <= 1e-12);
+        assert!((connectivity.value - cut.value).abs() <= TEST_TOLERANCE);
         assert_eq!(
             connectivity.witness.algorithm,
             "edmonds_karp_edge_connectivity"
@@ -22315,7 +22907,7 @@ mod tests {
         graph.add_edge("c", "d").expect("edge add should succeed");
 
         let result = global_edge_connectivity_edmonds_karp(&graph, "capacity");
-        assert!((result.value - 1.0).abs() <= 1e-12);
+        assert!((result.value - 1.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             result.witness.algorithm,
             "edmonds_karp_global_edge_connectivity"
@@ -22330,7 +22922,7 @@ mod tests {
         graph.add_edge("c", "a").expect("edge add should succeed");
 
         let result = global_edge_connectivity_edmonds_karp(&graph, "capacity");
-        assert!((result.value - 2.0).abs() <= 1e-12);
+        assert!((result.value - 2.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -22340,7 +22932,7 @@ mod tests {
         graph.add_edge("c", "d").expect("edge add should succeed");
 
         let result = global_edge_connectivity_edmonds_karp(&graph, "capacity");
-        assert!((result.value - 0.0).abs() <= 1e-12);
+        assert!((result.value - 0.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -22351,7 +22943,7 @@ mod tests {
         graph.add_edge("c", "d").expect("edge add should succeed");
 
         let result = global_minimum_edge_cut_edmonds_karp(&graph, "capacity");
-        assert!((result.value - 1.0).abs() <= 1e-12);
+        assert!((result.value - 1.0).abs() <= TEST_TOLERANCE);
         assert_eq!(result.source, "a");
         assert_eq!(result.sink, "b");
         assert_eq!(result.cut_edges, vec![("a".to_owned(), "b".to_owned())]);
@@ -22369,7 +22961,7 @@ mod tests {
         graph.add_edge("c", "a").expect("edge add should succeed");
 
         let result = global_minimum_edge_cut_edmonds_karp(&graph, "capacity");
-        assert!((result.value - 2.0).abs() <= 1e-12);
+        assert!((result.value - 2.0).abs() <= TEST_TOLERANCE);
         assert_eq!(result.source, "a");
         assert_eq!(result.sink, "b");
         assert_eq!(
@@ -22388,7 +22980,7 @@ mod tests {
         graph.add_edge("c", "d").expect("edge add should succeed");
 
         let result = global_minimum_edge_cut_edmonds_karp(&graph, "capacity");
-        assert!((result.value - 0.0).abs() <= 1e-12);
+        assert!((result.value - 0.0).abs() <= TEST_TOLERANCE);
         assert_eq!(result.source, "a");
         assert_eq!(result.sink, "c");
         assert!(result.cut_edges.is_empty());
@@ -22893,7 +23485,7 @@ mod tests {
                 ("3".to_owned(), "5".to_owned())
             ]
         );
-        assert!((result.total_weight - 16.0).abs() <= 1e-12);
+        assert!((result.total_weight - 16.0).abs() <= TEST_TOLERANCE);
         assert_eq!(result.witness.algorithm, "blossom_max_weight_matching");
         assert_matching_is_valid_and_maximal(&graph, &result.matching);
     }
@@ -22922,7 +23514,7 @@ mod tests {
                 ("b".to_owned(), "d".to_owned())
             ]
         );
-        assert!((result.total_weight - 18.0).abs() <= 1e-12);
+        assert!((result.total_weight - 18.0).abs() <= TEST_TOLERANCE);
         assert_matching_is_valid_and_maximal(&graph, &result.matching);
     }
 
@@ -22961,7 +23553,7 @@ mod tests {
         let forward_default = max_weight_matching(&forward, false, "weight");
         let reverse_default = max_weight_matching(&reverse, false, "weight");
         assert_eq!(forward_default.matching, reverse_default.matching);
-        assert!((forward_default.total_weight - reverse_default.total_weight).abs() <= 1e-12);
+        assert!((forward_default.total_weight - reverse_default.total_weight).abs() <= TEST_TOLERANCE);
 
         let forward_cardinality = max_weight_matching(&forward, true, "weight");
         let reverse_cardinality = max_weight_matching(&reverse, true, "weight");
@@ -22973,7 +23565,7 @@ mod tests {
         let forward_min = min_weight_matching(&forward, "weight");
         let reverse_min = min_weight_matching(&reverse, "weight");
         assert_eq!(forward_min.matching, reverse_min.matching);
-        assert!((forward_min.total_weight - reverse_min.total_weight).abs() <= 1e-12);
+        assert!((forward_min.total_weight - reverse_min.total_weight).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -22994,7 +23586,7 @@ mod tests {
             default_result.matching,
             vec![("a".to_owned(), "b".to_owned())]
         );
-        assert!((default_result.total_weight - 100.0).abs() <= 1e-12);
+        assert!((default_result.total_weight - 100.0).abs() <= TEST_TOLERANCE);
 
         let maxcard_result = max_weight_matching(&graph, true, "weight");
         assert_eq!(
@@ -23004,7 +23596,7 @@ mod tests {
                 ("b".to_owned(), "d".to_owned())
             ]
         );
-        assert!((maxcard_result.total_weight - 99.0).abs() <= 1e-12);
+        assert!((maxcard_result.total_weight - 99.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             maxcard_result.witness.algorithm,
             "blossom_max_weight_matching_maxcardinality"
@@ -23036,7 +23628,7 @@ mod tests {
                 ("b".to_owned(), "d".to_owned())
             ]
         );
-        assert!((result.total_weight - 2.0).abs() <= 1e-12);
+        assert!((result.total_weight - 2.0).abs() <= TEST_TOLERANCE);
         assert_eq!(result.witness.algorithm, "blossom_min_weight_matching");
         assert_matching_is_valid_and_maximal(&graph, &result.matching);
     }
@@ -23054,7 +23646,7 @@ mod tests {
 
         let result = min_weight_matching(&graph, "weight");
         assert_eq!(result.matching, vec![("a".to_owned(), "b".to_owned())]);
-        assert!((result.total_weight - 1.0).abs() <= 1e-12);
+        assert!((result.total_weight - 1.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23064,11 +23656,11 @@ mod tests {
         let min_result = min_weight_matching(&graph, "weight");
 
         assert!(max_result.matching.is_empty());
-        assert!((max_result.total_weight - 0.0).abs() <= 1e-12);
+        assert!((max_result.total_weight - 0.0).abs() <= TEST_TOLERANCE);
         assert_eq!(max_result.witness.nodes_touched, 0);
 
         assert!(min_result.matching.is_empty());
-        assert!((min_result.total_weight - 0.0).abs() <= 1e-12);
+        assert!((min_result.total_weight - 0.0).abs() <= TEST_TOLERANCE);
         assert_eq!(min_result.witness.nodes_touched, 0);
     }
 
@@ -23277,7 +23869,7 @@ mod tests {
         for key in forward_edge_map.keys() {
             let left = *forward_edge_map.get(key).unwrap_or(&0.0);
             let right = *reverse_edge_map.get(key).unwrap_or(&0.0);
-            assert!((left - right).abs() <= 1e-12);
+            assert!((left - right).abs() <= TEST_TOLERANCE);
         }
 
         let forward_pagerank = pagerank(&forward);
@@ -23378,7 +23970,7 @@ mod tests {
         assert_eq!(result.scores.len(), 1);
         assert_eq!(result.scores[0].node, "solo");
         // NetworkX returns 0.0 for isolated singleton (degree=0, denominator=1)
-        assert!((result.scores[0].score - 0.0).abs() <= 1e-12);
+        assert!((result.scores[0].score - 0.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23417,7 +24009,7 @@ mod tests {
         let expected = [("a", 0.5), ("b", 0.5), ("c", 0.0)];
         for (actual, (exp_node, exp_score)) in result.scores.iter().zip(expected) {
             assert_eq!(actual.node, exp_node);
-            assert!((actual.score - exp_score).abs() <= 1e-12);
+            assert!((actual.score - exp_score).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -23432,7 +24024,7 @@ mod tests {
         let single_result = closeness_centrality(&singleton);
         assert_eq!(single_result.scores.len(), 1);
         assert_eq!(single_result.scores[0].node, "solo");
-        assert!((single_result.scores[0].score - 0.0).abs() <= 1e-12);
+        assert!((single_result.scores[0].score - 0.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23472,7 +24064,7 @@ mod tests {
         let expected = [("a", 1.0_f64), ("b", 1.0_f64), ("c", 0.0_f64)];
         for (actual, (exp_node, exp_score)) in result.scores.iter().zip(expected) {
             assert_eq!(actual.node, exp_node);
-            assert!((actual.score - exp_score).abs() <= 1e-12);
+            assert!((actual.score - exp_score).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -23487,7 +24079,7 @@ mod tests {
         let single_result = harmonic_centrality(&singleton);
         assert_eq!(single_result.scores.len(), 1);
         assert_eq!(single_result.scores[0].node, "solo");
-        assert!((single_result.scores[0].score - 0.0).abs() <= 1e-12);
+        assert!((single_result.scores[0].score - 0.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23501,7 +24093,7 @@ mod tests {
         let result = katz_centrality(&graph);
         assert_eq!(result.scores.len(), 4);
         for score in result.scores {
-            assert!((score.score - 0.5_f64).abs() <= 1e-12);
+            assert!((score.score - 0.5_f64).abs() <= TEST_TOLERANCE);
         }
         assert_eq!(result.witness.algorithm, "katz_centrality_power_iteration");
         assert_eq!(result.witness.complexity_claim, "O(k * (|V| + |E|))");
@@ -23533,7 +24125,7 @@ mod tests {
             assert!(center > *leaf);
         }
         for pair in leaves.windows(2) {
-            assert!((pair[0] - pair[1]).abs() <= 1e-12);
+            assert!((pair[0] - pair[1]).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -23548,7 +24140,7 @@ mod tests {
         let single_result = katz_centrality(&singleton);
         assert_eq!(single_result.scores.len(), 1);
         assert_eq!(single_result.scores[0].node, "solo");
-        assert!((single_result.scores[0].score - 1.0).abs() <= 1e-12);
+        assert!((single_result.scores[0].score - 1.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23563,10 +24155,10 @@ mod tests {
         assert_eq!(result.hubs.len(), 4);
         assert_eq!(result.authorities.len(), 4);
         for score in result.hubs {
-            assert!((score.score - 0.25_f64).abs() <= 1e-12);
+            assert!((score.score - 0.25_f64).abs() <= TEST_TOLERANCE);
         }
         for score in result.authorities {
-            assert!((score.score - 0.25_f64).abs() <= 1e-12);
+            assert!((score.score - 0.25_f64).abs() <= TEST_TOLERANCE);
         }
         assert_eq!(result.witness.algorithm, "hits_centrality_power_iteration");
         assert_eq!(result.witness.complexity_claim, "O(k * (|V| + |E|))");
@@ -23675,12 +24267,12 @@ mod tests {
             .iter()
             .map(|entry| (entry.node.as_str(), entry.score))
             .collect::<BTreeMap<&str, f64>>();
-        assert!((hubs.get("a").copied().unwrap_or_default() - 0.5).abs() <= 1e-12);
-        assert!((hubs.get("b").copied().unwrap_or_default() - 0.5).abs() <= 1e-12);
-        assert!((hubs.get("c").copied().unwrap_or_default() - 0.0).abs() <= 1e-12);
-        assert!((authorities.get("a").copied().unwrap_or_default() - 0.5).abs() <= 1e-12);
-        assert!((authorities.get("b").copied().unwrap_or_default() - 0.5).abs() <= 1e-12);
-        assert!((authorities.get("c").copied().unwrap_or_default() - 0.0).abs() <= 1e-12);
+        assert!((hubs.get("a").copied().unwrap_or_default() - 0.5).abs() <= TEST_TOLERANCE);
+        assert!((hubs.get("b").copied().unwrap_or_default() - 0.5).abs() <= TEST_TOLERANCE);
+        assert!((hubs.get("c").copied().unwrap_or_default() - 0.0).abs() <= TEST_TOLERANCE);
+        assert!((authorities.get("a").copied().unwrap_or_default() - 0.5).abs() <= TEST_TOLERANCE);
+        assert!((authorities.get("b").copied().unwrap_or_default() - 0.5).abs() <= TEST_TOLERANCE);
+        assert!((authorities.get("c").copied().unwrap_or_default() - 0.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23697,8 +24289,8 @@ mod tests {
         assert_eq!(result.authorities.len(), 1);
         assert_eq!(result.hubs[0].node, "solo");
         assert_eq!(result.authorities[0].node, "solo");
-        assert!((result.hubs[0].score - 1.0).abs() <= 1e-12);
-        assert!((result.authorities[0].score - 1.0).abs() <= 1e-12);
+        assert!((result.hubs[0].score - 1.0).abs() <= TEST_TOLERANCE);
+        assert!((result.authorities[0].score - 1.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23712,7 +24304,7 @@ mod tests {
         let result = pagerank(&graph);
         assert_eq!(result.scores.len(), 4);
         for score in result.scores {
-            assert!((score.score - 0.25_f64).abs() <= 1e-12);
+            assert!((score.score - 0.25_f64).abs() <= TEST_TOLERANCE);
         }
         assert_eq!(result.witness.algorithm, "pagerank_power_iteration");
         assert_eq!(result.witness.complexity_claim, "O(k * (|V| + |E|))");
@@ -23744,7 +24336,7 @@ mod tests {
             assert!(center > *leaf);
         }
         for pair in leaves.windows(2) {
-            assert!((pair[0] - pair[1]).abs() <= 1e-12);
+            assert!((pair[0] - pair[1]).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -23779,7 +24371,7 @@ mod tests {
         let singleton_result = pagerank(&singleton);
         assert_eq!(singleton_result.scores.len(), 1);
         assert_eq!(singleton_result.scores[0].node, "solo");
-        assert!((singleton_result.scores[0].score - 1.0).abs() <= 1e-12);
+        assert!((singleton_result.scores[0].score - 1.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23793,7 +24385,7 @@ mod tests {
         let result = eigenvector_centrality(&graph);
         assert_eq!(result.scores.len(), 4);
         for score in result.scores {
-            assert!((score.score - 0.5_f64).abs() <= 1e-12);
+            assert!((score.score - 0.5_f64).abs() <= TEST_TOLERANCE);
         }
         assert_eq!(
             result.witness.algorithm,
@@ -23828,7 +24420,7 @@ mod tests {
             assert!(center > *leaf);
         }
         for pair in leaves.windows(2) {
-            assert!((pair[0] - pair[1]).abs() <= 1e-12);
+            assert!((pair[0] - pair[1]).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -23863,7 +24455,7 @@ mod tests {
         let single_result = eigenvector_centrality(&singleton);
         assert_eq!(single_result.scores.len(), 1);
         assert_eq!(single_result.scores[0].node, "solo");
-        assert!((single_result.scores[0].score - 1.0).abs() <= 1e-12);
+        assert!((single_result.scores[0].score - 1.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -23882,7 +24474,7 @@ mod tests {
         ];
         for (actual, (exp_node, exp_score)) in result.scores.iter().zip(expected) {
             assert_eq!(actual.node, exp_node);
-            assert!((actual.score - exp_score).abs() <= 1e-12);
+            assert!((actual.score - exp_score).abs() <= TEST_TOLERANCE);
         }
         assert_eq!(result.witness.algorithm, "brandes_betweenness_centrality");
         assert_eq!(result.witness.complexity_claim, "O(|V| * |E|)");
@@ -23901,10 +24493,10 @@ mod tests {
         for score in result.scores {
             if score.node == "c" {
                 center_seen = true;
-                assert!((score.score - 1.0).abs() <= 1e-12);
+                assert!((score.score - 1.0).abs() <= TEST_TOLERANCE);
             } else {
                 assert!(score.node.starts_with('l'));
-                assert!((score.score - 0.0).abs() <= 1e-12);
+                assert!((score.score - 0.0).abs() <= TEST_TOLERANCE);
             }
         }
         assert!(center_seen);
@@ -23920,7 +24512,7 @@ mod tests {
 
         let result = betweenness_centrality(&graph);
         for score in result.scores {
-            assert!((score.score - (1.0 / 6.0)).abs() <= 1e-12);
+            assert!((score.score - (1.0 / 6.0)).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -23983,13 +24575,13 @@ mod tests {
         let singleton_result = betweenness_centrality(&singleton);
         assert_eq!(singleton_result.scores.len(), 1);
         assert_eq!(singleton_result.scores[0].node, "solo");
-        assert!((singleton_result.scores[0].score - 0.0).abs() <= 1e-12);
+        assert!((singleton_result.scores[0].score - 0.0).abs() <= TEST_TOLERANCE);
 
         let mut pair = Graph::strict();
         pair.add_edge("a", "b").expect("edge add should succeed");
         let pair_result = betweenness_centrality(&pair);
         for score in pair_result.scores {
-            assert!((score.score - 0.0).abs() <= 1e-12);
+            assert!((score.score - 0.0).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -24006,12 +24598,12 @@ mod tests {
             .iter()
             .map(|entry| ((entry.left.as_str(), entry.right.as_str()), entry.score))
             .collect::<BTreeMap<(&str, &str), f64>>();
-        assert!((as_edge_map.get(&("a", "b")).copied().unwrap_or_default() - 0.5).abs() <= 1e-12);
+        assert!((as_edge_map.get(&("a", "b")).copied().unwrap_or_default() - 0.5).abs() <= TEST_TOLERANCE);
         assert!(
             (as_edge_map.get(&("b", "c")).copied().unwrap_or_default() - (2.0 / 3.0)).abs()
                 <= 1e-12
         );
-        assert!((as_edge_map.get(&("c", "d")).copied().unwrap_or_default() - 0.5).abs() <= 1e-12);
+        assert!((as_edge_map.get(&("c", "d")).copied().unwrap_or_default() - 0.5).abs() <= TEST_TOLERANCE);
         assert_eq!(
             result.witness.algorithm,
             "brandes_edge_betweenness_centrality"
@@ -24029,7 +24621,7 @@ mod tests {
 
         let result = edge_betweenness_centrality(&graph);
         for score in result.scores {
-            assert!((score.score - (1.0 / 3.0)).abs() <= 1e-12);
+            assert!((score.score - (1.0 / 3.0)).abs() <= TEST_TOLERANCE);
         }
     }
 
@@ -24163,15 +24755,15 @@ mod tests {
         assert_eq!(edge_betweenness.scores.len(), 5);
         assert_eq!(pagerank_result.scores.len(), 5);
         assert_eq!(eigenvector_result.scores.len(), 5);
-        assert!((st_edge_cut.value - 1.0).abs() <= 1e-12);
+        assert!((st_edge_cut.value - 1.0).abs() <= TEST_TOLERANCE);
         assert_eq!(
             st_edge_cut.cut_edges,
             vec![("d".to_owned(), "e".to_owned())]
         );
-        assert!((pair_edge_connectivity.value - 1.0).abs() <= 1e-12);
-        assert!((global_edge_connectivity.value - 1.0).abs() <= 1e-12);
+        assert!((pair_edge_connectivity.value - 1.0).abs() <= TEST_TOLERANCE);
+        assert!((global_edge_connectivity.value - 1.0).abs() <= TEST_TOLERANCE);
         assert!(global_edge_connectivity.value <= pair_edge_connectivity.value);
-        assert!((global_min_edge_cut.value - 1.0).abs() <= 1e-12);
+        assert!((global_min_edge_cut.value - 1.0).abs() <= TEST_TOLERANCE);
         assert_eq!(global_min_edge_cut.source, "a");
         assert_eq!(global_min_edge_cut.sink, "e");
         assert_eq!(
@@ -26489,7 +27081,7 @@ mod tests {
         // N(0) = {1, 2}, N(1) = {0, 2}, common = {2}, union = {0, 1, 2}
         // Jaccard = 1/3
         let (_, _, score) = &result[0];
-        assert!((score - 1.0 / 3.0).abs() < 1e-10);
+        assert!((score - 1.0 / 3.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26503,7 +27095,7 @@ mod tests {
         // N(0) = {1}, N(2) = {1}, common = {1}, union = {1}
         // Jaccard = 1/1 = 1.0
         let (_, _, score) = &result[0];
-        assert!((score - 1.0).abs() < 1e-10);
+        assert!((score - 1.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26519,7 +27111,7 @@ mod tests {
         // N(0) = {1, 2}, N(1) = {0, 2}, common = {2}, deg(2) = 3
         // AA = 1/ln(3)
         let (_, _, score) = &result[0];
-        assert!((score - 1.0 / 3.0_f64.ln()).abs() < 1e-10);
+        assert!((score - 1.0 / 3.0_f64.ln()).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26532,7 +27124,7 @@ mod tests {
         let result = preferential_attachment(&g, &pairs);
         // deg(0) = 2, deg(1) = 2 => PA = 4.0
         let (_, _, score) = &result[0];
-        assert!((score - 4.0).abs() < 1e-10);
+        assert!((score - 4.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26548,7 +27140,7 @@ mod tests {
         // N(0) = {1, 2}, N(1) = {0, 2}, common = {2}, deg(2) = 3
         // RA = 1/3
         let (_, _, score) = &result[0];
-        assert!((score - 1.0 / 3.0).abs() < 1e-10);
+        assert!((score - 1.0 / 3.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26570,10 +27162,10 @@ mod tests {
         let pairs = vec![("a".to_owned(), "b".to_owned())];
         // No neighbors for either => Jaccard = 0/0 = 0
         let jc = jaccard_coefficient(&g, &pairs);
-        assert!((jc[0].2 - 0.0).abs() < 1e-10);
+        assert!((jc[0].2 - 0.0).abs() < TEST_TOLERANCE);
         // PA = 0 * 0 = 0
         let pa = preferential_attachment(&g, &pairs);
-        assert!((pa[0].2 - 0.0).abs() < 1e-10);
+        assert!((pa[0].2 - 0.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -26687,7 +27279,7 @@ mod tests {
         dg.add_edge("a", "b").unwrap();
         dg.add_edge("b", "a").unwrap();
         let r = overall_reciprocity(&dg);
-        assert!((r - 1.0).abs() < 1e-10);
+        assert!((r - 1.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26696,7 +27288,7 @@ mod tests {
         dg.add_edge("a", "b").unwrap();
         dg.add_edge("b", "c").unwrap();
         let r = overall_reciprocity(&dg);
-        assert!((r - 0.0).abs() < 1e-10);
+        assert!((r - 0.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26707,13 +27299,13 @@ mod tests {
         dg.add_edge("b", "c").unwrap();
         // 3 edges total, 2 reciprocated (a->b and b->a)
         let r = overall_reciprocity(&dg);
-        assert!((r - 2.0 / 3.0).abs() < 1e-10);
+        assert!((r - 2.0 / 3.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
     fn overall_reciprocity_empty() {
         let dg = DiGraph::strict();
-        assert!((overall_reciprocity(&dg) - 0.0).abs() < 1e-10);
+        assert!((overall_reciprocity(&dg) - 0.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26724,11 +27316,11 @@ mod tests {
         dg.add_edge("b", "c").unwrap();
         let r = reciprocity(&dg, &["a", "b", "c"]);
         // a: out={b}, in={b}, total=2, reciprocated=2 -> 1.0
-        assert!((r["a"] - 1.0).abs() < 1e-10);
+        assert!((r["a"] - 1.0).abs() < TEST_TOLERANCE);
         // b: out={a,c}, in={a}, total=3, reciprocated=2 (b->a reciprocated, a->b reciprocated) -> 2/3
-        assert!((r["b"] - 2.0 / 3.0).abs() < 1e-10);
+        assert!((r["b"] - 2.0 / 3.0).abs() < TEST_TOLERANCE);
         // c: out={}, in={b}, total=1, reciprocated=0 -> 0.0
-        assert!((r["c"] - 0.0).abs() < 1e-10);
+        assert!((r["c"] - 0.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -26744,7 +27336,7 @@ mod tests {
         let _ = g.add_edge("0", "1");
         let _ = g.add_edge("1", "2");
         let w = wiener_index(&g).unwrap();
-        assert!((w - 4.0).abs() < 1e-10);
+        assert!((w - 4.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26756,7 +27348,7 @@ mod tests {
         let _ = g.add_edge("1", "2");
         let _ = g.add_edge("0", "2");
         let w = wiener_index(&g).unwrap();
-        assert!((w - 3.0).abs() < 1e-10);
+        assert!((w - 3.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26771,7 +27363,7 @@ mod tests {
     fn wiener_index_single_node() {
         let mut g = Graph::strict();
         g.add_node("a");
-        assert!((wiener_index(&g).unwrap() - 0.0).abs() < 1e-10);
+        assert!((wiener_index(&g).unwrap() - 0.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -26790,7 +27382,7 @@ mod tests {
         let _ = g.add_edge("2", "3");
         let adc = average_degree_connectivity(&g);
         // All nodes have degree 3, neighbors all have degree 3
-        assert!((adc[&3] - 3.0).abs() < 1e-10);
+        assert!((adc[&3] - 3.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26802,9 +27394,9 @@ mod tests {
         let _ = g.add_edge("c", "d");
         let adc = average_degree_connectivity(&g);
         // Center (deg=3): neighbors all have deg 1 → avg=1.0
-        assert!((adc[&3] - 1.0).abs() < 1e-10);
+        assert!((adc[&3] - 1.0).abs() < TEST_TOLERANCE);
         // Leaves (deg=1): neighbor is center with deg 3 → avg=3.0
-        assert!((adc[&1] - 3.0).abs() < 1e-10);
+        assert!((adc[&1] - 3.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -26824,7 +27416,7 @@ mod tests {
         let rc = rich_club_coefficient(&g);
         // Only degree present is 3
         // k=3: no nodes with deg>3 → 0.0
-        assert!((rc[&3] - 0.0).abs() < 1e-10);
+        assert!((rc[&3] - 0.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26836,9 +27428,9 @@ mod tests {
         let _ = g.add_edge("c", "d");
         let rc = rich_club_coefficient(&g);
         // k=1: nodes with deg>1 = {c (deg 3)}, only 1 node → phi=0.0
-        assert!((rc[&1] - 0.0).abs() < 1e-10);
+        assert!((rc[&1] - 0.0).abs() < TEST_TOLERANCE);
         // k=3: no nodes with deg>3 → 0.0
-        assert!((rc[&3] - 0.0).abs() < 1e-10);
+        assert!((rc[&3] - 0.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -26854,7 +27446,7 @@ mod tests {
         let _ = g.add_edge("1", "2");
         let _ = g.add_edge("0", "2");
         let s = s_metric(&g);
-        assert!((s - 12.0).abs() < 1e-10);
+        assert!((s - 12.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -26866,13 +27458,13 @@ mod tests {
         let _ = g.add_edge("c", "b");
         let _ = g.add_edge("c", "d");
         let s = s_metric(&g);
-        assert!((s - 9.0).abs() < 1e-10);
+        assert!((s - 9.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
     fn s_metric_empty() {
         let g = Graph::strict();
-        assert!((s_metric(&g) - 0.0).abs() < 1e-10);
+        assert!((s_metric(&g) - 0.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -27353,7 +27945,7 @@ mod tests {
         let result = maximum_spanning_tree(&g, "weight");
         // Max ST picks edges with weight 3.0 and 2.0
         assert_eq!(result.edges.len(), 2);
-        assert!((result.total_weight - 5.0).abs() < 1e-10);
+        assert!((result.total_weight - 5.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -27362,7 +27954,7 @@ mod tests {
         g.add_edge("a", "b").expect("edge add should succeed");
         g.add_edge("b", "c").expect("edge add should succeed");
         g.add_edge("a", "c").expect("edge add should succeed");
-        assert!((super::number_of_spanning_trees(&g, None) - 3.0).abs() < 1e-10);
+        assert!((super::number_of_spanning_trees(&g, None) - 3.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -28624,7 +29216,7 @@ mod tests {
                 },
             ]
         );
-        assert!((result.total_weight - 9.0).abs() <= 1e-12);
+        assert!((result.total_weight - 9.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -28646,7 +29238,7 @@ mod tests {
                 weight: -10.0,
             }]
         );
-        assert!((result.total_weight + 10.0).abs() <= 1e-12);
+        assert!((result.total_weight + 10.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -28683,7 +29275,7 @@ mod tests {
                 },
             ]
         );
-        assert!((result.total_weight - 11.0).abs() <= 1e-12);
+        assert!((result.total_weight - 11.0).abs() <= TEST_TOLERANCE);
     }
 
     #[test]
@@ -28731,7 +29323,7 @@ mod tests {
                 },
             ]
         );
-        assert!((result.total_weight - 4.0).abs() <= 1e-12);
+        assert!((result.total_weight - 4.0).abs() <= TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -29582,9 +30174,9 @@ mod tests {
         let scores = in_degree_centrality(&dg);
         let map: std::collections::HashMap<&str, f64> =
             scores.iter().map(|s| (s.node.as_str(), s.score)).collect();
-        assert!((map["a"] - 0.0).abs() < 1e-10);
-        assert!((map["b"] - 0.5).abs() < 1e-10);
-        assert!((map["c"] - 0.5).abs() < 1e-10);
+        assert!((map["a"] - 0.0).abs() < TEST_TOLERANCE);
+        assert!((map["b"] - 0.5).abs() < TEST_TOLERANCE);
+        assert!((map["c"] - 0.5).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29596,9 +30188,9 @@ mod tests {
         let scores = out_degree_centrality(&dg);
         let map: std::collections::HashMap<&str, f64> =
             scores.iter().map(|s| (s.node.as_str(), s.score)).collect();
-        assert!((map["a"] - 0.5).abs() < 1e-10);
-        assert!((map["b"] - 0.5).abs() < 1e-10);
-        assert!((map["c"] - 0.0).abs() < 1e-10);
+        assert!((map["a"] - 0.5).abs() < TEST_TOLERANCE);
+        assert!((map["b"] - 0.5).abs() < TEST_TOLERANCE);
+        assert!((map["c"] - 0.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29614,8 +30206,8 @@ mod tests {
         let in_scores = in_degree_centrality(&dg);
         let out_scores = out_degree_centrality(&dg);
         assert_eq!(in_scores.len(), 1);
-        assert!((in_scores[0].score - 0.0).abs() < 1e-10);
-        assert!((out_scores[0].score - 0.0).abs() < 1e-10);
+        assert!((in_scores[0].score - 0.0).abs() < TEST_TOLERANCE);
+        assert!((out_scores[0].score - 0.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -29629,7 +30221,7 @@ mod tests {
         let _ = g.add_edge("a", "b");
         let _ = g.add_edge("b", "c");
         let _ = g.add_edge("c", "a");
-        assert!((local_reaching_centrality(&g, "a") - 1.0).abs() < 1e-10);
+        assert!((local_reaching_centrality(&g, "a") - 1.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29638,7 +30230,7 @@ mod tests {
         let _ = g.add_edge("a", "b");
         g.add_node("c");
         // a can reach b but not c
-        assert!((local_reaching_centrality(&g, "a") - 0.5).abs() < 1e-10);
+        assert!((local_reaching_centrality(&g, "a") - 0.5).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29647,9 +30239,9 @@ mod tests {
         dg.add_edge("a", "b").unwrap();
         dg.add_edge("b", "c").unwrap();
         // a can reach b and c
-        assert!((local_reaching_centrality_directed(&dg, "a") - 1.0).abs() < 1e-10);
+        assert!((local_reaching_centrality_directed(&dg, "a") - 1.0).abs() < TEST_TOLERANCE);
         // c can reach nobody
-        assert!((local_reaching_centrality_directed(&dg, "c") - 0.0).abs() < 1e-10);
+        assert!((local_reaching_centrality_directed(&dg, "c") - 0.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29659,7 +30251,7 @@ mod tests {
         let _ = g.add_edge("a", "b");
         let _ = g.add_edge("b", "c");
         let _ = g.add_edge("c", "a");
-        assert!((global_reaching_centrality(&g) - 0.0).abs() < 1e-10);
+        assert!((global_reaching_centrality(&g) - 0.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29669,7 +30261,7 @@ mod tests {
         let mut dg = DiGraph::strict();
         dg.add_edge("a", "b").unwrap();
         dg.add_edge("b", "c").unwrap();
-        assert!((global_reaching_centrality_directed(&dg) - 0.75).abs() < 1e-10);
+        assert!((global_reaching_centrality_directed(&dg) - 0.75).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -29683,9 +30275,9 @@ mod tests {
         let _ = g.add_edge("b", "c");
         let _ = g.add_edge("c", "a");
         // Group {a}: neighbors outside = {b, c}, non-group = 2, so 2/2 = 1.0
-        assert!((group_degree_centrality(&g, &["a"]) - 1.0).abs() < 1e-10);
+        assert!((group_degree_centrality(&g, &["a"]) - 1.0).abs() < TEST_TOLERANCE);
         // Group {a, b}: neighbors outside = {c}, non-group = 1, so 1/1 = 1.0
-        assert!((group_degree_centrality(&g, &["a", "b"]) - 1.0).abs() < 1e-10);
+        assert!((group_degree_centrality(&g, &["a", "b"]) - 1.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29694,7 +30286,7 @@ mod tests {
         let _ = g.add_edge("a", "b");
         g.add_node("c");
         // Group {a}: neighbors outside = {b}, non-group = 2, so 1/2 = 0.5
-        assert!((group_degree_centrality(&g, &["a"]) - 0.5).abs() < 1e-10);
+        assert!((group_degree_centrality(&g, &["a"]) - 0.5).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29703,7 +30295,7 @@ mod tests {
         dg.add_edge("a", "b").unwrap();
         dg.add_edge("c", "b").unwrap();
         // Group {b}: predecessors outside = {a, c}, non-group = 2, so 2/2 = 1.0
-        assert!((group_in_degree_centrality(&dg, &["b"]) - 1.0).abs() < 1e-10);
+        assert!((group_in_degree_centrality(&dg, &["b"]) - 1.0).abs() < TEST_TOLERANCE);
     }
 
     #[test]
@@ -29712,7 +30304,7 @@ mod tests {
         dg.add_edge("a", "b").unwrap();
         dg.add_edge("a", "c").unwrap();
         // Group {a}: successors outside = {b, c}, non-group = 2, so 2/2 = 1.0
-        assert!((group_out_degree_centrality(&dg, &["a"]) - 1.0).abs() < 1e-10);
+        assert!((group_out_degree_centrality(&dg, &["a"]) - 1.0).abs() < TEST_TOLERANCE);
     }
 
     // -----------------------------------------------------------------------
@@ -30532,8 +31124,20 @@ mod tests {
     #[test]
     fn test_wheel_graph() {
         let g = wheel_graph(5).expect("wheel_graph failed");
-        assert_eq!(g.node_count(), 6);
-        assert_eq!(g.edge_count(), 10);
+        assert_eq!(g.node_count(), 5);
+        assert_eq!(g.edge_count(), 8);
+
+        let empty = wheel_graph(0).expect("wheel_graph(0) failed");
+        assert_eq!(empty.node_count(), 0);
+        assert_eq!(empty.edge_count(), 0);
+
+        let single = wheel_graph(1).expect("wheel_graph(1) failed");
+        assert_eq!(single.node_count(), 1);
+        assert_eq!(single.edge_count(), 0);
+
+        let pair = wheel_graph(2).expect("wheel_graph(2) failed");
+        assert_eq!(pair.node_count(), 2);
+        assert_eq!(pair.edge_count(), 1);
     }
 
     #[test]

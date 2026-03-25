@@ -10,10 +10,30 @@ use mt19937::{MT19937, gen_res53};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 use std::fmt;
 
+/// Maximum nodes for general generators (path, cycle, empty, etc.).
+/// At average degree ~10, a 100k-node graph uses ~2M edges ≈ 48MB.
+/// This cap prevents accidental denial-of-service from huge inputs.
 const MAX_N_GENERIC: usize = 100_000;
+
+/// Star graph cap. star_graph(n) creates a hub with n spokes = n edges.
+/// Set to MAX_N_GENERIC - 1 so total nodes (hub + spokes) stays within
+/// the generic budget.
 const MAX_N_STAR: usize = MAX_N_GENERIC - 1;
+
+/// Complete graph cap. K_n has n*(n-1)/2 edges.
+/// K_2000 ≈ 2M edges ≈ 48MB edge storage. K_3000 would be ~4.5M edges,
+/// pushing memory above 100MB for a single graph.
 const MAX_N_COMPLETE: usize = 2_000;
+
+/// G(n,p) and similar O(n²) random graph cap.
+/// The naive algorithm iterates all n*(n-1)/2 candidate edges.
+/// At n=20000 that's ~200M iterations — ~1 second in Rust.
+/// Beyond this, generation time becomes user-visible.
 const MAX_N_GNP: usize = 20_000;
+
+/// Tolerance for validating probability parameter sums (e.g.,
+/// scale_free_graph alpha+beta+gamma = 1.0). Matches NetworkX.
+const PARAM_SUM_EPSILON: f64 = 1.0e-6;
 
 #[derive(Debug, Clone)]
 pub struct GenerationReport {
@@ -1211,7 +1231,7 @@ impl GraphGenerator {
         }
 
         let sum = alpha + beta + gamma;
-        if (sum - 1.0).abs() > 1e-6 {
+        if (sum - 1.0).abs() > PARAM_SUM_EPSILON {
             return Err(GenerationError::FailClosed {
                 operation: "scale_free_graph",
                 reason: format!("alpha + beta + gamma must = 1.0, got {sum}"),

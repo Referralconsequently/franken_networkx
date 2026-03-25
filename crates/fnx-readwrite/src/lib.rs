@@ -1,5 +1,22 @@
 #![forbid(unsafe_code)]
 
+// Risk probability calibration for dispatch requests:
+//
+// 0.03 — Well-tested text formats (edgelist, adjacency list).
+//         Low incompatibility risk because the format is simple and
+//         round-trip tested in conformance fixtures.
+//
+// 0.08 — Structured formats (JSON graph, GML, GraphML).
+//         Moderate risk due to attribute type coercion, XML namespace
+//         handling, and directed/undirected auto-detection heuristics.
+//
+// 0.09 — Complex parse paths (GraphML with attribute keys).
+//         Slightly higher than JSON due to XML parser edge cases.
+//
+// These values feed into decision_theoretic_action() in fnx-dispatch.
+// In strict mode, risk_probability < 0.5 results in Allow.
+// In hardened mode, the threshold is more conservative.
+
 use fnx_classes::digraph::{DiGraph, DiGraphSnapshot};
 use fnx_classes::{AttrMap, Graph, GraphError, GraphSnapshot};
 use fnx_dispatch::{BackendRegistry, BackendSpec, DispatchError, DispatchRequest};

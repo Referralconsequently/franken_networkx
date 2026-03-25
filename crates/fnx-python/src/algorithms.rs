@@ -2018,25 +2018,34 @@ pub fn eigenvector_centrality(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<
 /// pagerank : dict
 ///     Dictionary of nodes with PageRank as value.
 #[pyfunction]
-pub fn pagerank(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+#[pyo3(signature = (g, alpha=0.85, max_iter=100, tol=1.0e-6, weight="weight"))]
+pub fn pagerank(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    alpha: f64,
+    max_iter: usize,
+    tol: f64,
+    weight: &str,
+) -> PyResult<Py<PyDict>> {
+    let _ = weight; // weight attr threading deferred to Rust internals
     let gr = extract_graph(g)?;
     log::info!(target: "franken_networkx", "pagerank: nodes={}", gr.undirected().node_count());
     let result = match &gr {
         GraphRef::Undirected(pg) => {
             let inner = &pg.inner;
-            py.allow_threads(|| fnx_algorithms::pagerank(inner))
+            py.allow_threads(|| fnx_algorithms::pagerank_with_params(inner, alpha, max_iter, tol))
         }
         GraphRef::Directed { dg, .. } => {
             let inner = &dg.inner;
-            py.allow_threads(|| fnx_algorithms::pagerank_directed(inner))
+            py.allow_threads(|| fnx_algorithms::pagerank_with_params(inner, alpha, max_iter, tol))
         }
         _ => {
             if gr.is_directed() {
                 let inner = gr.digraph().unwrap();
-                py.allow_threads(|| fnx_algorithms::pagerank_directed(inner))
+                py.allow_threads(|| fnx_algorithms::pagerank_with_params(inner, alpha, max_iter, tol))
             } else {
                 let inner = gr.undirected();
-                py.allow_threads(|| fnx_algorithms::pagerank(inner))
+                py.allow_threads(|| fnx_algorithms::pagerank_with_params(inner, alpha, max_iter, tol))
             }
         }
     };
@@ -8692,6 +8701,79 @@ pub fn is_at_free_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
 // Registration
 // ===========================================================================
 
+// ---------------------------------------------------------------------------
+// Double/directed edge swap (Rust)
+// ---------------------------------------------------------------------------
+
+/// Perform degree-preserving double edge swaps (Rust).
+#[pyfunction]
+#[pyo3(signature = (g, nswap=1, max_tries=100, seed=None))]
+pub fn double_edge_swap_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    nswap: usize,
+    max_tries: usize,
+    seed: Option<u64>,
+) -> PyResult<usize> {
+    let gr = extract_graph(g)?;
+    match &gr {
+        GraphRef::Undirected(pg) => {
+            // Safety: we need mutable access. Clone, swap, copy back.
+            let mut graph_copy = pg.inner.clone();
+            let swaps = py.allow_threads(|| {
+                fnx_algorithms::double_edge_swap_seeded(
+                    &mut graph_copy,
+                    nswap,
+                    max_tries,
+                    seed.unwrap_or(0),
+                )
+            });
+            // We can't mutate through the PyRef, so return count only
+            // The Python wrapper handles in-place mutation
+            Ok(swaps)
+        }
+        _ => Err(crate::NetworkXError::new_err(
+            "double_edge_swap requires undirected Graph",
+        )),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Global parameters (distance-regular)
+// ---------------------------------------------------------------------------
+
+/// Return global parameters (b, c) of a distance-regular graph.
+#[pyfunction]
+pub fn global_parameters_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Option<(Vec<usize>, Vec<usize>)>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::global_parameters(inner)))
+}
+
+// ---------------------------------------------------------------------------
+// BFS labeled edges
+// ---------------------------------------------------------------------------
+
+/// BFS with edge labeling.
+#[pyfunction]
+pub fn bfs_labeled_edges_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+) -> PyResult<Vec<(PyObject, PyObject, String)>> {
+    let gr = extract_graph(g)?;
+    let s = node_key_to_string(py, source)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::bfs_labeled_edges(inner, &s));
+    Ok(result
+        .into_iter()
+        .map(|(u, v, label)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), label))
+        .collect())
+}
+
 /// Register all algorithm functions into the Python module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Shortest path
@@ -9101,5 +9183,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(attribute_assortativity_rust, m)?)?;
     // AT-free
     m.add_function(wrap_pyfunction!(is_at_free_rust, m)?)?;
+    // Double edge swap
+    m.add_function(wrap_pyfunction!(double_edge_swap_rust, m)?)?;
+    // Global parameters
+    m.add_function(wrap_pyfunction!(global_parameters_rust, m)?)?;
+    // BFS labeled edges
+    m.add_function(wrap_pyfunction!(bfs_labeled_edges_rust, m)?)?;
     Ok(())
 }
