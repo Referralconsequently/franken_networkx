@@ -278,22 +278,22 @@ from franken_networkx._fnx import (
     barbell_graph as _rust_barbell_graph,
     bull_graph as _rust_bull_graph,
     chvatal_graph,
-    cubical_graph,
+    cubical_graph as _rust_cubical_graph,
     desargues_graph,
-    diamond_graph,
+    diamond_graph as _rust_diamond_graph,
     dodecahedral_graph,
     frucht_graph,
     heawood_graph,
-    house_graph,
-    house_x_graph,
+    house_graph as _rust_house_graph,
+    house_x_graph as _rust_house_x_graph,
     icosahedral_graph,
     krackhardt_kite_graph,
     moebius_kantor_graph,
     octahedral_graph,
     pappus_graph,
-    petersen_graph,
+    petersen_graph as _rust_petersen_graph,
     sedgewick_maze_graph,
-    tetrahedral_graph,
+    tetrahedral_graph as _rust_tetrahedral_graph,
     truncated_cube_graph,
     truncated_tetrahedron_graph,
     tutte_graph,
@@ -2526,6 +2526,78 @@ def wheel_graph(n, create_using=None):
         return _rust_wheel_graph(n)
 
     graph = nx.wheel_graph(n, create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def diamond_graph(create_using=None):
+    """Return the diamond graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_diamond_graph()
+
+    graph = nx.diamond_graph(create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def house_graph(create_using=None):
+    """Return the house graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_house_graph()
+
+    graph = nx.house_graph(create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def house_x_graph(create_using=None):
+    """Return the house-X graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_house_x_graph()
+
+    graph = nx.house_x_graph(create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def cubical_graph(create_using=None):
+    """Return the cubical graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_cubical_graph()
+
+    graph = nx.cubical_graph(create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def petersen_graph(create_using=None):
+    """Return the Petersen graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_petersen_graph()
+
+    graph = nx.petersen_graph(create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def tetrahedral_graph(create_using=None):
+    """Return the tetrahedral graph."""
+    import networkx as nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_tetrahedral_graph()
+
+    graph = nx.tetrahedral_graph(create_using=None)
     return _from_nx_graph(graph, create_using=create_using)
 
 

@@ -21603,51 +21603,6 @@ pub fn bfs_labeled_edges(
 // Graph set operations
 // ---------------------------------------------------------------------------
 
-/// Return the union of two undirected graphs.
-///
-/// Nodes and edges from both graphs are combined. Raises an error if
-/// node sets overlap (use `disjoint_union` for overlapping graphs).
-pub fn graph_union(g1: &Graph, g2: &Graph) -> Result<Graph, String> {
-    let mut result = Graph::new(g1.mode());
-    for node in g1.nodes_ordered() {
-        let _ = result.add_node(node.to_owned());
-    }
-    for node in g2.nodes_ordered() {
-        if result.has_node(node) {
-            return Err(format!("Node {} exists in both graphs. Use rename.", node));
-        }
-        let _ = result.add_node(node.to_owned());
-    }
-    for edge in g1.edges_ordered() {
-        let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
-    }
-    for edge in g2.edges_ordered() {
-        let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
-    }
-    Ok(result)
-}
-
-/// Return the intersection of two undirected graphs.
-///
-/// Keeps only nodes present in both and edges present in both.
-#[must_use]
-pub fn graph_intersection(g1: &Graph, g2: &Graph) -> Graph {
-    let mut result = Graph::new(g1.mode());
-    // Nodes in both
-    for node in g1.nodes_ordered() {
-        if g2.has_node(node) {
-            let _ = result.add_node(node.to_owned());
-        }
-    }
-    // Edges in both
-    for edge in g1.edges_ordered() {
-        if g2.has_edge(&edge.left, &edge.right) && result.has_node(&edge.left) && result.has_node(&edge.right) {
-            let _ = result.add_edge(edge.left.clone(), edge.right.clone());
-        }
-    }
-    result
-}
-
 /// Return the full join of two graphs.
 ///
 /// Union of both graphs plus all cross-edges between G1 and G2 nodes.

@@ -8698,6 +8698,55 @@ pub fn is_at_free_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
     Ok(py.allow_threads(|| fnx_algorithms::is_at_free(inner)))
 }
 
+// ---------------------------------------------------------------------------
+// Full join
+// ---------------------------------------------------------------------------
+
+/// Return the full join of two graphs.
+#[pyfunction]
+pub fn full_join_rust(py: Python<'_>, g1: &Bound<'_, PyAny>, g2: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let gr1 = extract_graph(g1)?;
+    let gr2 = extract_graph(g2)?;
+    let inner1 = gr1.undirected();
+    let inner2 = gr2.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::full_join(inner1, inner2));
+    let pg = crate::PyGraph {
+        inner: result,
+        node_key_map: std::collections::HashMap::new(),
+        node_py_attrs: std::collections::HashMap::new(),
+        edge_py_attrs: std::collections::HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+    Ok(pg.into_pyobject(py)?.into_any().unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Identified nodes (contract)
+// ---------------------------------------------------------------------------
+
+/// Contract node v into node u.
+#[pyfunction]
+pub fn identified_nodes_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    u: &Bound<'_, PyAny>,
+    v: &Bound<'_, PyAny>,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let u_key = node_key_to_string(py, u)?;
+    let v_key = node_key_to_string(py, v)?;
+    let result = py.allow_threads(|| fnx_algorithms::identified_nodes(inner, &u_key, &v_key));
+    let pg = crate::PyGraph {
+        inner: result,
+        node_key_map: std::collections::HashMap::new(),
+        node_py_attrs: std::collections::HashMap::new(),
+        edge_py_attrs: std::collections::HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+    Ok(pg.into_pyobject(py)?.into_any().unbind())
+}
+
 // Registration
 // ===========================================================================
 
@@ -9189,5 +9238,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(global_parameters_rust, m)?)?;
     // BFS labeled edges
     m.add_function(wrap_pyfunction!(bfs_labeled_edges_rust, m)?)?;
+    // Full join
+    m.add_function(wrap_pyfunction!(full_join_rust, m)?)?;
+    // Identified nodes
+    m.add_function(wrap_pyfunction!(identified_nodes_rust, m)?)?;
     Ok(())
 }
