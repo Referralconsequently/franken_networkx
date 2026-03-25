@@ -8943,6 +8943,195 @@ pub fn quotient_graph_rust(
     Ok(pg.into_pyobject(py)?.into_any().unbind())
 }
 
+// ---------------------------------------------------------------------------
+// Moral graph
+// ---------------------------------------------------------------------------
+
+/// Return the moral graph of a DAG.
+#[pyfunction]
+pub fn moral_graph_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    let dg = gr.digraph().ok_or_else(|| crate::NetworkXError::new_err("moral_graph requires DiGraph"))?;
+    let result = py.allow_threads(|| fnx_algorithms::moral_graph(dg));
+    let pg = crate::PyGraph {
+        inner: result,
+        node_key_map: std::collections::HashMap::new(),
+        node_py_attrs: std::collections::HashMap::new(),
+        edge_py_attrs: std::collections::HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+    Ok(pg.into_pyobject(py)?.into_any().unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Distance indices
+// ---------------------------------------------------------------------------
+
+/// Gutman index.
+#[pyfunction]
+pub fn gutman_index_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    py.allow_threads(|| fnx_algorithms::gutman_index(inner))
+        .ok_or_else(|| crate::NetworkXError::new_err("Graph is not connected"))
+}
+
+/// Hyper-Wiener index.
+#[pyfunction]
+pub fn hyper_wiener_index_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    py.allow_threads(|| fnx_algorithms::hyper_wiener_index(inner))
+        .ok_or_else(|| crate::NetworkXError::new_err("Graph is not connected"))
+}
+
+/// Schultz index.
+#[pyfunction]
+pub fn schultz_index_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    py.allow_threads(|| fnx_algorithms::schultz_index(inner))
+        .ok_or_else(|| crate::NetworkXError::new_err("Graph is not connected"))
+}
+
+/// Harmonic diameter.
+#[pyfunction]
+pub fn harmonic_diameter_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<f64> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::harmonic_diameter(inner)))
+}
+
+// ---------------------------------------------------------------------------
+// Self-loop functions
+// ---------------------------------------------------------------------------
+
+/// Return self-loop edges.
+#[pyfunction]
+pub fn selfloop_edges_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::selfloop_edges(inner));
+    Ok(result.iter().map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v))).collect())
+}
+
+/// Count self-loops.
+#[pyfunction]
+pub fn number_of_selfloops_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    Ok(py.allow_threads(|| fnx_algorithms::number_of_selfloops(inner)))
+}
+
+/// Nodes with self-loops.
+#[pyfunction]
+pub fn nodes_with_selfloops_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::nodes_with_selfloops(inner));
+    Ok(result.iter().map(|n| gr.py_node_key(py, n)).collect())
+}
+
+// ---------------------------------------------------------------------------
+// To edgelist / to dict of lists
+// ---------------------------------------------------------------------------
+
+/// Convert graph to dict-of-lists adjacency.
+#[pyfunction]
+pub fn to_dict_of_lists_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::to_dict_of_lists(inner));
+    let dict = PyDict::new(py);
+    for (node, nbrs) in &result {
+        let py_nbrs: Vec<PyObject> = nbrs.iter().map(|n| gr.py_node_key(py, n)).collect();
+        dict.set_item(gr.py_node_key(py, node), py_nbrs)?;
+    }
+    Ok(dict.unbind())
+}
+
+// ---------------------------------------------------------------------------
+// CN Soundarajan-Hopcroft
+// ---------------------------------------------------------------------------
+
+/// CN Soundarajan-Hopcroft link prediction.
+#[pyfunction]
+#[pyo3(signature = (g, ebunch, community="community"))]
+pub fn cn_soundarajan_hopcroft_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    ebunch: Vec<(Bound<'_, PyAny>, Bound<'_, PyAny>)>,
+    community: &str,
+) -> PyResult<Vec<(PyObject, PyObject, f64)>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let pairs: Vec<(String, String)> = ebunch
+        .iter()
+        .map(|(u, v)| Ok((node_key_to_string(py, u)?, node_key_to_string(py, v)?)))
+        .collect::<PyResult<_>>()?;
+    let result = py.allow_threads(|| fnx_algorithms::cn_soundarajan_hopcroft(inner, &pairs, community));
+    Ok(result.into_iter().map(|(u, v, s)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), s)).collect())
+}
+
+// ---------------------------------------------------------------------------
+// Triad type
+// ---------------------------------------------------------------------------
+
+/// Classify the triad type of three nodes.
+#[pyfunction]
+pub fn triad_type_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    u: &Bound<'_, PyAny>,
+    v: &Bound<'_, PyAny>,
+    w: &Bound<'_, PyAny>,
+) -> PyResult<String> {
+    let gr = extract_graph(g)?;
+    let dg = gr.digraph().ok_or_else(|| crate::NetworkXError::new_err("triad_type requires DiGraph"))?;
+    let uk = node_key_to_string(py, u)?;
+    let vk = node_key_to_string(py, v)?;
+    let wk = node_key_to_string(py, w)?;
+    Ok(py.allow_threads(|| fnx_algorithms::triad_type(dg, &uk, &vk, &wk)))
+}
+
+// ---------------------------------------------------------------------------
+// BFS beam edges
+// ---------------------------------------------------------------------------
+
+/// BFS with beam width.
+#[pyfunction]
+#[pyo3(signature = (g, source, width=100))]
+pub fn bfs_beam_edges_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    width: usize,
+) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let s = node_key_to_string(py, source)?;
+    let result = py.allow_threads(|| fnx_algorithms::bfs_beam_edges(inner, &s, width));
+    Ok(result.iter().map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v))).collect())
+}
+
+// ---------------------------------------------------------------------------
+// All neighbors (directed)
+// ---------------------------------------------------------------------------
+
+/// Return all neighbors of a node in a directed graph.
+#[pyfunction]
+pub fn all_neighbors_directed_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    node: &Bound<'_, PyAny>,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    let dg = gr.digraph().ok_or_else(|| crate::NetworkXError::new_err("requires DiGraph"))?;
+    let n = node_key_to_string(py, node)?;
+    let result = py.allow_threads(|| fnx_algorithms::all_neighbors_directed(dg, &n));
+    Ok(result.iter().map(|n| gr.py_node_key(py, n)).collect())
+}
+
 // Registration
 // ===========================================================================
 
@@ -9453,5 +9642,26 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_edge_attributes_rust, m)?)?;
     // Quotient graph
     m.add_function(wrap_pyfunction!(quotient_graph_rust, m)?)?;
+    // Moral graph
+    m.add_function(wrap_pyfunction!(moral_graph_rust, m)?)?;
+    // Distance indices
+    m.add_function(wrap_pyfunction!(gutman_index_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(hyper_wiener_index_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(schultz_index_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(harmonic_diameter_rust, m)?)?;
+    // Self-loop functions
+    m.add_function(wrap_pyfunction!(selfloop_edges_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(number_of_selfloops_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(nodes_with_selfloops_rust, m)?)?;
+    // To dict of lists
+    m.add_function(wrap_pyfunction!(to_dict_of_lists_rust, m)?)?;
+    // CN Soundarajan-Hopcroft
+    m.add_function(wrap_pyfunction!(cn_soundarajan_hopcroft_rust, m)?)?;
+    // Triad type
+    m.add_function(wrap_pyfunction!(triad_type_rust, m)?)?;
+    // BFS beam edges
+    m.add_function(wrap_pyfunction!(bfs_beam_edges_rust, m)?)?;
+    // All neighbors directed
+    m.add_function(wrap_pyfunction!(all_neighbors_directed_rust, m)?)?;
     Ok(())
 }

@@ -1,3 +1,4 @@
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
 #![forbid(unsafe_code)]
 
 //! PyO3 Python bindings for FrankenNetworkX.

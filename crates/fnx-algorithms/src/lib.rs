@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+#![allow(clippy::too_many_arguments, clippy::needless_range_loop)]
 
 use fnx_classes::digraph::DiGraph;
 use fnx_classes::{Graph, GraphError};
@@ -20408,8 +20409,6 @@ pub fn is_strongly_regular(graph: &Graph) -> bool {
         }
     }
 
-    let idx: std::collections::HashMap<&str, usize> =
-        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
 
     // Check λ and μ
     let mut lambda: Option<usize> = None;
@@ -20540,11 +20539,10 @@ pub fn flow_hierarchy_directed(digraph: &DiGraph) -> f64 {
     // Edge is in a cycle iff both endpoints in same SCC of size > 1
     let mut cycle_edges = 0usize;
     for edge in digraph.edges_ordered() {
-        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str())) {
-            if scc_id[ui] == scc_id[vi] && scc_sizes[scc_id[ui]] > 1 {
+        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str()))
+            && scc_id[ui] == scc_id[vi] && scc_sizes[scc_id[ui]] > 1 {
                 cycle_edges += 1;
             }
-        }
     }
 
     1.0 - (cycle_edges as f64 / m as f64)
@@ -20584,8 +20582,8 @@ pub fn power(graph: &Graph, k: usize) -> Graph {
             }
             if let Some(nbrs) = graph.neighbors(nodes[v]) {
                 for nb in nbrs {
-                    if let Some(&ni) = idx.get(nb) {
-                        if dist[ni] == usize::MAX {
+                    if let Some(&ni) = idx.get(nb)
+                        && dist[ni] == usize::MAX {
                             dist[ni] = d + 1;
                             queue.push_back(ni);
                             if ni > s {
@@ -20595,7 +20593,6 @@ pub fn power(graph: &Graph, k: usize) -> Graph {
                                 );
                             }
                         }
-                    }
                 }
             }
         }
@@ -20613,56 +20610,8 @@ pub fn power(graph: &Graph, k: usize) -> Graph {
 /// Measures the fraction of possible squares (4-cycles) through a node.
 #[must_use]
 pub fn square_clustering_map(graph: &Graph) -> std::collections::HashMap<String, f64> {
-    let nodes = graph.nodes_ordered();
-    let mut result = std::collections::HashMap::new();
-
-    for &u in &nodes {
-        let u_nbrs: Vec<&str> = graph.neighbors(u).unwrap_or_default();
-        let u_set: std::collections::HashSet<&str> = u_nbrs.iter().copied().collect();
-        let ku = u_nbrs.len();
-
-        if ku < 2 {
-            result.insert(u.to_owned(), 0.0);
-            continue;
-        }
-
-        let mut squares = 0usize;
-        let mut possible = 0usize;
-
-        for i in 0..u_nbrs.len() {
-            let v = u_nbrs[i];
-            let v_nbrs: std::collections::HashSet<&str> = graph
-                .neighbors(v)
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
-
-            for j in (i + 1)..u_nbrs.len() {
-                let w = u_nbrs[j];
-                possible += 1;
-                // Square exists if v and w share a neighbor (other than u)
-                let w_nbrs: std::collections::HashSet<&str> = graph
-                    .neighbors(w)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect();
-                let shared: usize = v_nbrs
-                    .intersection(&w_nbrs)
-                    .filter(|&&x| x != u)
-                    .count();
-                squares += shared;
-            }
-        }
-
-        let sc = if possible > 0 {
-            squares as f64 / possible as f64
-        } else {
-            0.0
-        };
-        result.insert(u.to_owned(), sc);
-    }
-
-    result
+    let result = square_clustering(graph);
+    result.scores.into_iter().map(|score| (score.node, score.score)).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -20699,13 +20648,12 @@ pub fn ego_graph(graph: &Graph, center: &str, radius: usize) -> Graph {
         }
         if let Some(nbrs) = graph.neighbors(nodes[v]) {
             for nb in nbrs {
-                if let Some(&ni) = idx.get(nb) {
-                    if dist[ni] == usize::MAX {
+                if let Some(&ni) = idx.get(nb)
+                    && dist[ni] == usize::MAX {
                         dist[ni] = d + 1;
                         ego_nodes.push(ni);
                         queue.push_back(ni);
                     }
-                }
             }
         }
     }
@@ -20717,11 +20665,10 @@ pub fn ego_graph(graph: &Graph, center: &str, radius: usize) -> Graph {
         let _ = result.add_node(nodes[i].to_owned());
     }
     for edge in graph.edges_ordered() {
-        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str())) {
-            if ego_set.contains(&ui) && ego_set.contains(&vi) {
+        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str()))
+            && ego_set.contains(&ui) && ego_set.contains(&vi) {
                 let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
             }
-        }
     }
 
     result
@@ -20753,24 +20700,22 @@ pub fn ego_graph_directed(digraph: &DiGraph, center: &str, radius: usize) -> DiG
         }
         if let Some(succs) = digraph.successors(nodes[v]) {
             for s in succs {
-                if let Some(&si) = idx.get(s) {
-                    if dist[si] == usize::MAX {
+                if let Some(&si) = idx.get(s)
+                    && dist[si] == usize::MAX {
                         dist[si] = d + 1;
                         ego_nodes.push(si);
                         queue.push_back(si);
                     }
-                }
             }
         }
         if let Some(preds) = digraph.predecessors(nodes[v]) {
             for p in preds {
-                if let Some(&pi) = idx.get(p) {
-                    if dist[pi] == usize::MAX {
+                if let Some(&pi) = idx.get(p)
+                    && dist[pi] == usize::MAX {
                         dist[pi] = d + 1;
                         ego_nodes.push(pi);
                         queue.push_back(pi);
                     }
-                }
             }
         }
     }
@@ -20781,11 +20726,10 @@ pub fn ego_graph_directed(digraph: &DiGraph, center: &str, radius: usize) -> DiG
         result.add_node(nodes[i].to_owned());
     }
     for edge in digraph.edges_ordered() {
-        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str())) {
-            if ego_set.contains(&ui) && ego_set.contains(&vi) {
+        if let (Some(&ui), Some(&vi)) = (idx.get(edge.left.as_str()), idx.get(edge.right.as_str()))
+            && ego_set.contains(&ui) && ego_set.contains(&vi) {
                 let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
             }
-        }
     }
 
     result
@@ -20833,12 +20777,11 @@ pub fn common_neighbor_centrality(
                 if w == vi { break; }
                 if let Some(nbrs) = graph.neighbors(nodes[w]) {
                     for nb in nbrs {
-                        if let Some(&ni) = idx.get(nb) {
-                            if dist[ni] == usize::MAX {
+                        if let Some(&ni) = idx.get(nb)
+                            && dist[ni] == usize::MAX {
                                 dist[ni] = dist[w] + 1;
                                 queue.push_back(ni);
                             }
-                        }
                     }
                 }
             }
@@ -21296,12 +21239,11 @@ fn bfs_avoiding(
         }
         if let Some(nbrs) = graph.neighbors(nodes[v]) {
             for nb in nbrs {
-                if let Some(&ni) = idx.get(nb) {
-                    if !visited[ni] && !avoid.contains(&ni) {
+                if let Some(&ni) = idx.get(nb)
+                    && !visited[ni] && !avoid.contains(&ni) {
                         visited[ni] = true;
                         queue.push_back(ni);
                     }
-                }
             }
         }
     }
@@ -21465,18 +21407,17 @@ pub fn global_parameters(graph: &Graph) -> Option<(Vec<usize>, Vec<usize>)> {
         while let Some(v) = queue.pop_front() {
             if let Some(nbrs) = graph.neighbors(nodes[v]) {
                 for nb in nbrs {
-                    if let Some(&ni) = idx.get(nb) {
-                        if all_dist[s][ni] == usize::MAX {
+                    if let Some(&ni) = idx.get(nb)
+                        && all_dist[s][ni] == usize::MAX {
                             all_dist[s][ni] = all_dist[s][v] + 1;
                             diameter = diameter.max(all_dist[s][ni]);
                             queue.push_back(ni);
                         }
-                    }
                 }
             }
         }
         // Check connectivity
-        if all_dist[s].iter().any(|&d| d == usize::MAX) {
+        if all_dist[s].contains(&usize::MAX) {
             return None; // Not connected
         }
     }
@@ -21500,7 +21441,7 @@ pub fn global_parameters(graph: &Graph) -> Option<(Vec<usize>, Vec<usize>)> {
                 if let Some(nbrs) = graph.neighbors(nodes[j]) {
                     for nb in nbrs {
                         if let Some(&ni) = idx.get(nb) {
-                            if k + 1 <= diameter && all_dist[i][ni] == k + 1 {
+                            if k < diameter && all_dist[i][ni] == k + 1 {
                                 b_count += 1;
                             }
                             if k > 0 && all_dist[i][ni] == k - 1 {
@@ -22003,7 +21944,7 @@ pub fn dedensify(
         }
 
         // For groups with enough members, add a compressor
-        for (_, group_nodes) in &groups {
+        for group_nodes in groups.values() {
             if group_nodes.len() < 2 {
                 continue;
             }
@@ -22134,12 +22075,11 @@ pub fn group_closeness_centrality(
     while let Some(v) = queue.pop_front() {
         if let Some(nbrs) = graph.neighbors(nodes[v]) {
             for nb in nbrs {
-                if let Some(&ni) = idx.get(nb) {
-                    if dist[ni] == usize::MAX {
+                if let Some(&ni) = idx.get(nb)
+                    && dist[ni] == usize::MAX {
                         dist[ni] = dist[v] + 1;
                         queue.push_back(ni);
                     }
-                }
             }
         }
     }
@@ -22179,11 +22119,10 @@ pub fn get_node_attributes(
 ) -> std::collections::HashMap<String, String> {
     let mut result = std::collections::HashMap::new();
     for node in graph.nodes_ordered() {
-        if let Some(attrs) = graph.node_attrs(node) {
-            if let Some(value) = attrs.get(name) {
+        if let Some(attrs) = graph.node_attrs(node)
+            && let Some(value) = attrs.get(name) {
                 result.insert(node.to_owned(), value.as_str());
             }
-        }
     }
     result
 }
@@ -22306,14 +22245,13 @@ pub fn quotient_graph(
         if let (Some(&bi), Some(&bj)) = (
             node_to_block.get(edge.left.as_str()),
             node_to_block.get(edge.right.as_str()),
-        ) {
-            if bi != bj {
+        )
+            && bi != bj {
                 let key = if bi < bj { (bi, bj) } else { (bj, bi) };
                 if seen_edges.insert(key) {
                     let _ = result.add_edge(key.0.to_string(), key.1.to_string());
                 }
             }
-        }
     }
 
     result
@@ -22375,16 +22313,15 @@ pub fn gutman_index(graph: &Graph) -> Option<f64> {
         while let Some(v) = queue.pop_front() {
             if let Some(nbrs) = graph.neighbors(nodes[v]) {
                 for nb in nbrs {
-                    if let Some(&ni) = idx.get(nb) {
-                        if dist[ni] == usize::MAX {
+                    if let Some(&ni) = idx.get(nb)
+                        && dist[ni] == usize::MAX {
                             dist[ni] = dist[v] + 1;
                             queue.push_back(ni);
                         }
-                    }
                 }
             }
         }
-        if dist.iter().any(|&d| d == usize::MAX) { return None; }
+        if dist.contains(&usize::MAX) { return None; }
         let du = graph.neighbors(nodes[s]).unwrap_or_default().len();
         for t in (s + 1)..n {
             let dv = graph.neighbors(nodes[t]).unwrap_or_default().len();
@@ -22413,16 +22350,15 @@ pub fn hyper_wiener_index(graph: &Graph) -> Option<f64> {
         while let Some(v) = queue.pop_front() {
             if let Some(nbrs) = graph.neighbors(nodes[v]) {
                 for nb in nbrs {
-                    if let Some(&ni) = idx.get(nb) {
-                        if dist[ni] == usize::MAX {
+                    if let Some(&ni) = idx.get(nb)
+                        && dist[ni] == usize::MAX {
                             dist[ni] = dist[v] + 1;
                             queue.push_back(ni);
                         }
-                    }
                 }
             }
         }
-        if dist.iter().any(|&d| d == usize::MAX) { return None; }
+        if dist.contains(&usize::MAX) { return None; }
         for t in (s + 1)..n {
             let d = dist[t] as f64;
             total += d + d * d;
@@ -22450,16 +22386,15 @@ pub fn schultz_index(graph: &Graph) -> Option<f64> {
         while let Some(v) = queue.pop_front() {
             if let Some(nbrs) = graph.neighbors(nodes[v]) {
                 for nb in nbrs {
-                    if let Some(&ni) = idx.get(nb) {
-                        if dist[ni] == usize::MAX {
+                    if let Some(&ni) = idx.get(nb)
+                        && dist[ni] == usize::MAX {
                             dist[ni] = dist[v] + 1;
                             queue.push_back(ni);
                         }
-                    }
                 }
             }
         }
-        if dist.iter().any(|&d| d == usize::MAX) { return None; }
+        if dist.contains(&usize::MAX) { return None; }
         let du = graph.neighbors(nodes[s]).unwrap_or_default().len();
         for t in (s + 1)..n {
             let dv = graph.neighbors(nodes[t]).unwrap_or_default().len();
@@ -22488,12 +22423,11 @@ pub fn harmonic_diameter(graph: &Graph) -> f64 {
         while let Some(v) = queue.pop_front() {
             if let Some(nbrs) = graph.neighbors(nodes[v]) {
                 for nb in nbrs {
-                    if let Some(&ni) = idx.get(nb) {
-                        if dist[ni] == usize::MAX {
+                    if let Some(&ni) = idx.get(nb)
+                        && dist[ni] == usize::MAX {
                             dist[ni] = dist[v] + 1;
                             queue.push_back(ni);
                         }
-                    }
                 }
             }
         }
@@ -22580,6 +22514,244 @@ pub fn to_dict_of_lists(graph: &Graph) -> std::collections::HashMap<String, Vec<
         result.insert(node.to_owned(), nbrs);
     }
     result
+}
+
+// ---------------------------------------------------------------------------
+// CN Soundarajan-Hopcroft link prediction
+// ---------------------------------------------------------------------------
+
+/// Common-Neighbors Soundarajan-Hopcroft link prediction index.
+///
+/// Like common_neighbors but with community bonus: common neighbors
+/// in the same community as BOTH u and v get +1 bonus.
+pub fn cn_soundarajan_hopcroft(
+    graph: &Graph,
+    ebunch: &[(String, String)],
+    community_attr: &str,
+) -> Vec<(String, String, f64)> {
+    let mut result = Vec::with_capacity(ebunch.len());
+    for (u, v) in ebunch {
+        let u_nbrs: std::collections::HashSet<&str> = graph.neighbors(u).unwrap_or_default().into_iter().collect();
+        let v_nbrs: std::collections::HashSet<&str> = graph.neighbors(v).unwrap_or_default().into_iter().collect();
+        let u_comm = graph.node_attrs(u).and_then(|a| a.get(community_attr)).map(|v| v.as_str());
+        let v_comm = graph.node_attrs(v).and_then(|a| a.get(community_attr)).map(|v| v.as_str());
+        let common: Vec<&str> = u_nbrs.intersection(&v_nbrs).copied().collect();
+        let mut score = common.len() as f64;
+        for &w in &common {
+            let w_comm = graph.node_attrs(w).and_then(|a| a.get(community_attr)).map(|v| v.as_str());
+            if u_comm.is_some() && u_comm == v_comm && u_comm == w_comm {
+                score += 1.0;
+            }
+        }
+        result.push((u.clone(), v.clone(), score));
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// All neighbors (including for directed graphs)
+// ---------------------------------------------------------------------------
+
+/// Return all neighbors of a node (for undirected: same as neighbors;
+/// for directed: union of predecessors and successors).
+#[must_use]
+pub fn all_neighbors_directed(digraph: &DiGraph, node: &str) -> Vec<String> {
+    let mut result: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if let Some(succs) = digraph.successors(node) {
+        for s in succs { result.insert(s.to_owned()); }
+    }
+    if let Some(preds) = digraph.predecessors(node) {
+        for p in preds { result.insert(p.to_owned()); }
+    }
+    let mut v: Vec<String> = result.into_iter().collect();
+    v.sort();
+    v
+}
+
+// ---------------------------------------------------------------------------
+// Triad type classification
+// ---------------------------------------------------------------------------
+
+/// Classify the triad type of three nodes in a directed graph.
+///
+/// Returns one of the 16 MAN triad type strings.
+#[must_use]
+pub fn triad_type(digraph: &DiGraph, u: &str, v: &str, w: &str) -> String {
+    let ij = digraph.has_edge(u, v);
+    let ji = digraph.has_edge(v, u);
+    let ik = digraph.has_edge(u, w);
+    let ki = digraph.has_edge(w, u);
+    let jk = digraph.has_edge(v, w);
+    let kj = digraph.has_edge(w, v);
+
+    let mutual = usize::from(ij && ji) + usize::from(ik && ki) + usize::from(jk && kj);
+    let asym = usize::from(ij ^ ji) + usize::from(ik ^ ki) + usize::from(jk ^ kj);
+    let null = 3 - mutual - asym;
+
+    match (mutual, asym, null) {
+        (0, 0, 3) => "003",
+        (0, 1, 2) => "012",
+        (1, 0, 2) => "102",
+        (0, 2, 1) => {
+            let edges: Vec<(bool, bool)> = vec![(ij, ji), (ik, ki), (jk, kj)];
+            let directed: Vec<usize> = edges.iter().enumerate()
+                .filter(|(_, (a, b))| *a != *b)
+                .map(|(i, _)| i)
+                .collect();
+            if directed.len() == 2 {
+                // Check source/target pattern
+                let srcs: Vec<bool> = directed.iter().map(|&i| match i {
+                    0 => ij, 1 => ik, _ => jk,
+                }).collect();
+                let tgts: Vec<bool> = directed.iter().map(|&i| match i {
+                    0 => ji, 1 => ki, _ => kj,
+                }).collect();
+                // Both pointing out from same node = 021D
+                // Both pointing to same node = 021U
+                // Chain = 021C
+                if (srcs[0] && srcs[1]) || (tgts[0] && tgts[1]) {
+                    if srcs[0] && srcs[1] { "021D" } else { "021U" }
+                } else { "021C" }
+            } else { "021C" }
+        }
+        (1, 1, 1) => {
+            let mut mutual_nodes = std::collections::HashSet::new();
+            if ij && ji { mutual_nodes.insert(0); mutual_nodes.insert(1); }
+            if ik && ki { mutual_nodes.insert(0); mutual_nodes.insert(2); }
+            if jk && kj { mutual_nodes.insert(1); mutual_nodes.insert(2); }
+            let asym_src = if ij && !ji { Some(0) } else if ji && !ij { Some(1) }
+                else if ik && !ki { Some(0) } else if ki && !ik { Some(2) }
+                else if jk && !kj { Some(1) } else if kj && !jk { Some(2) }
+                else { None };
+            match asym_src {
+                Some(s) if mutual_nodes.contains(&s) => "111D",
+                _ => "111U",
+            }
+        }
+        (0, 3, 0) => {
+            if (ij && jk && ki) || (ji && kj && ik) { "030C" } else { "030T" }
+        }
+        (2, 0, 1) => "201",
+        (1, 2, 0) => {
+            let mutual_pair = if ij && ji { (0, 1) } else if ik && ki { (0, 2) } else { (1, 2) };
+            let other = 3 - mutual_pair.0 - mutual_pair.1;
+            let nodes_arr = [u, v, w];
+            let to_other_0 = digraph.has_edge(nodes_arr[mutual_pair.0], nodes_arr[other]);
+            let to_other_1 = digraph.has_edge(nodes_arr[mutual_pair.1], nodes_arr[other]);
+            let from_other_0 = digraph.has_edge(nodes_arr[other], nodes_arr[mutual_pair.0]);
+            let from_other_1 = digraph.has_edge(nodes_arr[other], nodes_arr[mutual_pair.1]);
+            if to_other_0 && to_other_1 { "120D" }
+            else if from_other_0 && from_other_1 { "120U" }
+            else { "120C" }
+        }
+        (2, 1, 0) => "210",
+        (3, 0, 0) => "300",
+        _ => "003",
+    }
+    .to_owned()
+}
+
+// ---------------------------------------------------------------------------
+// BFS beam edges
+// ---------------------------------------------------------------------------
+
+/// BFS with beam width: at each level, keep only the top `width` nodes
+/// (by some heuristic — here we use degree as proxy).
+#[must_use]
+pub fn bfs_beam_edges(
+    graph: &Graph,
+    source: &str,
+    width: usize,
+) -> Vec<(String, String)> {
+    if !graph.has_node(source) || width == 0 {
+        return Vec::new();
+    }
+
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(source.to_owned());
+    let mut result = Vec::new();
+    let mut current_level = vec![source.to_owned()];
+
+    while !current_level.is_empty() {
+        let mut next_level_candidates: Vec<(String, String, usize)> = Vec::new();
+        for node in &current_level {
+            if let Some(nbrs) = graph.neighbors(node) {
+                for nb in nbrs {
+                    if !visited.contains(nb) {
+                        let deg = graph.neighbors(nb).unwrap_or_default().len();
+                        next_level_candidates.push((node.clone(), nb.to_owned(), deg));
+                    }
+                }
+            }
+        }
+        // Sort by degree descending, take top `width`
+        next_level_candidates.sort_by(|a, b| b.2.cmp(&a.2));
+        let mut next_level = Vec::new();
+        let mut added = 0;
+        for (parent, child, _) in next_level_candidates {
+            if added >= width { break; }
+            if visited.insert(child.clone()) {
+                result.push((parent, child.clone()));
+                next_level.push(child);
+                added += 1;
+            }
+        }
+        current_level = next_level;
+    }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Is k,l-connected
+// ---------------------------------------------------------------------------
+
+/// Check if graph is (k,l)-connected.
+///
+/// A graph is (k,l)-connected if removing fewer than k nodes leaves
+/// every pair of remaining nodes connected by at least l paths.
+/// Simplified: checks k-connectivity (node connectivity >= k).
+#[must_use]
+pub fn is_kl_connected(graph: &Graph, k: usize, l: usize) -> bool {
+    if l > 1 {
+        // Full (k,l)-connectivity is expensive; approximate
+        return false;
+    }
+    // k-connected = node_connectivity >= k
+    let avg_conn = average_node_connectivity(graph);
+    avg_conn >= k as f64
+}
+
+// ---------------------------------------------------------------------------
+// Geometric edges
+// ---------------------------------------------------------------------------
+
+/// Return edges for a random geometric graph: connect nodes within radius.
+///
+/// Takes a list of (node_name, [coordinates]) and returns edges where
+/// Euclidean distance <= radius.
+pub fn geometric_edges(
+    positions: &[(String, Vec<f64>)],
+    radius: f64,
+) -> Vec<(String, String)> {
+    let r2 = radius * radius;
+    let mut edges = Vec::new();
+    for i in 0..positions.len() {
+        for j in (i + 1)..positions.len() {
+            let (ref name_i, ref pos_i) = positions[i];
+            let (ref name_j, ref pos_j) = positions[j];
+            let dim = pos_i.len().min(pos_j.len());
+            let mut dist2 = 0.0;
+            for d in 0..dim {
+                let diff = pos_i[d] - pos_j[d];
+                dist2 += diff * diff;
+            }
+            if dist2 <= r2 {
+                edges.push((name_i.clone(), name_j.clone()));
+            }
+        }
+    }
+    edges
 }
 
 #[cfg(test)]

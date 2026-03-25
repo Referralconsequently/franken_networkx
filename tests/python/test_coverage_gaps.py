@@ -506,6 +506,15 @@ class TestGenerators:
         tree = fnx.tree_graph(tree_payload, ident="name", children="kids")
         expected_tree = nx.tree_graph(tree_payload, ident="name", children="kids")
 
+        adjacency_data = fnx.adjacency_data(
+            fnx.path_graph(3),
+            attrs={"id": "name", "key": "ekey"},
+        )
+        expected_adjacency_data = nx.adjacency_data(
+            nx.path_graph(3),
+            attrs={"id": "name", "key": "ekey"},
+        )
+
         cytoscape_payload = {
             "data": [],
             "directed": False,
@@ -525,12 +534,32 @@ class TestGenerators:
             ident="value",
         )
 
+        projected_source = fnx.complete_bipartite_graph(2, 2)
+        projected = fnx.projected_graph(projected_source, [0, 1], multigraph=True)
+        expected_projected = nx.projected_graph(
+            nx.complete_bipartite_graph(2, 2),
+            [0, 1],
+            multigraph=True,
+        )
+
+        multigraph_input = {
+            0: {1: {7: {"weight": 3}}},
+            1: {0: {7: {"weight": 3}}},
+        }
+        converted = fnx.to_networkx_graph(multigraph_input, multigraph_input=True)
+        expected_converted = nx.to_networkx_graph(multigraph_input, multigraph_input=True)
+
         assert adjacency_graph.is_directed()
         assert sorted(adjacency_graph.edges()) == sorted(expected_adjacency.edges())
         assert node_link_graph.is_directed()
         assert sorted(node_link_graph.edges()) == sorted(expected_node_link.edges())
+        assert adjacency_data == expected_adjacency_data
         assert sorted(tree.edges()) == sorted(expected_tree.edges())
         assert sorted(cytoscape.edges()) == sorted(expected_cytoscape.edges())
+        assert isinstance(projected, fnx.MultiGraph)
+        assert sorted(projected.edges(keys=True)) == sorted(expected_projected.edges(keys=True))
+        assert isinstance(converted, fnx.Graph)
+        assert sorted(converted.edges(data=True)) == sorted(expected_converted.edges(data=True))
 
     @needs_nx
     def test_harary_and_havel_hakimi_wrappers_match_networkx(self):

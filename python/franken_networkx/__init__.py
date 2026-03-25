@@ -590,7 +590,7 @@ from franken_networkx._fnx import powerlaw_cluster_graph as _rust_powerlaw_clust
 
 # Read/write — graph I/O
 from franken_networkx._fnx import (
-    node_link_data,
+    node_link_data as _rust_node_link_data,
     node_link_graph as _rust_node_link_graph,
     read_adjlist,
     read_edgelist,
@@ -738,38 +738,14 @@ def is_bipartite_node_set(G, nodes):
 
 
 def projected_graph(B, nodes, multigraph=False):
-    """Return the projection of a bipartite graph onto one set of nodes.
+    """Return the projection of a bipartite graph onto one set of nodes."""
+    import networkx as nx
 
-    Nodes from *nodes* are connected in the projection if they share a
-    common neighbor in the bipartite graph *B*.
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    Parameters
-    ----------
-    B : Graph
-        A bipartite graph.
-    nodes : container
-        Nodes to project onto.
-    multigraph : bool, optional
-        Ignored — present for API compatibility.
-
-    Returns
-    -------
-    G : Graph
-        The projected graph.
-    """
-    node_set = set(nodes)
-    G = Graph()
-    for n in node_set:
-        G.add_node(n)
-
-    node_list = list(node_set)
-    for i, u in enumerate(node_list):
-        nbrs_u = set(B.neighbors(u)) - node_set
-        for v in node_list[i + 1:]:
-            nbrs_v = set(B.neighbors(v)) - node_set
-            if nbrs_u & nbrs_v:
-                G.add_edge(u, v)
-    return G
+    graph = nx.projected_graph(_to_nx(B), nodes, multigraph=multigraph)
+    return _from_nx_graph(graph)
 
 
 def bipartite_density(B, nodes):
@@ -3096,12 +3072,51 @@ def random_labeled_tree(n, seed=None):
 # ---------------------------------------------------------------------------
 
 
-def adjacency_data(G):
-    """Return *G* in node-link format suitable for JSON serialization.
+def adjacency_data(G, attrs=None):
+    """Return adjacency-data format suitable for JSON serialization."""
+    import networkx as nx
 
-    Alias for ``node_link_data``.
-    """
-    return node_link_data(G)
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.adjacency_data(
+        _to_nx(G),
+        attrs={"id": "id", "key": "key"} if attrs is None else attrs,
+    )
+
+
+def node_link_data(
+    G,
+    source="source",
+    target="target",
+    name="id",
+    key="key",
+    edges="edges",
+    nodes="nodes",
+):
+    """Return node-link data suitable for JSON serialization."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    if (
+        source == "source"
+        and target == "target"
+        and name == "id"
+        and key == "key"
+        and edges == "edges"
+        and nodes == "nodes"
+    ):
+        return _rust_node_link_data(G)
+
+    return nx.node_link_data(
+        _to_nx(G),
+        source=source,
+        target=target,
+        name=name,
+        key=key,
+        edges=edges,
+        nodes=nodes,
+    )
 
 
 def adjacency_graph(data, directed=False, multigraph=True, attrs=None):
@@ -7202,23 +7217,13 @@ def random_unlabeled_rooted_forest(n, q=None, seed=None):
         if rng.random() < q: G.add_edge(i, rng.randint(0, i-1))
     return G
 
-def tree_data(G, root, attrs=None):
-    """Serialize rooted tree to nested dict."""
-    result = {'id': root, 'children': []}
-    for child in G.neighbors(root):
-        if child != root:
-            sub = G.copy(); sub.remove_edge(root, child)
-            comp_nodes = set()
-            queue = [child]; visited = {child}
-            while queue:
-                cur = queue.pop(0)
-                comp_nodes.add(cur)
-                for nb in G.neighbors(cur):
-                    if nb not in visited and nb != root:
-                        visited.add(nb); queue.append(nb)
-            subtree = G.subgraph(comp_nodes)
-            result['children'].append(tree_data(subtree, child, attrs))
-    return result
+def tree_data(G, root, ident="id", children="children"):
+    """Serialize a rooted directed tree to nested data."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.tree_data(_to_nx(G), root, ident=ident, children=children)
 
 def tree_graph(data, ident="id", children="children"):
     """Reconstruct tree from nested dict data."""
@@ -8509,28 +8514,13 @@ def to_dict_of_dicts(G, nodelist=None, edge_data=None):
     return d
 
 
-def cytoscape_data(G, attrs=None):
+def cytoscape_data(G, name="name", ident="id"):
     """Export graph to Cytoscape.js JSON format."""
-    nodes = []
-    for node in G.nodes():
-        el = {"data": {"id": str(node), "value": str(node), "name": str(node)}}
-        if hasattr(G.nodes, '__getitem__'):
-            a = G.nodes[node]
-            if isinstance(a, dict):
-                el["data"].update({str(k): v for k, v in a.items()})
-        nodes.append(el)
-    edges = []
-    for u, v, data in G.edges(data=True):
-        el = {"data": {"source": str(u), "target": str(v)}}
-        if isinstance(data, dict):
-            el["data"].update({str(k): v for k, v in data.items()})
-        edges.append(el)
-    return {
-        "data": [],
-        "directed": G.is_directed(),
-        "multigraph": G.is_multigraph(),
-        "elements": {"nodes": nodes, "edges": edges},
-    }
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.cytoscape_data(_to_nx(G), name=name, ident=ident)
 
 
 def cytoscape_graph(data, name="name", ident="id"):
@@ -8543,22 +8533,18 @@ def cytoscape_graph(data, name="name", ident="id"):
     return _from_nx_graph(graph)
 
 
-def to_networkx_graph(data, create_using=None):
-    """Convert various formats to a graph (universal dispatcher)."""
-    if isinstance(data, dict):
-        if all(isinstance(v, dict) for v in data.values()):
-            return from_dict_of_dicts(data, create_using=create_using)
-        else:
-            return from_dict_of_lists(data, create_using=create_using)
-    if isinstance(data, (list, tuple)):
-        return from_edgelist(data, create_using=create_using)
-    try:
-        import numpy as np
-        if isinstance(data, np.ndarray):
-            return from_numpy_array(data, create_using=create_using)
-    except ImportError:
-        pass
-    raise NetworkXError(f"Cannot convert {type(data)} to graph")
+def to_networkx_graph(data, create_using=None, multigraph_input=False):
+    """Convert supported input data to a graph."""
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    graph = nx.to_networkx_graph(
+        data,
+        create_using=None,
+        multigraph_input=multigraph_input,
+    )
+    return _from_nx_graph(graph, create_using=create_using)
 
 
 def prominent_group(
