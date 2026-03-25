@@ -9444,5 +9444,14 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(node_degree_xy_rust, m)?)?;
     // Dedensify
     m.add_function(wrap_pyfunction!(dedensify_rust, m)?)?;
+    // Numeric assortativity
+    m.add_function(wrap_pyfunction!(numeric_assortativity_coefficient_rust, m)?)?;
+    // Group closeness centrality
+    m.add_function(wrap_pyfunction!(group_closeness_centrality_rust, m)?)?;
+    // Get node/edge attributes
+    m.add_function(wrap_pyfunction!(get_node_attributes_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(get_edge_attributes_rust, m)?)?;
+    // Quotient graph
+    m.add_function(wrap_pyfunction!(quotient_graph_rust, m)?)?;
     Ok(())
 }

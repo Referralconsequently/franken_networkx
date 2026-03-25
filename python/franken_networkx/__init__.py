@@ -591,7 +591,7 @@ from franken_networkx._fnx import powerlaw_cluster_graph as _rust_powerlaw_clust
 # Read/write — graph I/O
 from franken_networkx._fnx import (
     node_link_data,
-    node_link_graph,
+    node_link_graph as _rust_node_link_graph,
     read_adjlist,
     read_edgelist,
     read_graphml,
@@ -3104,12 +3104,61 @@ def adjacency_data(G):
     return node_link_data(G)
 
 
-def adjacency_graph(data):
-    """Return a graph from node-link format data.
+def adjacency_graph(data, directed=False, multigraph=True, attrs=None):
+    """Return a graph from adjacency-data format."""
+    import networkx as nx
 
-    Alias for ``node_link_graph``.
-    """
-    return node_link_graph(data)
+    from franken_networkx.readwrite import _from_nx_graph
+
+    graph = nx.adjacency_graph(
+        data,
+        directed=directed,
+        multigraph=multigraph,
+        attrs={"id": "id", "key": "key"} if attrs is None else attrs,
+    )
+    return _from_nx_graph(graph)
+
+
+def node_link_graph(
+    data,
+    directed=False,
+    multigraph=True,
+    source="source",
+    target="target",
+    name="id",
+    key="key",
+    edges="edges",
+    nodes="nodes",
+):
+    """Build a graph from node-link data."""
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if (
+        directed == False
+        and multigraph == True
+        and source == "source"
+        and target == "target"
+        and name == "id"
+        and key == "key"
+        and edges == "edges"
+        and nodes == "nodes"
+    ):
+        return _rust_node_link_graph(data)
+
+    graph = nx.node_link_graph(
+        data,
+        directed=directed,
+        multigraph=multigraph,
+        source=source,
+        target=target,
+        name=name,
+        key=key,
+        edges=edges,
+        nodes=nodes,
+    )
+    return _from_nx_graph(graph)
 
 
 # ---------------------------------------------------------------------------
@@ -7171,15 +7220,14 @@ def tree_data(G, root, attrs=None):
             result['children'].append(tree_data(subtree, child, attrs))
     return result
 
-def tree_graph(data, attrs=None):
-    """Reconstruct tree from nested dict (inverse of tree_data)."""
-    G = Graph()
-    def _build(d, parent=None):
-        node = d['id']; G.add_node(node)
-        if parent is not None: G.add_edge(parent, node)
-        for child in d.get('children', []): _build(child, node)
-    _build(data)
-    return G
+def tree_graph(data, ident="id", children="children"):
+    """Reconstruct tree from nested dict data."""
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    graph = nx.tree_graph(data, ident=ident, children=children)
+    return _from_nx_graph(graph)
 
 def complete_to_chordal_graph(G):
     """Add fill edges to make G chordal. Returns (H, added_edges)."""
@@ -8485,33 +8533,14 @@ def cytoscape_data(G, attrs=None):
     }
 
 
-def cytoscape_graph(data, attrs=None):
+def cytoscape_graph(data, name="name", ident="id"):
     """Build graph from Cytoscape.js JSON format."""
-    if data.get("directed", False):
-        G = DiGraph()
-    else:
-        G = Graph()
-    elements = data.get("elements", {})
-    # Handle both list and dict formats
-    if isinstance(elements, dict):
-        node_list = elements.get("nodes", [])
-        edge_list = elements.get("edges", [])
-    else:
-        node_list = [el for el in elements if "source" not in el.get("data", {})]
-        edge_list = [el for el in elements if "source" in el.get("data", {})]
-    for el in node_list:
-        d = el.get("data", {})
-        node_id = d.get("id")
-        if node_id is not None:
-            node_attrs = {k: v for k, v in d.items() if k not in ("id", "value", "name")}
-            G.add_node(node_id, **node_attrs)
-    for el in edge_list:
-        d = el.get("data", {})
-        src, tgt = d.get("source"), d.get("target")
-        if src is not None and tgt is not None:
-            edge_attrs = {k: v for k, v in d.items() if k not in ("source", "target")}
-            G.add_edge(src, tgt, **edge_attrs)
-    return G
+    import networkx as nx
+
+    from franken_networkx.readwrite import _from_nx_graph
+
+    graph = nx.cytoscape_graph(data, name=name, ident=ident)
+    return _from_nx_graph(graph)
 
 
 def to_networkx_graph(data, create_using=None):

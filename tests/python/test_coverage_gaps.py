@@ -467,6 +467,72 @@ class TestGenerators:
         assert graph.number_of_edges() == 0
 
     @needs_nx
+    def test_serialization_graph_builders_match_networkx_contract(self):
+        adjacency_payload = {
+            "directed": True,
+            "multigraph": False,
+            "graph": [],
+            "nodes": [{"id": 0}, {"id": 1}],
+            "adjacency": [[{"id": 1}], []],
+        }
+        adjacency_graph = fnx.adjacency_graph(adjacency_payload, directed=True, multigraph=False)
+        expected_adjacency = nx.adjacency_graph(
+            adjacency_payload,
+            directed=True,
+            multigraph=False,
+        )
+
+        node_link_payload = {
+            "directed": True,
+            "multigraph": False,
+            "graph": {},
+            "nodes": [{"id": 0}, {"id": 1}],
+            "links": [{"source": 0, "target": 1}],
+        }
+        node_link_graph = fnx.node_link_graph(
+            node_link_payload,
+            directed=True,
+            multigraph=False,
+            edges="links",
+        )
+        expected_node_link = nx.node_link_graph(
+            node_link_payload,
+            directed=True,
+            multigraph=False,
+            edges="links",
+        )
+
+        tree_payload = {"name": "root", "kids": [{"name": "leaf"}]}
+        tree = fnx.tree_graph(tree_payload, ident="name", children="kids")
+        expected_tree = nx.tree_graph(tree_payload, ident="name", children="kids")
+
+        cytoscape_payload = {
+            "data": [],
+            "directed": False,
+            "multigraph": False,
+            "elements": {
+                "nodes": [
+                    {"data": {"value": "a", "label": "A"}},
+                    {"data": {"value": "b", "label": "B"}},
+                ],
+                "edges": [{"data": {"source": "a", "target": "b"}}],
+            },
+        }
+        cytoscape = fnx.cytoscape_graph(cytoscape_payload, name="label", ident="value")
+        expected_cytoscape = nx.cytoscape_graph(
+            cytoscape_payload,
+            name="label",
+            ident="value",
+        )
+
+        assert adjacency_graph.is_directed()
+        assert sorted(adjacency_graph.edges()) == sorted(expected_adjacency.edges())
+        assert node_link_graph.is_directed()
+        assert sorted(node_link_graph.edges()) == sorted(expected_node_link.edges())
+        assert sorted(tree.edges()) == sorted(expected_tree.edges())
+        assert sorted(cytoscape.edges()) == sorted(expected_cytoscape.edges())
+
+    @needs_nx
     def test_harary_and_havel_hakimi_wrappers_match_networkx(self):
         hakimi = fnx.havel_hakimi_graph([3, 3, 2, 2, 2], create_using=fnx.Graph())
         expected_hakimi = nx.havel_hakimi_graph([3, 3, 2, 2, 2], create_using=nx.Graph())

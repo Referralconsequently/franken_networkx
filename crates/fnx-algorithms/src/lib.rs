@@ -22319,6 +22319,269 @@ pub fn quotient_graph(
     result
 }
 
+// ---------------------------------------------------------------------------
+// Moral graph (DAG moralization)
+// ---------------------------------------------------------------------------
+
+/// Return the moral graph of a DAG.
+///
+/// The moral graph is an undirected graph where:
+/// 1. All directed edges become undirected
+/// 2. Co-parents (nodes sharing a child) are connected
+#[must_use]
+pub fn moral_graph(digraph: &DiGraph) -> Graph {
+    let mut result = Graph::new(digraph.mode());
+    for node in digraph.nodes_ordered() {
+        let _ = result.add_node(node.to_owned());
+    }
+    // Add undirected edges for all directed edges
+    for edge in digraph.edges_ordered() {
+        let _ = result.add_edge(edge.left.clone(), edge.right.clone());
+    }
+    // Moralize: connect co-parents
+    for node in digraph.nodes_ordered() {
+        if let Some(preds) = digraph.predecessors(node) {
+            let parents: Vec<String> = preds.iter().map(|p| (*p).to_owned()).collect();
+            for i in 0..parents.len() {
+                for j in (i + 1)..parents.len() {
+                    let _ = result.add_edge(parents[i].clone(), parents[j].clone());
+                }
+            }
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Graph distance indices (Gutman, hyper-Wiener, Schultz)
+// ---------------------------------------------------------------------------
+
+/// Gutman index: sum of deg(u)*deg(v)*d(u,v) for all pairs.
+#[must_use]
+pub fn gutman_index(graph: &Graph) -> Option<f64> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 { return Some(0.0); }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut total = 0.0;
+    for s in 0..n {
+        let mut dist = vec![usize::MAX; n];
+        dist[s] = 0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+        while let Some(v) = queue.pop_front() {
+            if let Some(nbrs) = graph.neighbors(nodes[v]) {
+                for nb in nbrs {
+                    if let Some(&ni) = idx.get(nb) {
+                        if dist[ni] == usize::MAX {
+                            dist[ni] = dist[v] + 1;
+                            queue.push_back(ni);
+                        }
+                    }
+                }
+            }
+        }
+        if dist.iter().any(|&d| d == usize::MAX) { return None; }
+        let du = graph.neighbors(nodes[s]).unwrap_or_default().len();
+        for t in (s + 1)..n {
+            let dv = graph.neighbors(nodes[t]).unwrap_or_default().len();
+            total += (du * dv * dist[t]) as f64;
+        }
+    }
+    Some(total)
+}
+
+/// Hyper-Wiener index: sum of d(u,v) + d(u,v)^2 for all pairs, divided by 2.
+#[must_use]
+pub fn hyper_wiener_index(graph: &Graph) -> Option<f64> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 { return Some(0.0); }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut total = 0.0;
+    for s in 0..n {
+        let mut dist = vec![usize::MAX; n];
+        dist[s] = 0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+        while let Some(v) = queue.pop_front() {
+            if let Some(nbrs) = graph.neighbors(nodes[v]) {
+                for nb in nbrs {
+                    if let Some(&ni) = idx.get(nb) {
+                        if dist[ni] == usize::MAX {
+                            dist[ni] = dist[v] + 1;
+                            queue.push_back(ni);
+                        }
+                    }
+                }
+            }
+        }
+        if dist.iter().any(|&d| d == usize::MAX) { return None; }
+        for t in (s + 1)..n {
+            let d = dist[t] as f64;
+            total += d + d * d;
+        }
+    }
+    Some(total / 2.0)
+}
+
+/// Schultz index: sum of (deg(u) + deg(v)) * d(u,v) for all pairs.
+#[must_use]
+pub fn schultz_index(graph: &Graph) -> Option<f64> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 { return Some(0.0); }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut total = 0.0;
+    for s in 0..n {
+        let mut dist = vec![usize::MAX; n];
+        dist[s] = 0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+        while let Some(v) = queue.pop_front() {
+            if let Some(nbrs) = graph.neighbors(nodes[v]) {
+                for nb in nbrs {
+                    if let Some(&ni) = idx.get(nb) {
+                        if dist[ni] == usize::MAX {
+                            dist[ni] = dist[v] + 1;
+                            queue.push_back(ni);
+                        }
+                    }
+                }
+            }
+        }
+        if dist.iter().any(|&d| d == usize::MAX) { return None; }
+        let du = graph.neighbors(nodes[s]).unwrap_or_default().len();
+        for t in (s + 1)..n {
+            let dv = graph.neighbors(nodes[t]).unwrap_or_default().len();
+            total += ((du + dv) * dist[t]) as f64;
+        }
+    }
+    Some(total)
+}
+
+/// Harmonic diameter: reciprocal of the harmonic mean of all pairwise distances.
+#[must_use]
+pub fn harmonic_diameter(graph: &Graph) -> f64 {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n < 2 { return 0.0; }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    let mut reciprocal_sum = 0.0;
+    for s in 0..n {
+        let mut dist = vec![usize::MAX; n];
+        dist[s] = 0;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(s);
+        while let Some(v) = queue.pop_front() {
+            if let Some(nbrs) = graph.neighbors(nodes[v]) {
+                for nb in nbrs {
+                    if let Some(&ni) = idx.get(nb) {
+                        if dist[ni] == usize::MAX {
+                            dist[ni] = dist[v] + 1;
+                            queue.push_back(ni);
+                        }
+                    }
+                }
+            }
+        }
+        for t in (s + 1)..n {
+            if dist[t] < usize::MAX && dist[t] > 0 {
+                reciprocal_sum += 1.0 / dist[t] as f64;
+            }
+        }
+    }
+
+    let n_pairs = (n * (n - 1)) as f64 / 2.0;
+    if reciprocal_sum > 0.0 { n_pairs / reciprocal_sum } else { f64::INFINITY }
+}
+
+// ---------------------------------------------------------------------------
+// Selfloop edges
+// ---------------------------------------------------------------------------
+
+/// Return all self-loop edges in the graph.
+#[must_use]
+pub fn selfloop_edges(graph: &Graph) -> Vec<(String, String)> {
+    graph
+        .edges_ordered()
+        .iter()
+        .filter(|e| e.left == e.right)
+        .map(|e| (e.left.clone(), e.right.clone()))
+        .collect()
+}
+
+/// Count of self-loop edges.
+#[must_use]
+pub fn number_of_selfloops(graph: &Graph) -> usize {
+    graph
+        .edges_ordered()
+        .iter()
+        .filter(|e| e.left == e.right)
+        .count()
+}
+
+/// Nodes with self-loops.
+#[must_use]
+pub fn nodes_with_selfloops(graph: &Graph) -> Vec<String> {
+    let mut result = Vec::new();
+    for node in graph.nodes_ordered() {
+        if graph.has_edge(node, node) {
+            result.push(node.to_owned());
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// To edgelist / to dict of lists
+// ---------------------------------------------------------------------------
+
+/// Convert graph to edge list representation.
+#[must_use]
+pub fn to_edgelist(graph: &Graph) -> Vec<(String, String, std::collections::BTreeMap<String, String>)> {
+    graph
+        .edges_ordered()
+        .iter()
+        .map(|e| {
+            let attrs: std::collections::BTreeMap<String, String> = e
+                .attrs
+                .iter()
+                .map(|(k, v)| (k.clone(), v.as_str()))
+                .collect();
+            (e.left.clone(), e.right.clone(), attrs)
+        })
+        .collect()
+}
+
+/// Convert graph to dict-of-lists adjacency representation.
+#[must_use]
+pub fn to_dict_of_lists(graph: &Graph) -> std::collections::HashMap<String, Vec<String>> {
+    let mut result = std::collections::HashMap::new();
+    for node in graph.nodes_ordered() {
+        let nbrs: Vec<String> = graph
+            .neighbors(node)
+            .unwrap_or_default()
+            .iter()
+            .map(|&n| n.to_owned())
+            .collect();
+        result.insert(node.to_owned(), nbrs);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
