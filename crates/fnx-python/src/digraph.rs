@@ -151,6 +151,62 @@ impl PyMultiDiGraph {
                         .insert((u.clone(), v.clone(), 0), attrs.bind(py).copy()?.unbind());
                 }
                 g.graph_attrs = other.graph_attrs.bind(py).copy()?.unbind();
+            } else if let Ok(iter) = PyIterator::from_object(data) {
+                for item in iter {
+                    let item = item?;
+                    if let Ok(tuple) = item.downcast::<PyTuple>() {
+                        let merged = PyDict::new(py);
+                        match tuple.len() {
+                            2 => {
+                                g.add_edge(
+                                    py,
+                                    &tuple.get_item(0)?,
+                                    &tuple.get_item(1)?,
+                                    None,
+                                    Some(&merged),
+                                )?;
+                            }
+                            3 => {
+                                let third = tuple.get_item(2)?;
+                                if let Ok(d) = third.downcast::<PyDict>() {
+                                    merged.update(d.as_mapping())?;
+                                    g.add_edge(
+                                        py,
+                                        &tuple.get_item(0)?,
+                                        &tuple.get_item(1)?,
+                                        None,
+                                        Some(&merged),
+                                    )?;
+                                } else {
+                                    let edge_key = third.extract::<usize>()?;
+                                    g.add_edge(
+                                        py,
+                                        &tuple.get_item(0)?,
+                                        &tuple.get_item(1)?,
+                                        Some(edge_key),
+                                        Some(&merged),
+                                    )?;
+                                }
+                            }
+                            4 => {
+                                let edge_key = tuple.get_item(2)?.extract::<usize>()?;
+                                if let Ok(d) = tuple.get_item(3)?.downcast::<PyDict>() {
+                                    merged.update(d.as_mapping())?;
+                                }
+                                g.add_edge(
+                                    py,
+                                    &tuple.get_item(0)?,
+                                    &tuple.get_item(1)?,
+                                    Some(edge_key),
+                                    Some(&merged),
+                                )?;
+                            }
+                            _ => g.add_node(py, &item, None)?,
+                        }
+                    } else {
+                        g.add_node(py, &item, None)?;
+                    }
+                }
             }
         }
 
@@ -1439,6 +1495,34 @@ impl PyDiGraph {
                     }
                 }
                 g.graph_attrs = other.graph_attrs.bind(py).copy()?.unbind();
+            } else if let Ok(iter) = PyIterator::from_object(data) {
+                for item in iter {
+                    let item = item?;
+                    if let Ok(tuple) = item.downcast::<PyTuple>() {
+                        let merged = PyDict::new(py);
+                        match tuple.len() {
+                            2 => {
+                                g.add_edge(py, &tuple.get_item(0)?, &tuple.get_item(1)?, Some(&merged))?;
+                            }
+                            3 => {
+                                if let Ok(d) = tuple.get_item(2)?.downcast::<PyDict>() {
+                                    merged.update(d.as_mapping())?;
+                                    g.add_edge(
+                                        py,
+                                        &tuple.get_item(0)?,
+                                        &tuple.get_item(1)?,
+                                        Some(&merged),
+                                    )?;
+                                } else {
+                                    g.add_node(py, &item, None)?;
+                                }
+                            }
+                            _ => g.add_node(py, &item, None)?,
+                        }
+                    } else {
+                        g.add_node(py, &item, None)?;
+                    }
+                }
             }
         }
 

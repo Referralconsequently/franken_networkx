@@ -468,6 +468,15 @@ class TestGenerators:
 
     @needs_nx
     def test_serialization_graph_builders_match_networkx_contract(self):
+        def normalize_adjacency_payload(payload):
+            normalized = dict(payload)
+            normalized["nodes"] = sorted(payload["nodes"], key=lambda item: tuple(sorted(item.items())))
+            normalized["adjacency"] = [
+                sorted(neighbors, key=lambda item: tuple(sorted(item.items())))
+                for neighbors in payload["adjacency"]
+            ]
+            return normalized
+
         adjacency_payload = {
             "directed": True,
             "multigraph": False,
@@ -586,12 +595,24 @@ class TestGenerators:
         }
         converted = fnx.to_networkx_graph(multigraph_input, multigraph_input=True)
         expected_converted = nx.to_networkx_graph(multigraph_input, multigraph_input=True)
+        converted_multi = fnx.to_networkx_graph(
+            multigraph_input,
+            create_using=fnx.MultiGraph(),
+            multigraph_input=True,
+        )
+        expected_converted_multi = nx.to_networkx_graph(
+            multigraph_input,
+            create_using=nx.MultiGraph(),
+            multigraph_input=True,
+        )
 
         assert adjacency_graph.is_directed()
         assert sorted(adjacency_graph.edges()) == sorted(expected_adjacency.edges())
         assert node_link_graph.is_directed()
         assert sorted(node_link_graph.edges()) == sorted(expected_node_link.edges())
-        assert adjacency_data == expected_adjacency_data
+        assert normalize_adjacency_payload(adjacency_data) == normalize_adjacency_payload(
+            expected_adjacency_data
+        )
         assert sorted(tree.edges()) == sorted(expected_tree.edges())
         assert tree_export == expected_tree_export
         assert node_link_export == expected_node_link_export
@@ -601,6 +622,191 @@ class TestGenerators:
         assert sorted(projected.edges(keys=True)) == sorted(expected_projected.edges(keys=True))
         assert isinstance(converted, fnx.Graph)
         assert sorted(converted.edges(data=True)) == sorted(expected_converted.edges(data=True))
+        assert isinstance(converted_multi, fnx.MultiGraph)
+        assert sorted(converted_multi.edges(keys=True, data=True)) == sorted(
+            expected_converted_multi.edges(keys=True, data=True)
+        )
+
+    @needs_nx
+    def test_graph_transform_helpers_match_networkx_contract(self):
+        path = fnx.path_graph(3)
+        line = fnx.line_graph(path, create_using=fnx.Graph())
+        expected_line = nx.line_graph(nx.path_graph(3), create_using=nx.Graph())
+
+        clique_graph = fnx.make_max_clique_graph(fnx.complete_graph(4), create_using=fnx.Graph())
+        expected_clique_graph = nx.make_max_clique_graph(nx.complete_graph(4), create_using=nx.Graph())
+
+        digraph = fnx.DiGraph([(0, 2), (1, 2)])
+        stochastic = fnx.stochastic_graph(digraph, copy=True, weight="w")
+        expected_stochastic = nx.stochastic_graph(nx.DiGraph([(0, 2), (1, 2)]), copy=True, weight="w")
+
+        moral = fnx.moral_graph(digraph)
+        expected_moral = nx.moral_graph(nx.DiGraph([(0, 2), (1, 2)]))
+
+        chordal_graph, alpha = fnx.complete_to_chordal_graph(fnx.cycle_graph(4))
+        expected_chordal_graph, expected_alpha = nx.complete_to_chordal_graph(nx.cycle_graph(4))
+
+        assert isinstance(line, fnx.Graph)
+        assert sorted(line.edges()) == sorted(expected_line.edges())
+        assert isinstance(clique_graph, fnx.Graph)
+        assert sorted(clique_graph.edges()) == sorted(expected_clique_graph.edges())
+        assert isinstance(stochastic, fnx.DiGraph)
+        assert sorted(stochastic.edges(data=True)) == sorted(expected_stochastic.edges(data=True))
+        assert {frozenset(edge) for edge in moral.edges()} == {
+            frozenset(edge) for edge in expected_moral.edges()
+        }
+        assert sorted(chordal_graph.edges()) == sorted(expected_chordal_graph.edges())
+        assert alpha == expected_alpha
+
+    def test_graph_class_constructors_accept_edge_iterables(self):
+        graph = fnx.Graph([(0, 1)])
+        multigraph = fnx.MultiGraph([(0, 1)])
+        digraph = fnx.DiGraph([(0, 2), (1, 2)])
+        multidigraph = fnx.MultiDiGraph([(0, 2), (1, 2)])
+
+        assert sorted(graph.edges()) == [(0, 1)]
+        assert sorted(multigraph.edges()) == [(0, 1)]
+        assert sorted(digraph.edges()) == [(0, 2), (1, 2)]
+        assert sorted(multidigraph.edges()) == [(0, 2), (1, 2)]
+
+    @needs_nx
+    def test_ego_graph_and_from_dict_of_dicts_match_networkx_contract(self):
+        weighted = fnx.Graph()
+        weighted.add_edge(0, 1, weight=1)
+        weighted.add_edge(1, 2, weight=1)
+        weighted.add_edge(2, 3, weight=5)
+
+        ego = fnx.ego_graph(weighted, 1, radius=1, distance="weight")
+        expected_ego = nx.ego_graph(
+            nx.Graph(
+                [
+                    (0, 1, {"weight": 1}),
+                    (1, 2, {"weight": 1}),
+                    (2, 3, {"weight": 5}),
+                ]
+            ),
+            1,
+            radius=1,
+            distance="weight",
+        )
+
+        multigraph = fnx.from_dict_of_dicts(
+            {0: {1: {7: {"w": 1}}}, 1: {0: {7: {"w": 1}}}},
+            create_using=fnx.MultiGraph(),
+            multigraph_input=True,
+        )
+        expected_multigraph = nx.from_dict_of_dicts(
+            {0: {1: {7: {"w": 1}}}, 1: {0: {7: {"w": 1}}}},
+            create_using=nx.MultiGraph(),
+            multigraph_input=True,
+        )
+
+        assert sorted(ego.edges(data=True)) == sorted(expected_ego.edges(data=True))
+        assert isinstance(multigraph, fnx.MultiGraph)
+        assert sorted(multigraph.edges(keys=True, data=True)) == sorted(
+            expected_multigraph.edges(keys=True, data=True)
+        )
+
+    @needs_nx
+    def test_tabular_and_matrix_importers_preserve_networkx_contract(self):
+        np = pytest.importorskip("numpy")
+        pd = pytest.importorskip("pandas")
+        scipy_sparse = pytest.importorskip("scipy.sparse")
+
+        frame = pd.DataFrame(
+            [
+                {"src": "a", "dst": "b", "ek": 7, "weight": 3},
+                {"src": "a", "dst": "b", "ek": 8, "weight": 4},
+            ]
+        )
+        pandas_graph = fnx.from_pandas_edgelist(
+            frame,
+            source="src",
+            target="dst",
+            edge_attr="weight",
+            create_using=fnx.MultiGraph(),
+            edge_key="ek",
+        )
+        expected_pandas_graph = nx.from_pandas_edgelist(
+            frame,
+            source="src",
+            target="dst",
+            edge_attr="weight",
+            create_using=nx.MultiGraph(),
+            edge_key="ek",
+        )
+
+        matrix = np.array([[0, 2], [2, 0]], dtype=int)
+        numpy_graph = fnx.from_numpy_array(
+            matrix,
+            parallel_edges=True,
+            create_using=fnx.MultiGraph(),
+        )
+        expected_numpy_graph = nx.from_numpy_array(
+            matrix,
+            parallel_edges=True,
+            create_using=nx.MultiGraph(),
+        )
+
+        sparse_graph = fnx.from_scipy_sparse_array(
+            scipy_sparse.csr_array(matrix),
+            parallel_edges=True,
+            create_using=fnx.MultiGraph(),
+        )
+        expected_sparse_graph = nx.from_scipy_sparse_array(
+            scipy_sparse.csr_array(matrix),
+            parallel_edges=True,
+            create_using=nx.MultiGraph(),
+        )
+
+        assert sorted(pandas_graph.edges(keys=True, data=True)) == sorted(
+            expected_pandas_graph.edges(keys=True, data=True)
+        )
+        assert sorted(numpy_graph.edges(keys=True, data=True)) == sorted(
+            expected_numpy_graph.edges(keys=True, data=True)
+        )
+        assert sorted(sparse_graph.edges(keys=True, data=True)) == sorted(
+            expected_sparse_graph.edges(keys=True, data=True)
+        )
+
+    @needs_nx
+    def test_tabular_and_matrix_exporters_preserve_networkx_contract(self):
+        np = pytest.importorskip("numpy")
+        pd = pytest.importorskip("pandas")
+
+        graph = fnx.MultiGraph()
+        graph.add_edge("a", "b", key=7, weight=3)
+        graph.add_edge("a", "b", key=8, weight=4)
+
+        expected_graph = nx.MultiGraph()
+        expected_graph.add_edge("a", "b", key=7, weight=3)
+        expected_graph.add_edge("a", "b", key=8, weight=4)
+
+        frame = fnx.to_pandas_edgelist(graph, source="src", target="dst", edge_key="ek")
+        expected_frame = nx.to_pandas_edgelist(
+            expected_graph,
+            source="src",
+            target="dst",
+            edge_key="ek",
+        )
+
+        matrix = fnx.to_numpy_array(
+            graph,
+            nodelist=["a", "b"],
+            multigraph_weight=max,
+            weight="weight",
+        )
+        expected_matrix = nx.to_numpy_array(
+            expected_graph,
+            nodelist=["a", "b"],
+            multigraph_weight=max,
+            weight="weight",
+        )
+
+        assert frame.sort_values(["ek"]).reset_index(drop=True).equals(
+            expected_frame.sort_values(["ek"]).reset_index(drop=True)
+        )
+        assert np.array_equal(matrix, expected_matrix)
 
     @needs_nx
     def test_harary_and_havel_hakimi_wrappers_match_networkx(self):

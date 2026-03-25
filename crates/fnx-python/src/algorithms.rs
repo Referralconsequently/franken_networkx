@@ -1392,13 +1392,11 @@ pub fn has_path(
     validate_node(&gr, &s, source)?;
     validate_node(&gr, &t, target)?;
     if let Some(inner) = gr.digraph() {
-        Ok(
-            fnx_algorithms::shortest_path_unweighted_directed(inner, &s, &t)
-                .path
-                .is_some(),
-        )
+        let result = py.allow_threads(|| fnx_algorithms::has_path_directed(inner, &s, &t));
+        Ok(result.has_path)
     } else {
-        let result = fnx_algorithms::has_path(gr.undirected(), &s, &t);
+        let inner = gr.undirected();
+        let result = py.allow_threads(|| fnx_algorithms::has_path(inner, &s, &t));
         Ok(result.has_path)
     }
 }
@@ -9132,6 +9130,56 @@ pub fn all_neighbors_directed_rust(
     Ok(result.iter().map(|n| gr.py_node_key(py, n)).collect())
 }
 
+// ---------------------------------------------------------------------------
+// Local bridges (Rust)
+// ---------------------------------------------------------------------------
+
+/// Return local bridges.
+#[pyfunction]
+pub fn local_bridges_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::local_bridges_list(inner));
+    Ok(result.iter().map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v))).collect())
+}
+
+// ---------------------------------------------------------------------------
+// Generic BFS edges
+// ---------------------------------------------------------------------------
+
+/// BFS edges with optional depth limit.
+#[pyfunction]
+#[pyo3(signature = (g, source, depth_limit=None))]
+pub fn generic_bfs_edges_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    source: &Bound<'_, PyAny>,
+    depth_limit: Option<usize>,
+) -> PyResult<Vec<(PyObject, PyObject)>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let s = node_key_to_string(py, source)?;
+    let result = py.allow_threads(|| fnx_algorithms::generic_bfs_edges(inner, &s, depth_limit));
+    Ok(result.iter().map(|(u, v)| (gr.py_node_key(py, u), gr.py_node_key(py, v))).collect())
+}
+
+// ---------------------------------------------------------------------------
+// Graph info
+// ---------------------------------------------------------------------------
+
+/// Return text description of graph.
+#[pyfunction]
+pub fn graph_info_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<String> {
+    let gr = extract_graph(g)?;
+    Ok(if gr.is_directed() {
+        let dg = gr.digraph().unwrap();
+        py.allow_threads(|| fnx_algorithms::digraph_info(dg))
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::graph_info(inner))
+    })
+}
+
 // Registration
 // ===========================================================================
 
@@ -9663,5 +9711,11 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bfs_beam_edges_rust, m)?)?;
     // All neighbors directed
     m.add_function(wrap_pyfunction!(all_neighbors_directed_rust, m)?)?;
+    // Local bridges
+    m.add_function(wrap_pyfunction!(local_bridges_rust, m)?)?;
+    // Generic BFS edges
+    m.add_function(wrap_pyfunction!(generic_bfs_edges_rust, m)?)?;
+    // Graph info
+    m.add_function(wrap_pyfunction!(graph_info_rust, m)?)?;
     Ok(())
 }

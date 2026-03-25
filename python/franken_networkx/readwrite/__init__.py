@@ -25,6 +25,20 @@ def _new_graph(create_using=None):
     return create_using
 
 
+def _to_nx_create_using(create_using=None):
+    """Return an empty NetworkX graph matching the requested output shape."""
+    import networkx as nx
+
+    if create_using is None:
+        return None
+
+    graph = create_using() if isinstance(create_using, type) else create_using
+
+    if graph.is_multigraph():
+        return nx.MultiDiGraph() if graph.is_directed() else nx.MultiGraph()
+    return nx.DiGraph() if graph.is_directed() else nx.Graph()
+
+
 def _strip_comment(line, comments):
     """Strip inline comments and return the cleaned line (empty string if comment-only)."""
     if comments:

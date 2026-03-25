@@ -144,8 +144,8 @@ class TestParametricGenerators:
 
     def test_wheel_graph(self):
         g = fnx.wheel_graph(5)
-        assert g.number_of_nodes() == 6
-        assert g.number_of_edges() == 10
+        assert g.number_of_nodes() == 5
+        assert g.number_of_edges() == 8
 
     def test_ladder_graph(self):
         g = fnx.ladder_graph(4)
@@ -174,7 +174,7 @@ class TestParametricGenerators:
 
     def test_windmill_graph(self):
         g = fnx.windmill_graph(3, 4)
-        assert g.number_of_nodes() == 9
+        assert g.number_of_nodes() == 10
 
     def test_hypercube_graph(self):
         g = fnx.hypercube_graph(3)

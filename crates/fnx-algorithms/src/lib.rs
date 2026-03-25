@@ -4529,6 +4529,15 @@ pub fn density(graph: &Graph) -> DensityResult {
 /// Uses BFS from `source`.  Returns `false` if either node is missing from the graph.
 #[must_use]
 pub fn has_path(graph: &Graph, source: &str, target: &str) -> HasPathResult {
+    has_path_generic(graph, source, target)
+}
+
+#[must_use]
+pub fn has_path_directed(digraph: &DiGraph, source: &str, target: &str) -> HasPathResult {
+    has_path_generic(digraph, source, target)
+}
+
+fn has_path_generic<G: GraphView>(graph: &G, source: &str, target: &str) -> HasPathResult {
     if source == target && graph.has_node(source) {
         return HasPathResult {
             has_path: true,
@@ -22685,7 +22694,7 @@ pub fn bfs_beam_edges(
             }
         }
         // Sort by degree descending, take top `width`
-        next_level_candidates.sort_by(|a, b| b.2.cmp(&a.2));
+        next_level_candidates.sort_by_key(|b| std::cmp::Reverse(b.2));
         let mut next_level = Vec::new();
         let mut added = 0;
         for (parent, child, _) in next_level_candidates {
@@ -22752,6 +22761,156 @@ pub fn geometric_edges(
         }
     }
     edges
+}
+
+// ---------------------------------------------------------------------------
+// Multi-graph set operations
+// ---------------------------------------------------------------------------
+
+/// Union of multiple undirected graphs.
+pub fn union_all(graphs: &[&Graph]) -> Result<Graph, String> {
+    if graphs.is_empty() {
+        return Err("cannot apply union_all to empty sequence".to_owned());
+    }
+    let mut result = Graph::new(graphs[0].mode());
+    for &g in graphs {
+        for node in g.nodes_ordered() {
+            if result.has_node(node) {
+                return Err(format!("Node {} in multiple graphs", node));
+            }
+            let _ = result.add_node(node.to_owned());
+        }
+        for edge in g.edges_ordered() {
+            let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+        }
+    }
+    Ok(result)
+}
+
+/// Intersection of multiple undirected graphs.
+#[must_use]
+pub fn intersection_all(graphs: &[&Graph]) -> Graph {
+    if graphs.is_empty() { return Graph::strict(); }
+    let mut common: std::collections::HashSet<String> =
+        graphs[0].nodes_ordered().iter().map(|&n| n.to_owned()).collect();
+    for &g in &graphs[1..] {
+        let ns: std::collections::HashSet<String> = g.nodes_ordered().iter().map(|&n| n.to_owned()).collect();
+        common = common.intersection(&ns).cloned().collect();
+    }
+    let mut result = Graph::new(graphs[0].mode());
+    for n in &common { let _ = result.add_node(n.clone()); }
+    for edge in graphs[0].edges_ordered() {
+        if !common.contains(&edge.left) || !common.contains(&edge.right) { continue; }
+        if graphs[1..].iter().all(|g| g.has_edge(&edge.left, &edge.right)) {
+            let _ = result.add_edge(edge.left.clone(), edge.right.clone());
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Generic BFS edges / local bridges / graph info / tree data
+// ---------------------------------------------------------------------------
+
+/// BFS edges with depth limit.
+#[must_use]
+pub fn generic_bfs_edges(graph: &Graph, source: &str, depth_limit: Option<usize>) -> Vec<(String, String)> {
+    if !graph.has_node(source) { return Vec::new(); }
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    let idx: std::collections::HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+    let s = idx[source];
+    let mut visited = vec![false; n];
+    visited[s] = true;
+    let mut result = Vec::new();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back((s, 0usize));
+    while let Some((v, depth)) = queue.pop_front() {
+        if depth_limit.is_some_and(|l| depth >= l) { continue; }
+        let mut nbrs: Vec<usize> = graph.neighbors(nodes[v]).unwrap_or_default()
+            .iter().filter_map(|nb| idx.get(nb).copied()).filter(|&ni| !visited[ni]).collect();
+        nbrs.sort();
+        for ni in nbrs {
+            if !visited[ni] {
+                visited[ni] = true;
+                result.push((nodes[v].to_owned(), nodes[ni].to_owned()));
+                queue.push_back((ni, depth + 1));
+            }
+        }
+    }
+    result
+}
+
+/// Local bridges: edges whose endpoints share no common neighbor.
+#[must_use]
+pub fn local_bridges_list(graph: &Graph) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    for edge in graph.edges_ordered() {
+        if edge.left == edge.right { continue; }
+        let u_nbrs: std::collections::HashSet<&str> = graph.neighbors(&edge.left).unwrap_or_default()
+            .into_iter().filter(|&n| n != edge.right.as_str()).collect();
+        let v_nbrs: std::collections::HashSet<&str> = graph.neighbors(&edge.right).unwrap_or_default()
+            .into_iter().filter(|&n| n != edge.left.as_str()).collect();
+        if u_nbrs.intersection(&v_nbrs).next().is_none() {
+            result.push((edge.left.clone(), edge.right.clone()));
+        }
+    }
+    result
+}
+
+/// Text description of an undirected graph.
+#[must_use]
+pub fn graph_info(graph: &Graph) -> String {
+    let n = graph.nodes_ordered().len();
+    let m = graph.edge_count();
+    let avg = if n > 0 { 2.0 * m as f64 / n as f64 } else { 0.0 };
+    format!("Type: Graph\nNumber of nodes: {n}\nNumber of edges: {m}\nAverage degree: {avg:.4}")
+}
+
+/// Text description of a directed graph.
+#[must_use]
+pub fn digraph_info(digraph: &DiGraph) -> String {
+    let n = digraph.nodes_ordered().len();
+    let m = digraph.edge_count();
+    let avg = if n > 0 { m as f64 / n as f64 } else { 0.0 };
+    format!("Type: DiGraph\nNumber of nodes: {n}\nNumber of edges: {m}\nAverage in degree: {avg:.4}\nAverage out degree: {avg:.4}")
+}
+
+/// Tree adjacency representation from a root.
+#[must_use]
+pub fn tree_data(graph: &Graph, root: &str) -> std::collections::HashMap<String, Vec<String>> {
+    let mut result = std::collections::HashMap::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut stack = vec![root.to_owned()];
+    visited.insert(root.to_owned());
+    while let Some(node) = stack.pop() {
+        let nbrs: Vec<String> = graph.neighbors(&node).unwrap_or_default()
+            .iter().filter(|&&n| !visited.contains(n)).map(|&n| n.to_owned()).collect();
+        let mut children = Vec::new();
+        for n in nbrs {
+            if visited.insert(n.clone()) {
+                stack.push(n.clone());
+                children.push(n);
+            }
+        }
+        result.insert(node, children);
+    }
+    result
+}
+
+/// All-pairs node connectivity via node-disjoint paths.
+#[must_use]
+pub fn all_pairs_node_connectivity(graph: &Graph) -> std::collections::HashMap<(String, String), usize> {
+    let nodes = graph.nodes_ordered();
+    let mut result = std::collections::HashMap::new();
+    for i in 0..nodes.len() {
+        for j in (i + 1)..nodes.len() {
+            let conn = node_disjoint_paths(graph, nodes[i], nodes[j]).len();
+            result.insert((nodes[i].to_owned(), nodes[j].to_owned()), conn);
+            result.insert((nodes[j].to_owned(), nodes[i].to_owned()), conn);
+        }
+    }
+    result
 }
 
 #[cfg(test)]

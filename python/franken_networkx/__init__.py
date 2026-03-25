@@ -268,7 +268,7 @@ from franken_networkx._fnx import (
     find_cliques_recursive,
     chordal_graph_cliques,
     chordal_graph_treewidth,
-    make_max_clique_graph,
+    make_max_clique_graph as _rust_make_max_clique_graph,
     ring_of_cliques,
 )
 
@@ -1213,44 +1213,14 @@ def minimum_edge_cut(G, s=None, t=None):
 
 
 def stochastic_graph(G, copy=True, weight='weight'):
-    """Return the stochastic graph of *G* (row-normalized adjacency).
+    """Return the stochastic graph of *G* (row-normalized adjacency)."""
+    import networkx as nx
 
-    Each row of the adjacency matrix is normalized so the edge weights
-    from each node sum to 1.
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
 
-    Parameters
-    ----------
-    G : DiGraph
-        Must be a directed graph.
-    copy : bool, optional
-        If True (default), return a new graph.
-    weight : str, optional
-        Edge attribute to normalize. Default ``'weight'``.
-    """
-    if not G.is_directed():
-        raise Exception("stochastic_graph requires a directed graph")
-
-    H = G.copy() if copy else G
-
-    for node in H.nodes():
-        succs = list(H.successors(node)) if hasattr(H, 'successors') else list(H.neighbors(node))
-        if not succs:
-            continue
-        total = 0.0
-        for succ in succs:
-            data = H.get_edge_data(node, succ)
-            if isinstance(data, dict):
-                total += float(data.get(weight, 1.0))
-            else:
-                total += 1.0
-        if total > 0:
-            for succ in succs:
-                data = H.get_edge_data(node, succ)
-                if isinstance(data, dict):
-                    w = float(data.get(weight, 1.0))
-                    data[weight] = w / total
-
-    return H
+    graph = nx.stochastic_graph(_to_nx(G), copy=copy, weight=weight)
+    return _from_nx_graph(graph, create_using=G if not copy else None)
 
 
 # ---------------------------------------------------------------------------
@@ -1258,37 +1228,22 @@ def stochastic_graph(G, copy=True, weight='weight'):
 # ---------------------------------------------------------------------------
 
 
-def ego_graph(G, n, radius=1, center=True, undirected=False):
-    """Return the ego graph of node *n* within *radius* hops.
+def ego_graph(G, n, radius=1, center=True, undirected=False, distance=None):
+    """Return the ego graph of node *n* within *radius* hops."""
+    import networkx as nx
 
-    Parameters
-    ----------
-    G : Graph or DiGraph
-    n : node
-        Center node.
-    radius : int, optional
-        Maximum distance from *n*. Default 1.
-    center : bool, optional
-        If True (default), include *n* in the subgraph.
-    undirected : bool, optional
-        If True, use undirected distances even for directed graphs.
-    """
-    nodes = {n} if center else set()
-    frontier = {n}
-    for _ in range(radius):
-        next_frontier = set()
-        for node in frontier:
-            for nbr in G.neighbors(node):
-                if nbr not in nodes and nbr not in frontier:
-                    next_frontier.add(nbr)
-        nodes.update(frontier)
-        nodes.update(next_frontier)
-        frontier = next_frontier
-        if not frontier:
-            break
-    if not center:
-        nodes.discard(n)
-    return G.subgraph(nodes)
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    graph = nx.ego_graph(
+        _to_nx(G),
+        n,
+        radius=radius,
+        center=center,
+        undirected=undirected,
+        distance=distance,
+    )
+    return _from_nx_graph(graph)
 
 
 def k_core(G, k=None, core_number=None):
@@ -1348,7 +1303,7 @@ def k_corona(G, k, core_number=None):
     return G.subgraph(corona_nodes)
 
 
-def line_graph(G):
+def line_graph(G, create_using=None):
     """Return the line graph of *G*.
 
     The line graph L(G) has a node for each edge in G. Two nodes in L(G)
@@ -1359,7 +1314,22 @@ def line_graph(G):
     from franken_networkx.drawing.layout import _to_nx
     from franken_networkx.readwrite import _from_nx_graph
 
-    return _from_nx_graph(nx.line_graph(_to_nx(G)))
+    graph = nx.line_graph(_to_nx(G), create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
+
+
+def make_max_clique_graph(G, create_using=None):
+    """Return the maximal-clique intersection graph of *G*."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    if create_using is None:
+        return _rust_make_max_clique_graph(G)
+
+    graph = nx.make_max_clique_graph(_to_nx(G), create_using=None)
+    return _from_nx_graph(graph, create_using=create_using)
 
 
 def power(G, k):
@@ -2870,7 +2840,12 @@ def windmill_graph(n, k):
 
 def complete_multipartite_graph(*subset_sizes):
     """Return the complete multipartite graph with the given subset sizes."""
-    return _rust_complete_multipartite_graph(subset_sizes)
+    if len(subset_sizes) == 1:
+        try:
+            subset_sizes = tuple(subset_sizes[0])
+        except TypeError:
+            pass
+    return _rust_complete_multipartite_graph(list(subset_sizes))
 
 
 def gnm_random_graph(n, m, seed=None):
@@ -6444,19 +6419,12 @@ def eulerize(G):
 
 def moral_graph(G):
     """Return the moral graph of a DAG (marry co-parents, drop directions)."""
-    H = Graph()
-    for node in G.nodes():
-        H.add_node(node)
-    for u, v in G.edges():
-        H.add_edge(u, v)
-    # Marry co-parents
-    for node in G.nodes():
-        if hasattr(G, 'predecessors'):
-            preds = list(G.predecessors(node))
-            for i in range(len(preds)):
-                for j in range(i + 1, len(preds)):
-                    H.add_edge(preds[i], preds[j])
-    return H
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    return _from_nx_graph(nx.moral_graph(_to_nx(G)))
 
 
 def equivalence_classes(iterable, relation):
@@ -7235,21 +7203,14 @@ def tree_graph(data, ident="id", children="children"):
     return _from_nx_graph(graph)
 
 def complete_to_chordal_graph(G):
-    """Add fill edges to make G chordal. Returns (H, added_edges)."""
-    H = G.copy(); added = set()
-    nodes = list(H.nodes()); n = len(nodes)
-    # Minimum degree elimination ordering
-    remaining = set(nodes)
-    for _ in range(n):
-        if not remaining: break
-        v = min(remaining, key=lambda x: sum(1 for nb in H.neighbors(x) if nb in remaining))
-        nbrs = [nb for nb in H.neighbors(v) if nb in remaining]
-        for i in range(len(nbrs)):
-            for j in range(i+1, len(nbrs)):
-                if not H.has_edge(nbrs[i], nbrs[j]):
-                    H.add_edge(nbrs[i], nbrs[j]); added.add((nbrs[i], nbrs[j]))
-        remaining.remove(v)
-    return H, added
+    """Return a chordal completion and elimination ordering map."""
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+    from franken_networkx.readwrite import _from_nx_graph
+
+    graph, alpha = nx.complete_to_chordal_graph(_to_nx(G))
+    return _from_nx_graph(graph), alpha
 
 # Structural Generators (br-rfd)
 def hkn_harary_graph(k, n, create_using=None):
@@ -8187,19 +8148,26 @@ def to_pandas_edgelist(G, source='source', target='target', nodelist=None,
     -------
     df : pandas.DataFrame
     """
-    import pandas as pd
+    import networkx as nx
 
-    edgelist = to_edgelist(G, nodelist=nodelist)
-    rows = []
-    for u, v, d in edgelist:
-        row = {source: u, target: v}
-        row.update(d)
-        rows.append(row)
-    return pd.DataFrame(rows, dtype=dtype)
+    return nx.to_pandas_edgelist(
+        _to_nx(G),
+        source=source,
+        target=target,
+        nodelist=nodelist,
+        dtype=dtype,
+        edge_key=edge_key,
+    )
 
 
-def from_pandas_edgelist(df, source='source', target='target', edge_attr=None,
-                         create_using=None):
+def from_pandas_edgelist(
+    df,
+    source='source',
+    target='target',
+    edge_attr=None,
+    create_using=None,
+    edge_key=None,
+):
     """Return a graph from a Pandas DataFrame of edges.
 
     Parameters
@@ -8220,23 +8188,19 @@ def from_pandas_edgelist(df, source='source', target='target', edge_attr=None,
     -------
     G : Graph or DiGraph
     """
-    G = _empty_graph_from_create_using(create_using)
+    import networkx as nx
 
-    if isinstance(edge_attr, bool) and edge_attr:
-        attr_cols = [c for c in df.columns if c not in (source, target)]
-    elif isinstance(edge_attr, str):
-        attr_cols = [edge_attr]
-    elif isinstance(edge_attr, (list, tuple)):
-        attr_cols = list(edge_attr)
-    else:
-        attr_cols = []
+    from franken_networkx.readwrite import _from_nx_graph, _to_nx_create_using
 
-    for _, row in df.iterrows():
-        u, v = row[source], row[target]
-        attrs = {col: row[col] for col in attr_cols if col in row.index}
-        G.add_edge(u, v, **attrs)
-
-    return G
+    graph = nx.from_pandas_edgelist(
+        df,
+        source=source,
+        target=target,
+        edge_attr=edge_attr,
+        create_using=_to_nx_create_using(create_using),
+        edge_key=edge_key,
+    )
+    return _from_nx_graph(graph, create_using=create_using)
 
 
 
@@ -8268,34 +8232,26 @@ def to_numpy_array(G, nodelist=None, dtype=None, order=None,
     A : numpy.ndarray
         Adjacency matrix as a 2-D NumPy array.
     """
-    import numpy as np
+    import networkx as nx
+    from franken_networkx.drawing.layout import _to_nx
 
-    if nodelist is None:
-        nodelist = list(G.nodes())
+    return nx.to_numpy_array(
+        _to_nx(G),
+        nodelist=nodelist,
+        dtype=dtype,
+        order=order,
+        multigraph_weight=multigraph_weight,
+        weight=weight,
+        nonedge=nonedge,
+    )
 
-    n = len(nodelist)
-    index = {node: i for i, node in enumerate(nodelist)}
-
-    if dtype is None:
-        dtype = np.float64
-
-    A = np.full((n, n), nonedge, dtype=dtype, order=order)
-
-    for u, v, data in G.edges(data=True):
-        if u in index and v in index:
-            i, j = index[u], index[v]
-            if weight is None:
-                w = 1
-            else:
-                w = data.get(weight, 1)
-            A[i, j] = w
-            if not G.is_directed():
-                A[j, i] = w
-
-    return A
-
-
-def from_numpy_array(A, parallel_edges=False, create_using=None):
+def from_numpy_array(
+    A,
+    parallel_edges=False,
+    create_using=None,
+    edge_attr='weight',
+    nodelist=None,
+):
     """Return a graph from a 2-D NumPy adjacency matrix.
 
     Parameters
@@ -8312,23 +8268,18 @@ def from_numpy_array(A, parallel_edges=False, create_using=None):
     G : Graph or DiGraph
         The constructed graph.
     """
+    import networkx as nx
 
-    G = _empty_graph_from_create_using(create_using)
+    from franken_networkx.readwrite import _from_nx_graph, _to_nx_create_using
 
-    n = A.shape[0]
-    for i in range(n):
-        G.add_node(i)
-
-    # Iterate the full matrix (both triangles) to match NetworkX behavior.
-    # For undirected graphs, add_edge deduplicates automatically;
-    # last-encountered weight wins for asymmetric matrices.
-    for i in range(n):
-        for j in range(n):
-            val = A[i, j]
-            if val != 0:
-                G.add_edge(i, j, weight=float(val))
-
-    return G
+    graph = nx.from_numpy_array(
+        A,
+        parallel_edges=parallel_edges,
+        create_using=_to_nx_create_using(create_using),
+        edge_attr=edge_attr,
+        nodelist=nodelist,
+    )
+    return _from_nx_graph(graph, create_using=create_using)
 
 
 def to_scipy_sparse_array(G, nodelist=None, dtype=None, weight='weight',
@@ -8408,55 +8359,31 @@ def from_scipy_sparse_array(A, parallel_edges=False, create_using=None,
     G : Graph or DiGraph
         The constructed graph.
     """
-    import scipy.sparse
+    import networkx as nx
 
-    G = _empty_graph_from_create_using(create_using)
+    from franken_networkx.readwrite import _from_nx_graph, _to_nx_create_using
 
-    coo = scipy.sparse.coo_array(A)
-    n = coo.shape[0]
-    for i in range(n):
-        G.add_node(i)
-
-    # Iterate all nonzero entries; for undirected graphs, add_edge
-    # deduplicates automatically (last-encountered weight wins).
-    for i, j, v in zip(coo.row, coo.col, coo.data):
-        kwargs = {edge_attribute: float(v)} if edge_attribute else {}
-        G.add_edge(int(i), int(j), **kwargs)
-
-    return G
+    graph = nx.from_scipy_sparse_array(
+        A,
+        parallel_edges=parallel_edges,
+        create_using=_to_nx_create_using(create_using),
+        edge_attribute=edge_attribute,
+    )
+    return _from_nx_graph(graph, create_using=create_using)
 
 
 def from_dict_of_dicts(d, create_using=None, multigraph_input=False):
-    """Return a graph from a dictionary of dictionaries.
+    """Return a graph from a dictionary of dictionaries."""
+    import networkx as nx
 
-    Parameters
-    ----------
-    d : dict of dicts
-        Adjacency representation. ``d[u][v]`` gives the edge data dict for
-        edge (u, v).
-    create_using : Graph constructor, optional
-        Graph type to create. Default ``Graph()``.
-    multigraph_input : bool, optional
-        Ignored (multigraphs not yet supported). Present for API compat.
+    from franken_networkx.readwrite import _from_nx_graph, _to_nx_create_using
 
-    Returns
-    -------
-    G : Graph or DiGraph
-    """
-    G = _empty_graph_from_create_using(create_using)
-
-    # Add all keys as nodes first (preserves isolated nodes like NetworkX).
-    for u in d:
-        G.add_node(u)
-
-    for u, nbrs in d.items():
-        for v, data in nbrs.items():
-            if isinstance(data, dict):
-                G.add_edge(u, v, **data)
-            else:
-                G.add_edge(u, v)
-
-    return G
+    graph = nx.from_dict_of_dicts(
+        d,
+        create_using=_to_nx_create_using(create_using),
+        multigraph_input=multigraph_input,
+    )
+    return _from_nx_graph(graph, create_using=create_using)
 
 
 def from_edgelist(edgelist, create_using=None):
@@ -8537,11 +8464,11 @@ def to_networkx_graph(data, create_using=None, multigraph_input=False):
     """Convert supported input data to a graph."""
     import networkx as nx
 
-    from franken_networkx.readwrite import _from_nx_graph
+    from franken_networkx.readwrite import _from_nx_graph, _to_nx_create_using
 
     graph = nx.to_networkx_graph(
         data,
-        create_using=None,
+        create_using=_to_nx_create_using(create_using),
         multigraph_input=multigraph_input,
     )
     return _from_nx_graph(graph, create_using=create_using)

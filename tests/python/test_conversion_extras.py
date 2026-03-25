@@ -33,7 +33,7 @@ def test_prufer_sequence_round_trip():
 def test_nested_tuple_round_trip():
     tree = fnx.balanced_tree(2, 2)
 
-    nested = fnx.to_nested_tuple(tree, root="0")
+    nested = fnx.to_nested_tuple(tree, root=0)
     restored = fnx.from_nested_tuple(nested, sensible_relabeling=True)
 
     assert nested == (((), ()), ((), ()))
