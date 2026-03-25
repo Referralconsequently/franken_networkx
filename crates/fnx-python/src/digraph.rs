@@ -1016,10 +1016,47 @@ impl PyMultiDiGraph {
         self.copy(py)
     }
 
-    fn to_undirected(&self) -> PyResult<()> {
-        Err(crate::NetworkXNotImplemented::new_err(
-            "to_undirected() is not yet supported for MultiDiGraph.",
-        ))
+    fn to_undirected(&self, py: Python<'_>) -> PyResult<crate::PyMultiGraph> {
+        let mut ug = crate::PyMultiGraph {
+            inner: fnx_classes::MultiGraph::strict(),
+            node_key_map: HashMap::new(),
+            node_py_attrs: HashMap::new(),
+            edge_py_attrs: HashMap::new(),
+            graph_attrs: self.graph_attrs.bind(py).copy()?.unbind(),
+        };
+
+        for (canonical, py_key) in &self.node_key_map {
+            ug.inner.add_node(canonical.clone());
+            ug.node_key_map.insert(canonical.clone(), py_key.clone_ref(py));
+            if let Some(attrs) = self.node_py_attrs.get(canonical) {
+                ug.node_py_attrs.insert(canonical.clone(), attrs.bind(py).copy()?.unbind());
+            }
+        }
+
+        for edge in self.inner.edges_ordered() {
+            let u = &edge.source;
+            let v = &edge.target;
+            let k = edge.key;
+            
+            let mut rust_attrs = edge.attrs.clone();
+            
+            let mut py_attrs_copy = None;
+            if let Some(py_attrs) = self.edge_py_attrs.get(&(u.clone(), v.clone(), k)) {
+                py_attrs_copy = Some(py_attrs.bind(py).copy()?.unbind());
+                rust_attrs.extend(crate::py_dict_to_attr_map(py_attrs.bind(py))?);
+            }
+            
+            let new_k = ug.inner.add_edge_with_attrs(u.clone(), v.clone(), rust_attrs)
+                .map_err(|e| crate::NetworkXError::new_err(e.to_string()))?;
+            
+            if let Some(pa) = py_attrs_copy {
+                let u_undir = if u < v { u.clone() } else { v.clone() };
+                let v_undir = if u < v { v.clone() } else { u.clone() };
+                ug.edge_py_attrs.insert((u_undir, v_undir, new_k), pa);
+            }
+        }
+
+        Ok(ug)
     }
 
     fn reverse(&self, py: Python<'_>) -> PyResult<Self> {

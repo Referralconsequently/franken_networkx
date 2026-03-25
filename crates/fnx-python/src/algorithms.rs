@@ -5750,13 +5750,27 @@ fn louvain_communities(
 fn modularity(
     py: Python<'_>,
     g: &Bound<'_, PyAny>,
-    communities: Vec<Vec<String>>,
+    communities: &Bound<'_, PyAny>,
     resolution: f64,
     weight: &str,
 ) -> PyResult<f64> {
     let gr = extract_graph(g)?;
+    
+    let mut comms_strs = Vec::new();
+    for comm in communities.try_iter()? {
+        let comm = comm?;
+        let mut comm_strs = Vec::new();
+        for node in comm.try_iter()? {
+            let node = node?;
+            let s = node_key_to_string(py, &node)?;
+            validate_node(&gr, &s, &node)?;
+            comm_strs.push(s);
+        }
+        comms_strs.push(comm_strs);
+    }
+    
     let inner = gr.undirected();
-    Ok(py.allow_threads(|| fnx_algorithms::modularity(inner, &communities, resolution, weight)))
+    Ok(py.allow_threads(|| fnx_algorithms::modularity(inner, &comms_strs, resolution, weight)))
 }
 
 #[pyfunction]

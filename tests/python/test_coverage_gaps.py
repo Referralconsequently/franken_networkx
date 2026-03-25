@@ -112,15 +112,11 @@ class TestCommunityDetection:
 
     def test_modularity(self):
         G = fnx.complete_graph(4)
-        # modularity expects lists of node labels (strings for fnx)
+        # modularity expects lists of node labels
         comms = [[0, 1], [2, 3]]
-        try:
-            m = fnx.modularity(G, comms)
-            assert isinstance(m, float)
-            assert -0.5 <= m <= 1.0
-        except TypeError:
-            # Modularity may require string node labels depending on implementation
-            pytest.skip("modularity signature mismatch — needs investigation")
+        m = fnx.modularity(G, comms)
+        assert isinstance(m, float)
+        assert -0.5 <= m <= 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -802,11 +798,31 @@ class TestGenerators:
             multigraph_weight=max,
             weight="weight",
         )
+        pandas_adjacency = fnx.to_pandas_adjacency(
+            graph,
+            nodelist=["a", "b"],
+            multigraph_weight=max,
+            nonedge=-1.0,
+        )
+        expected_pandas_adjacency = nx.to_pandas_adjacency(
+            expected_graph,
+            nodelist=["a", "b"],
+            multigraph_weight=max,
+            nonedge=-1.0,
+        )
+        sparse = fnx.to_scipy_sparse_array(graph, nodelist=["a", "b"], format="csr")
+        expected_sparse = nx.to_scipy_sparse_array(
+            expected_graph,
+            nodelist=["a", "b"],
+            format="csr",
+        )
 
         assert frame.sort_values(["ek"]).reset_index(drop=True).equals(
             expected_frame.sort_values(["ek"]).reset_index(drop=True)
         )
         assert np.array_equal(matrix, expected_matrix)
+        assert pandas_adjacency.equals(expected_pandas_adjacency)
+        assert np.array_equal(sparse.toarray(), expected_sparse.toarray())
 
     @needs_nx
     def test_harary_and_havel_hakimi_wrappers_match_networkx(self):

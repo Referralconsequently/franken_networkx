@@ -1457,7 +1457,7 @@ def laplacian_matrix(G, nodelist=None, weight='weight'):
 
     A = to_scipy_sparse_array(G, nodelist=nodelist, weight=weight)
     n = A.shape[0]
-    D = scipy.sparse.diags(np.asarray(A.sum(axis=1)).flatten())
+    D = scipy.sparse.diags(np.asarray(A.sum(axis=1)).flatten(), dtype=float)
     return D - A
 
 
@@ -4358,7 +4358,7 @@ def bethe_hessian_matrix(G, r=None, nodelist=None):
     A = to_scipy_sparse_array(G, nodelist=nodelist, weight=None)
     n = A.shape[0]
     d = np.asarray(A.sum(axis=1)).flatten()
-    D = scipy.sparse.diags(d)
+    D = scipy.sparse.diags(d, dtype=float)
     if r is None:
         r = max(np.sqrt(d.mean()), 1.0) if n > 0 else 1.0
     I = scipy.sparse.eye(n)
@@ -6538,13 +6538,27 @@ def from_pandas_adjacency(df, create_using=None):
     return G
 
 
-def to_pandas_adjacency(G, nodelist=None, dtype=None, weight='weight'):
+def to_pandas_adjacency(
+    G,
+    nodelist=None,
+    dtype=None,
+    order=None,
+    multigraph_weight=sum,
+    weight='weight',
+    nonedge=0.0,
+):
     """Export adjacency as pandas DataFrame."""
-    import pandas as pd
-    A = to_numpy_array(G, nodelist=nodelist, dtype=dtype, weight=weight)
-    if nodelist is None:
-        nodelist = list(G.nodes())
-    return pd.DataFrame(A, index=nodelist, columns=nodelist)
+    import networkx as nx
+
+    return nx.to_pandas_adjacency(
+        _to_nx(G),
+        nodelist=nodelist,
+        dtype=dtype,
+        order=order,
+        multigraph_weight=multigraph_weight,
+        weight=weight,
+        nonedge=nonedge,
+    )
 
 
 def from_prufer_sequence(sequence):
@@ -8306,37 +8320,16 @@ def to_scipy_sparse_array(G, nodelist=None, dtype=None, weight='weight',
     A : scipy.sparse array
         Adjacency matrix in the requested sparse format.
     """
-    import numpy as np
-    import scipy.sparse
+    import networkx as nx
+    from franken_networkx.drawing.layout import _to_nx
 
-    if nodelist is None:
-        nodelist = list(G.nodes())
-
-    n = len(nodelist)
-    index = {node: i for i, node in enumerate(nodelist)}
-
-    if dtype is None:
-        dtype = np.float64
-
-    row, col, data = [], [], []
-    for u, v, d in G.edges(data=True):
-        if u in index and v in index:
-            i, j = index[u], index[v]
-            w = 1 if weight is None else d.get(weight, 1)
-            row.append(i)
-            col.append(j)
-            data.append(w)
-            if not G.is_directed() and i != j:
-                row.append(j)
-                col.append(i)
-                data.append(w)
-
-    A = scipy.sparse.coo_array(
-        (np.array(data, dtype=dtype), (np.array(row), np.array(col))),
-        shape=(n, n),
+    return nx.to_scipy_sparse_array(
+        _to_nx(G),
+        nodelist=nodelist,
+        dtype=dtype,
+        weight=weight,
+        format=format,
     )
-    return A.asformat(format)
-
 
 def from_scipy_sparse_array(A, parallel_edges=False, create_using=None,
                             edge_attribute='weight'):

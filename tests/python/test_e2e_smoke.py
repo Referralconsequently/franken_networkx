@@ -82,7 +82,6 @@ def test_import():
     check("module imports", True)
     check("version is string", isinstance(fnx.__version__, str))
     check("version is non-empty", len(fnx.__version__) > 0)
-    return fnx
 
 
 # ===========================================================================
@@ -141,8 +140,6 @@ def test_graph_lifecycle(fnx):
     # __str__ and __repr__
     check("str(G) works", "Graph" in str(G))
     check("repr(G) works", "Graph" in repr(G))
-
-    return G
 
 
 @timed
@@ -374,8 +371,10 @@ def test_multidigraph_extended_surface(fnx):
     assert reversed_graph.has_edge("b", "a", key=1)
     assert reversed_graph.has_edge("a", "b", key=0)
 
-    with pytest.raises(fnx.NetworkXNotImplemented):
-        g.to_undirected()
+    undirected_graph = g.to_undirected()
+    assert isinstance(undirected_graph, fnx.MultiGraph)
+    assert not undirected_graph.is_directed()
+    assert undirected_graph.number_of_edges() == g.number_of_edges()
 
     g.update(edges=[("c", "a", {"weight": 4.0})], nodes=[("d", {"shape": "sink"})])
     assert g.has_node("d")
