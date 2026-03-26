@@ -9301,6 +9301,142 @@ pub fn find_asteroidal_triple_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyRe
     Ok(result.map(|(u, v, w)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), gr.py_node_key(py, &w))))
 }
 
+// ---------------------------------------------------------------------------
+// SNAP aggregation
+// ---------------------------------------------------------------------------
+
+/// SNAP aggregation: group nodes by attributes and neighbor signatures.
+#[pyfunction]
+pub fn snap_aggregation_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    node_attributes: Vec<String>,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::snap_aggregation(inner, &node_attributes));
+    let pg = crate::PyGraph {
+        inner: result,
+        node_key_map: std::collections::HashMap::new(),
+        node_py_attrs: std::collections::HashMap::new(),
+        edge_py_attrs: std::collections::HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+    Ok(pg.into_pyobject(py)?.into_any().unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Spanning tree / arborescence iterators
+// ---------------------------------------------------------------------------
+
+/// Enumerate spanning trees.
+#[pyfunction]
+#[pyo3(signature = (g, weight="weight", max_count=100))]
+pub fn spanning_tree_iterator_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    weight: &str,
+    max_count: usize,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let trees = py.allow_threads(|| fnx_algorithms::spanning_tree_iterator(inner, weight, max_count));
+    trees.into_iter().map(|t| {
+        let pg = crate::PyGraph {
+            inner: t,
+            node_key_map: std::collections::HashMap::new(),
+            node_py_attrs: std::collections::HashMap::new(),
+            edge_py_attrs: std::collections::HashMap::new(),
+            graph_attrs: PyDict::new(py).unbind(),
+        };
+        Ok(pg.into_pyobject(py)?.into_any().unbind())
+    }).collect()
+}
+
+/// Enumerate spanning arborescences.
+#[pyfunction]
+#[pyo3(signature = (g, weight="weight", max_count=100))]
+pub fn arborescence_iterator_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    weight: &str,
+    max_count: usize,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    let dg = gr.digraph().ok_or_else(|| crate::NetworkXError::new_err("requires DiGraph"))?;
+    let arbs = py.allow_threads(|| fnx_algorithms::arborescence_iterator(dg, weight, max_count));
+    arbs.into_iter().map(|a| {
+        let pg = crate::digraph::PyDiGraph {
+            inner: a,
+            node_key_map: std::collections::HashMap::new(),
+            node_py_attrs: std::collections::HashMap::new(),
+            edge_py_attrs: std::collections::HashMap::new(),
+            graph_attrs: PyDict::new(py).unbind(),
+        };
+        Ok(pg.into_pyobject(py)?.into_any().unbind())
+    }).collect()
+}
+
+// ---------------------------------------------------------------------------
+// GraphML writer (Rust)
+// ---------------------------------------------------------------------------
+
+/// Generate GraphML XML string.
+#[pyfunction]
+pub fn write_graphml_string_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<String> {
+    let gr = extract_graph(g)?;
+    Ok(if gr.is_directed() {
+        let dg = gr.digraph().unwrap();
+        py.allow_threads(|| fnx_algorithms::write_graphml_string_directed(dg))
+    } else {
+        let inner = gr.undirected();
+        py.allow_threads(|| fnx_algorithms::write_graphml_string(inner))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// All-pairs node connectivity / all-pairs all shortest paths / LCA
+// ---------------------------------------------------------------------------
+
+/// All-pairs node connectivity.
+#[pyfunction]
+pub fn all_pairs_node_connectivity_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::all_pairs_node_connectivity(inner));
+    let dict = PyDict::new(py);
+    for ((u, v), conn) in &result {
+        dict.set_item((gr.py_node_key(py, u), gr.py_node_key(py, v)), conn)?;
+    }
+    Ok(dict.unbind())
+}
+
+/// All-pairs all shortest paths.
+#[pyfunction]
+pub fn all_pairs_all_shortest_paths_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyDict>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::all_pairs_all_shortest_paths(inner));
+    let outer = PyDict::new(py);
+    for (source, targets) in &result {
+        let inner_dict = PyDict::new(py);
+        for (target, paths) in targets {
+            let py_paths: Vec<Vec<PyObject>> = paths.iter()
+                .map(|p| p.iter().map(|n| gr.py_node_key(py, n)).collect())
+                .collect();
+            inner_dict.set_item(gr.py_node_key(py, target), py_paths)?;
+        }
+        outer.set_item(gr.py_node_key(py, source), inner_dict)?;
+    }
+    Ok(outer.unbind())
+}
+
 // Registration
 // ===========================================================================
 
@@ -9850,5 +9986,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gomory_hu_tree_rust, m)?)?;
     // Find asteroidal triple
     m.add_function(wrap_pyfunction!(find_asteroidal_triple_rust, m)?)?;
+    // SNAP aggregation
+    m.add_function(wrap_pyfunction!(snap_aggregation_rust, m)?)?;
+    // Iterators
+    m.add_function(wrap_pyfunction!(spanning_tree_iterator_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(arborescence_iterator_rust, m)?)?;
+    // GraphML writer
+    m.add_function(wrap_pyfunction!(write_graphml_string_rust, m)?)?;
+    // All-pairs
+    m.add_function(wrap_pyfunction!(all_pairs_node_connectivity_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(all_pairs_all_shortest_paths_rust, m)?)?;
     Ok(())
 }

@@ -875,6 +875,58 @@ class TestGenerators:
         assert dict(graph.nodes(data=True)) == dict(expected_graph.nodes(data=True))
 
     @needs_nx
+    def test_top_level_nodes_edges_and_degree_match_networkx(self):
+        graph = fnx.Graph()
+        graph.add_edge(0, 1, weight=2)
+        graph.add_edge(1, 2, weight=3)
+        graph.add_edge(2, 3, weight=4)
+
+        expected_graph = nx.Graph()
+        expected_graph.add_edge(0, 1, weight=2)
+        expected_graph.add_edge(1, 2, weight=3)
+        expected_graph.add_edge(2, 3, weight=4)
+
+        assert list(fnx.nodes(graph)) == list(nx.nodes(expected_graph))
+        assert sorted(fnx.edges(graph, [1, 2])) == sorted(nx.edges(expected_graph, [1, 2]))
+        assert dict(fnx.degree(graph, weight="weight")) == dict(
+            nx.degree(expected_graph, weight="weight")
+        )
+
+    @needs_nx
+    def test_default_node_link_serialization_matches_networkx(self):
+        graph = fnx.MultiGraph()
+        graph.add_edge("a", "b", key=7, weight=3)
+
+        expected_graph = nx.MultiGraph()
+        expected_graph.add_edge("a", "b", key=7, weight=3)
+
+        payload = fnx.node_link_data(graph)
+        expected_payload = nx.node_link_data(expected_graph)
+        roundtrip = fnx.node_link_graph(expected_payload)
+
+        assert payload == expected_payload
+        assert isinstance(roundtrip, fnx.MultiGraph)
+        assert sorted(roundtrip.edges(keys=True, data=True)) == sorted(
+            expected_graph.edges(keys=True, data=True)
+        )
+
+    @needs_nx
+    def test_attribute_mixing_helpers_match_networkx_on_missing_attributes(self):
+        np = pytest.importorskip("numpy")
+        graph = fnx.path_graph(4)
+        expected_graph = nx.path_graph(4)
+
+        assert fnx.attribute_mixing_dict(graph, "missing", normalized=False) == nx.attribute_mixing_dict(
+            expected_graph,
+            "missing",
+            normalized=False,
+        )
+        assert np.array_equal(
+            fnx.attribute_mixing_matrix(graph, "missing", normalized=True),
+            nx.attribute_mixing_matrix(expected_graph, "missing", normalized=True),
+        )
+
+    @needs_nx
     def test_harary_and_havel_hakimi_wrappers_match_networkx(self):
         hakimi = fnx.havel_hakimi_graph([3, 3, 2, 2, 2], create_using=fnx.Graph())
         expected_hakimi = nx.havel_hakimi_graph([3, 3, 2, 2, 2], create_using=nx.Graph())

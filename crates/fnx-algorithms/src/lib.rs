@@ -23360,6 +23360,441 @@ fn bfs_path_avoiding(
     false
 }
 
+// ---------------------------------------------------------------------------
+// SNAP aggregation
+// ---------------------------------------------------------------------------
+
+/// SNAP (Summarization by grouping Nodes on Attributes and Pairs) aggregation.
+///
+/// Groups nodes by attribute values and neighbor-group signatures,
+/// iteratively refining until stable. Returns a summary graph where
+/// each node represents a group of original nodes.
+#[must_use]
+pub fn snap_aggregation(
+    graph: &Graph,
+    node_attributes: &[String],
+) -> Graph {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 { return Graph::strict(); }
+
+    let idx: std::collections::HashMap<&str, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+
+    // Initial grouping by attribute values
+    let mut group_of: Vec<usize> = vec![0; n];
+    let mut group_key: std::collections::HashMap<Vec<String>, usize> = std::collections::HashMap::new();
+    let mut next_group = 0usize;
+
+    for i in 0..n {
+        let mut key = Vec::new();
+        for attr in node_attributes {
+            let val = graph.node_attrs(nodes[i])
+                .and_then(|a| a.get(attr))
+                .map(|v| v.as_str())
+                .unwrap_or_default();
+            key.push(val);
+        }
+        let gid = *group_key.entry(key).or_insert_with(|| {
+            let id = next_group;
+            next_group += 1;
+            id
+        });
+        group_of[i] = gid;
+    }
+
+    // Iterative refinement: split groups by neighbor-group signature
+    let mut changed = true;
+    for _ in 0..n {
+        if !changed { break; }
+        changed = false;
+
+        let mut new_group_key: std::collections::HashMap<(usize, Vec<usize>), usize> = std::collections::HashMap::new();
+        let mut new_next = next_group;
+        let mut new_group_of = group_of.clone();
+
+        for i in 0..n {
+            let mut nbr_groups: Vec<usize> = graph.neighbors(nodes[i])
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|nb| idx.get(nb).map(|&ni| group_of[ni]))
+                .collect();
+            nbr_groups.sort();
+            nbr_groups.dedup();
+
+            let sig = (group_of[i], nbr_groups);
+            let new_gid = *new_group_key.entry(sig).or_insert_with(|| {
+                let id = new_next;
+                new_next += 1;
+                id
+            });
+            if new_gid != group_of[i] {
+                changed = true;
+            }
+            new_group_of[i] = new_gid;
+        }
+
+        if changed {
+            group_of = new_group_of;
+            next_group = new_next;
+        }
+    }
+
+    // Build summary graph
+    let mut summary = Graph::strict();
+    let mut group_names: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+    for i in 0..n {
+        let gid = group_of[i];
+        group_names.entry(gid).or_insert_with(|| {
+            let name = format!("Supernode-{gid}");
+            let _ = summary.add_node(name.clone());
+            name
+        });
+    }
+
+    // Add edges between groups
+    let mut seen: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    for edge in graph.edges_ordered() {
+        let gi = group_of[idx[edge.left.as_str()]];
+        let gj = group_of[idx[edge.right.as_str()]];
+        if gi != gj {
+            let key = if gi < gj { (gi, gj) } else { (gj, gi) };
+            if seen.insert(key) {
+                let _ = summary.add_edge(
+                    group_names[&key.0].clone(),
+                    group_names[&key.1].clone(),
+                );
+            }
+        }
+    }
+
+    summary
+}
+
+// ---------------------------------------------------------------------------
+// Spanning tree iterator (enumerate all spanning trees)
+// ---------------------------------------------------------------------------
+
+/// Enumerate spanning trees using edge-swap approach.
+///
+/// Generates spanning trees by starting from the MST and systematically
+/// swapping one non-tree edge in, removing the heaviest tree edge from
+/// the resulting cycle. Limited to `max_count` trees to prevent explosion.
+pub fn spanning_tree_iterator(
+    graph: &Graph,
+    weight_attr: &str,
+    max_count: usize,
+) -> Vec<Graph> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 { return vec![Graph::strict()]; }
+    if n == 1 {
+        let mut g = Graph::strict();
+        let _ = g.add_node(nodes[0].to_owned());
+        return vec![g];
+    }
+
+    // Start from MST
+    let mst = minimum_spanning_tree(graph, weight_attr);
+    let mst_edges: Vec<(String, String)> = mst.edges.iter()
+        .map(|e| (e.left.clone(), e.right.clone())).collect();
+
+    // Build first spanning tree
+    let mut first = Graph::new(graph.mode());
+    for &node in &nodes { let _ = first.add_node(node.to_owned()); }
+    for (u, v) in &mst_edges { let _ = first.add_edge(u.clone(), v.clone()); }
+
+    let mut results = vec![first];
+    if results.len() >= max_count { return results; }
+
+    // Find non-tree edges
+    let tree_edge_set: std::collections::HashSet<(String, String)> = mst_edges.iter()
+        .flat_map(|(u, v)| vec![(u.clone(), v.clone()), (v.clone(), u.clone())])
+        .collect();
+
+    let non_tree: Vec<(String, String)> = graph.edges_ordered().iter()
+        .filter(|e| !tree_edge_set.contains(&(e.left.clone(), e.right.clone())))
+        .map(|e| (e.left.clone(), e.right.clone()))
+        .collect();
+
+    // For each non-tree edge, swap with each tree edge on the cycle
+    for (nu, nv) in &non_tree {
+        if results.len() >= max_count { break; }
+
+        // Find path from nu to nv in MST (the fundamental cycle)
+        let idx: std::collections::HashMap<&str, usize> =
+            nodes.iter().enumerate().map(|(i, n)| (*n, i)).collect();
+        let si = idx[nu.as_str()];
+        let ti = idx[nv.as_str()];
+
+        // BFS in tree
+        let mut parent = vec![usize::MAX; n];
+        parent[si] = si;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(si);
+        'bfs: while let Some(v) = queue.pop_front() {
+            for (u, w) in &mst_edges {
+                let ui = idx[u.as_str()];
+                let wi = idx[w.as_str()];
+                if ui == v && parent[wi] == usize::MAX {
+                    parent[wi] = v;
+                    if wi == ti { break 'bfs; }
+                    queue.push_back(wi);
+                } else if wi == v && parent[ui] == usize::MAX {
+                    parent[ui] = v;
+                    if ui == ti { break 'bfs; }
+                    queue.push_back(ui);
+                }
+            }
+        }
+
+        // Extract cycle edges (path from ti back to si)
+        let mut cycle_edges = Vec::new();
+        let mut cur = ti;
+        while cur != si {
+            let p = parent[cur];
+            if p == usize::MAX { break; }
+            cycle_edges.push((nodes[p].to_owned(), nodes[cur].to_owned()));
+            cur = p;
+        }
+
+        // For each tree edge on cycle, swap it out and put non-tree edge in
+        for (cu, cv) in &cycle_edges {
+            if results.len() >= max_count { break; }
+            let mut new_tree = Graph::new(graph.mode());
+            for &node in &nodes { let _ = new_tree.add_node(node.to_owned()); }
+            for (u, v) in &mst_edges {
+                if (u == cu && v == cv) || (u == cv && v == cu) { continue; }
+                let _ = new_tree.add_edge(u.clone(), v.clone());
+            }
+            let _ = new_tree.add_edge(nu.clone(), nv.clone());
+            // Verify it's a spanning tree (n-1 edges, connected)
+            if new_tree.edge_count() == n - 1 && is_connected(&new_tree).is_connected {
+                results.push(new_tree);
+            }
+        }
+    }
+
+    results
+}
+
+// ---------------------------------------------------------------------------
+// Arborescence iterator (enumerate spanning arborescences)
+// ---------------------------------------------------------------------------
+
+/// Enumerate spanning arborescences of a directed graph.
+///
+/// Uses iterative approach: find one arborescence via maximum branching,
+/// then generate variants by edge swaps. Limited to `max_count`.
+pub fn arborescence_iterator(
+    digraph: &DiGraph,
+    weight_attr: &str,
+    max_count: usize,
+) -> Vec<DiGraph> {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n == 0 { return vec![DiGraph::strict()]; }
+    if n == 1 {
+        let mut g = DiGraph::strict();
+        g.add_node(nodes[0].to_owned());
+        return vec![g];
+    }
+
+    // Find one arborescence via maximum branching
+    let branching = maximum_branching(digraph, weight_attr, 1.0);
+    let mut results = Vec::new();
+
+    if branching.edges.len() == n - 1 {
+        let mut arb = DiGraph::new(digraph.mode());
+        for &node in &nodes { arb.add_node(node.to_owned()); }
+        for e in &branching.edges { let _ = arb.add_edge(e.left.clone(), e.right.clone()); }
+        results.push(arb);
+    } else {
+        return results; // No arborescence exists
+    }
+
+    if results.len() >= max_count { return results; }
+
+    // Generate additional arborescences by swapping one edge
+    let first_edges: Vec<(String, String)> = results[0].edges_ordered().iter()
+        .map(|e| (e.left.clone(), e.right.clone())).collect();
+
+    for edge in digraph.edges_ordered() {
+        if results.len() >= max_count { break; }
+        if first_edges.contains(&(edge.left.clone(), edge.right.clone())) { continue; }
+
+        // Try replacing each tree edge with this edge
+        for (tu, tv) in &first_edges {
+            if results.len() >= max_count { break; }
+            // Can only replace if the new edge has the same target
+            if edge.right != *tv { continue; }
+
+            let mut new_arb = DiGraph::new(digraph.mode());
+            for &node in &nodes { new_arb.add_node(node.to_owned()); }
+            for (u, v) in &first_edges {
+                if u == tu && v == tv { continue; }
+                let _ = new_arb.add_edge(u.clone(), v.clone());
+            }
+            let _ = new_arb.add_edge(edge.left.clone(), edge.right.clone());
+
+            // Verify: n-1 edges, each node (except root) has in-degree 1
+            if new_arb.edge_count() == n - 1 {
+                let valid = nodes.iter().filter(|&&node| {
+                    new_arb.predecessors(node).map_or(0, |p| p.len()) > 1
+                }).count() == 0;
+                if valid { results.push(new_arb); }
+            }
+        }
+    }
+
+    results
+}
+
+// ---------------------------------------------------------------------------
+// GraphML writer (Rust string generation)
+// ---------------------------------------------------------------------------
+
+/// Generate GraphML XML string for an undirected graph.
+#[must_use]
+pub fn write_graphml_string(graph: &Graph) -> String {
+    let mut xml = String::new();
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str("<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\"");
+    xml.push_str(" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"");
+    xml.push_str(" xsi:schemaLocation=\"http://graphml.graphdrawing.org/xmlns");
+    xml.push_str(" http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd\">\n");
+
+    // Collect all unique node/edge attribute keys
+    let mut node_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut edge_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for node in graph.nodes_ordered() {
+        if let Some(attrs) = graph.node_attrs(node) {
+            for k in attrs.keys() { node_keys.insert(k.clone()); }
+        }
+    }
+    for edge in graph.edges_ordered() {
+        for k in edge.attrs.keys() { edge_keys.insert(k.clone()); }
+    }
+
+    // Emit key declarations
+    for (i, key) in node_keys.iter().enumerate() {
+        xml.push_str(&format!(
+            "  <key id=\"n{}\" for=\"node\" attr.name=\"{}\" attr.type=\"string\"/>\n",
+            i, xml_escape(key)
+        ));
+    }
+    for (i, key) in edge_keys.iter().enumerate() {
+        xml.push_str(&format!(
+            "  <key id=\"e{}\" for=\"edge\" attr.name=\"{}\" attr.type=\"string\"/>\n",
+            i, xml_escape(key)
+        ));
+    }
+
+    let node_key_idx: std::collections::HashMap<&str, usize> =
+        node_keys.iter().enumerate().map(|(i, k)| (k.as_str(), i)).collect();
+    let edge_key_idx: std::collections::HashMap<&str, usize> =
+        edge_keys.iter().enumerate().map(|(i, k)| (k.as_str(), i)).collect();
+
+    xml.push_str("  <graph id=\"G\" edgedefault=\"undirected\">\n");
+
+    // Nodes
+    for node in graph.nodes_ordered() {
+        let attrs = graph.node_attrs(node);
+        if attrs.map_or(true, |a| a.is_empty()) {
+            xml.push_str(&format!("    <node id=\"{}\"/>\n", xml_escape(node)));
+        } else {
+            xml.push_str(&format!("    <node id=\"{}\">\n", xml_escape(node)));
+            if let Some(a) = attrs {
+                for (k, v) in a {
+                    let idx = node_key_idx[k.as_str()];
+                    xml.push_str(&format!("      <data key=\"n{}\">{}</data>\n", idx, xml_escape(&v.as_str())));
+                }
+            }
+            xml.push_str("    </node>\n");
+        }
+    }
+
+    // Edges
+    for edge in graph.edges_ordered() {
+        if edge.attrs.is_empty() {
+            xml.push_str(&format!(
+                "    <edge source=\"{}\" target=\"{}\"/>\n",
+                xml_escape(&edge.left), xml_escape(&edge.right)
+            ));
+        } else {
+            xml.push_str(&format!(
+                "    <edge source=\"{}\" target=\"{}\">\n",
+                xml_escape(&edge.left), xml_escape(&edge.right)
+            ));
+            for (k, v) in &edge.attrs {
+                let idx = edge_key_idx[k.as_str()];
+                xml.push_str(&format!("      <data key=\"e{}\">{}</data>\n", idx, xml_escape(&v.as_str())));
+            }
+            xml.push_str("    </edge>\n");
+        }
+    }
+
+    xml.push_str("  </graph>\n</graphml>\n");
+    xml
+}
+
+/// Generate GraphML for a directed graph.
+#[must_use]
+pub fn write_graphml_string_directed(digraph: &DiGraph) -> String {
+    let mut xml = String::new();
+    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    xml.push_str("<graphml xmlns=\"http://graphml.graphdrawing.org/xmlns\"");
+    xml.push_str(" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"");
+    xml.push_str(" xsi:schemaLocation=\"http://graphml.graphdrawing.org/xmlns");
+    xml.push_str(" http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd\">\n");
+
+    let mut edge_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for edge in digraph.edges_ordered() {
+        for k in edge.attrs.keys() { edge_keys.insert(k.clone()); }
+    }
+    for (i, key) in edge_keys.iter().enumerate() {
+        xml.push_str(&format!(
+            "  <key id=\"e{}\" for=\"edge\" attr.name=\"{}\" attr.type=\"string\"/>\n",
+            i, xml_escape(key)
+        ));
+    }
+    let edge_key_idx: std::collections::HashMap<&str, usize> =
+        edge_keys.iter().enumerate().map(|(i, k)| (k.as_str(), i)).collect();
+
+    xml.push_str("  <graph id=\"G\" edgedefault=\"directed\">\n");
+    for node in digraph.nodes_ordered() {
+        xml.push_str(&format!("    <node id=\"{}\"/>\n", xml_escape(node)));
+    }
+    for edge in digraph.edges_ordered() {
+        if edge.attrs.is_empty() {
+            xml.push_str(&format!(
+                "    <edge source=\"{}\" target=\"{}\"/>\n",
+                xml_escape(&edge.left), xml_escape(&edge.right)
+            ));
+        } else {
+            xml.push_str(&format!(
+                "    <edge source=\"{}\" target=\"{}\">\n",
+                xml_escape(&edge.left), xml_escape(&edge.right)
+            ));
+            for (k, v) in &edge.attrs {
+                let idx = edge_key_idx[k.as_str()];
+                xml.push_str(&format!("      <data key=\"e{}\">{}</data>\n", idx, xml_escape(&v.as_str())));
+            }
+            xml.push_str("    </edge>\n");
+        }
+    }
+    xml.push_str("  </graph>\n</graphml>\n");
+    xml
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

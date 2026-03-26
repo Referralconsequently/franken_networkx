@@ -2933,7 +2933,7 @@ def bidirectional_dijkstra(G, source, target, weight='weight'):
     return (length, path)
 
 
-def attribute_mixing_dict(G, attribute, normalized=False):
+def attribute_mixing_dict(G, attribute, nodes=None, normalized=False):
     """Return mixing dict for a categorical node attribute.
 
     Returns
@@ -2942,53 +2942,36 @@ def attribute_mixing_dict(G, attribute, normalized=False):
         ``result[a][b]`` counts edges between nodes with attribute
         values a and b.
     """
-    result = {}
-    for u, v in G.edges():
-        u_attrs = G.nodes[u] if hasattr(G.nodes, '__getitem__') else {}
-        v_attrs = G.nodes[v] if hasattr(G.nodes, '__getitem__') else {}
-        if not isinstance(u_attrs, dict) or not isinstance(v_attrs, dict):
-            continue
-        a = u_attrs.get(attribute)
-        b = v_attrs.get(attribute)
-        if a is None or b is None:
-            continue
-        result.setdefault(a, {})
-        result[a][b] = result[a].get(b, 0) + 1
-        if not G.is_directed():
-            result.setdefault(b, {})
-            result[b][a] = result[b].get(a, 0) + 1
-    if normalized and result:
-        total = sum(sum(inner.values()) for inner in result.values())
-        if total > 0:
-            for a in result:
-                for b in result[a]:
-                    result[a][b] /= total
-    return result
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.attribute_mixing_dict(
+        _to_nx(G),
+        attribute,
+        nodes=nodes,
+        normalized=normalized,
+    )
 
 
-def attribute_mixing_matrix(G, attribute, normalized=True):
+def attribute_mixing_matrix(G, attribute, nodes=None, mapping=None, normalized=True):
     """Return the attribute mixing matrix.
 
     Returns
     -------
     numpy.ndarray
     """
-    import numpy as np
-    mixing = attribute_mixing_dict(G, attribute, normalized=False)
-    if not mixing:
-        return np.array([[]])
-    labels = sorted({k for k in mixing} | {k2 for v in mixing.values() for k2 in v})
-    label_idx = {l: i for i, l in enumerate(labels)}
-    n = len(labels)
-    M = np.zeros((n, n))
-    for a, inner in mixing.items():
-        for b, count in inner.items():
-            M[label_idx[a], label_idx[b]] = count
-    if normalized:
-        total = M.sum()
-        if total > 0:
-            M /= total
-    return M
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.attribute_mixing_matrix(
+        _to_nx(G),
+        attribute,
+        nodes=nodes,
+        mapping=mapping,
+        normalized=normalized,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3042,16 +3025,6 @@ def node_link_data(
 
     from franken_networkx.drawing.layout import _to_nx
 
-    if (
-        source == "source"
-        and target == "target"
-        and name == "id"
-        and key == "key"
-        and edges == "edges"
-        and nodes == "nodes"
-    ):
-        return _rust_node_link_data(G)
-
     return nx.node_link_data(
         _to_nx(G),
         source=source,
@@ -3093,18 +3066,6 @@ def node_link_graph(
     import networkx as nx
 
     from franken_networkx.readwrite import _from_nx_graph
-
-    if (
-        not directed
-        and multigraph
-        and source == "source"
-        and target == "target"
-        and name == "id"
-        and key == "key"
-        and edges == "edges"
-        and nodes == "nodes"
-    ):
-        return _rust_node_link_graph(data)
 
     graph = nx.node_link_graph(
         data,
@@ -6466,17 +6427,27 @@ def reverse(G, copy=True):
 
 def nodes(G):
     """Return nodes of G (global function form)."""
-    return list(G.nodes())
+    from franken_networkx.drawing.layout import _to_nx
+
+    return _to_nx(G).nodes
 
 
-def edges(G):
+def edges(G, nbunch=None):
     """Return edges of G (global function form)."""
-    return list(G.edges())
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.edges(_to_nx(G), nbunch=nbunch)
 
 
-def degree(G):
+def degree(G, nbunch=None, weight=None):
     """Return degree view of G (global function form)."""
-    return dict(G.degree)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.degree(_to_nx(G), nbunch=nbunch, weight=weight)
 
 
 def number_of_nodes(G):
