@@ -3,6 +3,7 @@
 
 use fnx_classes::digraph::DiGraph;
 use fnx_classes::{Graph, GraphError};
+use fnx_runtime::CgseValue;
 use mwmatching::{Matching as BlossomMatching, SENTINEL as BLOSSOM_SENTINEL};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};

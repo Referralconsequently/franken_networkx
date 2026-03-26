@@ -9267,6 +9267,40 @@ pub fn attribute_assortativity_coefficient_rust(
     Ok(py.allow_threads(|| fnx_algorithms::attribute_assortativity_coefficient(inner, attribute)))
 }
 
+// ---------------------------------------------------------------------------
+// Gomory-Hu tree
+// ---------------------------------------------------------------------------
+
+/// Build Gomory-Hu tree.
+#[pyfunction]
+#[pyo3(signature = (g, weight="weight"))]
+pub fn gomory_hu_tree_rust(py: Python<'_>, g: &Bound<'_, PyAny>, weight: &str) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::gomory_hu_tree(inner, weight));
+    let pg = crate::PyGraph {
+        inner: result,
+        node_key_map: std::collections::HashMap::new(),
+        node_py_attrs: std::collections::HashMap::new(),
+        edge_py_attrs: std::collections::HashMap::new(),
+        graph_attrs: PyDict::new(py).unbind(),
+    };
+    Ok(pg.into_pyobject(py)?.into_any().unbind())
+}
+
+// ---------------------------------------------------------------------------
+// Find asteroidal triple
+// ---------------------------------------------------------------------------
+
+/// Find an asteroidal triple (or None if AT-free).
+#[pyfunction]
+pub fn find_asteroidal_triple_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Option<(PyObject, PyObject, PyObject)>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let result = py.allow_threads(|| fnx_algorithms::find_asteroidal_triple(inner));
+    Ok(result.map(|(u, v, w)| (gr.py_node_key(py, &u), gr.py_node_key(py, &v), gr.py_node_key(py, &w))))
+}
+
 // Registration
 // ===========================================================================
 
@@ -9812,5 +9846,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(group_betweenness_centrality_rust, m)?)?;
     // Attribute assortativity
     m.add_function(wrap_pyfunction!(attribute_assortativity_coefficient_rust, m)?)?;
+    // Gomory-Hu tree
+    m.add_function(wrap_pyfunction!(gomory_hu_tree_rust, m)?)?;
+    // Find asteroidal triple
+    m.add_function(wrap_pyfunction!(find_asteroidal_triple_rust, m)?)?;
     Ok(())
 }
