@@ -2388,7 +2388,9 @@ mod tests {
             .expect("graphml write should succeed");
 
         assert!(xml.contains(r#"<key id="g0" for="graph" attr.name="name" attr.type="string"/>"#));
-        assert!(xml.contains(r#"<key id="g1" for="graph" attr.name="public" attr.type="boolean"/>"#));
+        assert!(
+            xml.contains(r#"<key id="g1" for="graph" attr.name="public" attr.type="boolean"/>"#)
+        );
         assert!(xml.contains(r#"<key id="g2" for="graph" attr.name="version" attr.type="int"/>"#));
         assert!(xml.contains(r#"<data key="g0">demo</data>"#));
         assert!(xml.contains(r#"<data key="g1">true</data>"#));

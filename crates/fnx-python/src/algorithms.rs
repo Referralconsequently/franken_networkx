@@ -180,8 +180,8 @@ impl<'py> GraphRef<'py> {
                         }
                     }
                 }
-                if let Some(mut keys) = mdg.inner.edge_keys(right, left) {
-                    if let Some(key) = keys.next() {
+                if let Some(keys) = mdg.inner.edge_keys(right, left) {
+                    if let Some(key) = keys.first() {
                         let ek = (right.to_owned(), left.to_owned(), *key);
                         if let Some(attrs) = mdg.edge_py_attrs.get(&ek) {
                             return Some(attrs);

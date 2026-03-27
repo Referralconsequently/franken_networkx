@@ -144,4 +144,5 @@ def test_rust_write_graphml_preserves_graph_attrs(tmp_path: Path):
     assert 'for="graph" attr.name="version" attr.type="int"' in content
     assert 'for="graph" attr.name="public" attr.type="boolean"' in content
     assert '<data key="g0">demo</data>' in content
-    assert "<data key=" in content
+    assert '<data key="g1">true</data>' in content
+    assert '<data key="g2">3</data>' in content

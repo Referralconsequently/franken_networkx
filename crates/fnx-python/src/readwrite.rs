@@ -377,8 +377,10 @@ fn write_graphml(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) 
                         "expected directed graph backend for directed graph value",
                     )
                 })?;
-                py.allow_threads(|| engine.write_digraph_graphml_with_graph_attrs(inner, &graph_attrs))
-                    .map_err(rw_error_to_py)?
+                py.allow_threads(|| {
+                    engine.write_digraph_graphml_with_graph_attrs(inner, &graph_attrs)
+                })
+                .map_err(rw_error_to_py)?
             } else {
                 let inner = gr.undirected();
                 py.allow_threads(|| engine.write_graphml_with_graph_attrs(inner, &graph_attrs))
