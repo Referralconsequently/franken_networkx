@@ -4398,10 +4398,162 @@ pub fn distance_measures(graph: &Graph) -> DistanceMeasuresResult {
 /// Computes the average shortest path length of an undirected graph.
 ///
 /// Returns `sum(d(u,v)) / (n*(n-1))` for all pairs `u != v` where `d(u,v)` is
-/// the shortest-path distance between `u` and `v`.  The graph must be connected;
-/// if it is empty or has a single node, the result is 0.0.
+/// the shortest-path distance between `u` and `v`.
+/// Returns `f64::INFINITY` if the graph is disconnected.
 #[must_use]
 pub fn average_shortest_path_length(graph: &Graph) -> AverageShortestPathLengthResult {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return AverageShortestPathLengthResult {
+            average_shortest_path_length: 0.0,
+            witness: ComplexityWitness {
+                algorithm: "bfs_average_shortest_path_length".to_owned(),
+                complexity_claim: "O(|V| * (|V| + |E|))".to_owned(),
+                nodes_touched: n,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let mut total_distance = 0usize;
+    let mut total_nodes_touched = 0usize;
+    let mut total_edges_scanned = 0usize;
+    let mut max_queue_peak = 0usize;
+
+    for s in 0..n {
+        let mut dist = vec![None; n];
+        let mut queue = VecDeque::new();
+        dist[s] = Some(0usize);
+        queue.push_back(s);
+        let mut reached = 0usize;
+
+        while let Some(u) = queue.pop_front() {
+            reached += 1;
+            let d = dist[u].unwrap();
+            if let Some(nbrs) = graph.neighbors(nodes[u]) {
+                for nbr_name in nbrs {
+                    total_edges_scanned += 1;
+                    let v = graph.get_node_index(nbr_name).unwrap();
+                    if dist[v].is_none() {
+                        dist[v] = Some(d + 1);
+                        queue.push_back(v);
+                    }
+                }
+            }
+            max_queue_peak = max_queue_peak.max(queue.len());
+        }
+
+        if reached < n {
+            return AverageShortestPathLengthResult {
+                average_shortest_path_length: f64::INFINITY,
+                witness: ComplexityWitness {
+                    algorithm: "bfs_average_shortest_path_length".to_owned(),
+                    complexity_claim: "O(|V| * (|V| + |E|))".to_owned(),
+                    nodes_touched: total_nodes_touched + reached,
+                    edges_scanned: total_edges_scanned,
+                    queue_peak: max_queue_peak,
+                },
+            };
+        }
+
+        total_distance += dist.into_iter().flatten().sum::<usize>();
+        total_nodes_touched += reached;
+    }
+
+    let avg = total_distance as f64 / (n * (n - 1)) as f64;
+
+    AverageShortestPathLengthResult {
+        average_shortest_path_length: avg,
+        witness: ComplexityWitness {
+            algorithm: "bfs_average_shortest_path_length".to_owned(),
+            complexity_claim: "O(|V| * (|V| + |E|))".to_owned(),
+            nodes_touched: total_nodes_touched,
+            edges_scanned: total_edges_scanned,
+            queue_peak: max_queue_peak,
+        },
+    }
+}
+
+/// Average shortest path length for directed graphs.
+///
+/// Returns `f64::INFINITY` if the graph is not strongly connected.
+#[must_use]
+pub fn average_shortest_path_length_directed(digraph: &DiGraph) -> AverageShortestPathLengthResult {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return AverageShortestPathLengthResult {
+            average_shortest_path_length: 0.0,
+            witness: ComplexityWitness {
+                algorithm: "bfs_average_shortest_path_length_directed".to_owned(),
+                complexity_claim: "O(|V| * (|V| + |E|))".to_owned(),
+                nodes_touched: n,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    let mut total_distance = 0usize;
+    let mut total_nodes_touched = 0usize;
+    let mut total_edges_scanned = 0usize;
+    let mut max_queue_peak = 0usize;
+
+    for s in 0..n {
+        let mut dist = vec![None; n];
+        let mut queue = VecDeque::new();
+        dist[s] = Some(0usize);
+        queue.push_back(s);
+        let mut reached = 0usize;
+
+        while let Some(u) = queue.pop_front() {
+            reached += 1;
+            let d = dist[u].unwrap();
+            if let Some(succs) = digraph.successors(nodes[u]) {
+                for v_name in succs {
+                    total_edges_scanned += 1;
+                    let v = digraph.get_node_index(v_name).unwrap();
+                    if dist[v].is_none() {
+                        dist[v] = Some(d + 1);
+                        queue.push_back(v);
+                    }
+                }
+            }
+            max_queue_peak = max_queue_peak.max(queue.len());
+        }
+
+        if reached < n {
+            return AverageShortestPathLengthResult {
+                average_shortest_path_length: f64::INFINITY,
+                witness: ComplexityWitness {
+                    algorithm: "bfs_average_shortest_path_length_directed".to_owned(),
+                    complexity_claim: "O(|V| * (|V| + |E|))".to_owned(),
+                    nodes_touched: total_nodes_touched + reached,
+                    edges_scanned: total_edges_scanned,
+                    queue_peak: max_queue_peak,
+                },
+            };
+        }
+
+        total_distance += dist.into_iter().flatten().sum::<usize>();
+        total_nodes_touched += reached;
+    }
+
+    let avg = total_distance as f64 / (n * (n - 1)) as f64;
+
+    AverageShortestPathLengthResult {
+        average_shortest_path_length: avg,
+        witness: ComplexityWitness {
+            algorithm: "bfs_average_shortest_path_length_directed".to_owned(),
+            complexity_claim: "O(|V| * (|V| + |E|))".to_owned(),
+            nodes_touched: total_nodes_touched,
+            edges_scanned: total_edges_scanned,
+            queue_peak: max_queue_peak,
+        },
+    }
+}
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n <= 1 {
@@ -6505,8 +6657,8 @@ pub fn greedy_color_with_strategy(graph: &Graph, strategy: &str) -> GreedyColorR
                         });
                         sat_a
                             .cmp(&sat_b)
-                            .then_with(|| graph.degree(b).cmp(&graph.degree(a)))
-                            .then_with(|| a.cmp(b))
+                            .then_with(|| graph.degree(a).cmp(&graph.degree(b)))
+                            .then_with(|| b.cmp(a))
                     })
                     .copied();
                 if let Some(node) = best {
@@ -8383,6 +8535,19 @@ pub fn all_simple_paths(
         };
     }
 
+    if source == target {
+        return AllSimplePathsResult {
+            paths: vec![vec![source.to_owned()]],
+            witness: ComplexityWitness {
+                algorithm: "all_simple_paths".to_owned(),
+                complexity_claim: "O(1)".to_owned(),
+                nodes_touched: 1,
+                edges_scanned: 0,
+                queue_peak: 1,
+            },
+        };
+    }
+
     let max_depth = cutoff.unwrap_or(n.saturating_sub(1));
     let mut paths: Vec<Vec<String>> = Vec::new();
     let mut nodes_touched = 0usize;
@@ -8394,7 +8559,7 @@ pub fn all_simple_paths(
     let mut visited: HashSet<&str> = HashSet::new();
     visited.insert(source);
 
-    // Stack element: (node, sorted_neighbors, neighbor_index)
+    // Stack element: (node, neighbor_index)
     let mut nbr_cache: HashMap<&str, Vec<&str>> = HashMap::new();
     for &node in &nodes {
         let mut nbrs: Vec<&str> = graph
@@ -8445,6 +8610,112 @@ pub fn all_simple_paths(
         paths,
         witness: ComplexityWitness {
             algorithm: "all_simple_paths".to_owned(),
+            complexity_claim: "O(|V|! / (|V|-k)!)".to_owned(),
+            nodes_touched,
+            edges_scanned,
+            queue_peak: stack_peak,
+        },
+    }
+}
+
+/// Find all simple paths between source and target in a directed graph.
+///
+/// A simple path is a path with no repeated nodes.
+#[must_use]
+pub fn all_simple_paths_directed(
+    digraph: &DiGraph,
+    source: &str,
+    target: &str,
+    cutoff: Option<usize>,
+) -> AllSimplePathsResult {
+    use std::collections::{HashSet, HashMap};
+
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+
+    if !nodes.contains(&source) || !nodes.contains(&target) {
+        return AllSimplePathsResult {
+            paths: Vec::new(),
+            witness: ComplexityWitness {
+                algorithm: "all_simple_paths_directed".to_owned(),
+                complexity_claim: "O(|V|! / (|V|-k)!)".to_owned(),
+                nodes_touched: 0,
+                edges_scanned: 0,
+                queue_peak: 0,
+            },
+        };
+    }
+
+    if source == target {
+        return AllSimplePathsResult {
+            paths: vec![vec![source.to_owned()]],
+            witness: ComplexityWitness {
+                algorithm: "all_simple_paths_directed".to_owned(),
+                complexity_claim: "O(1)".to_owned(),
+                nodes_touched: 1,
+                edges_scanned: 0,
+                queue_peak: 1,
+            },
+        };
+    }
+
+    let max_depth = cutoff.unwrap_or(n.saturating_sub(1));
+    let mut paths: Vec<Vec<String>> = Vec::new();
+    let mut nodes_touched = 0usize;
+    let mut edges_scanned = 0usize;
+    let mut stack_peak = 0usize;
+
+    let mut visited: HashSet<&str> = HashSet::new();
+    visited.insert(source);
+
+    let mut nbr_cache: HashMap<&str, Vec<&str>> = HashMap::new();
+    for &node in &nodes {
+        let mut nbrs: Vec<&str> = digraph
+            .successors_iter(node)
+            .map(|iter| iter.collect())
+            .unwrap_or_default();
+        nbrs.sort_unstable();
+        nbr_cache.insert(node, nbrs);
+    }
+
+    let mut stack: Vec<(&str, usize)> = vec![(source, 0)];
+    let mut path: Vec<&str> = vec![source];
+
+    while !stack.is_empty() {
+        stack_peak = stack_peak.max(stack.len());
+        let (node, idx) = *stack.last().unwrap();
+        let nbrs = &nbr_cache[node];
+
+        if idx < nbrs.len() {
+            let next = nbrs[idx];
+            stack.last_mut().unwrap().1 += 1;
+            edges_scanned += 1;
+
+            if next == target {
+                nodes_touched += 1;
+                let mut found_path: Vec<String> = path.iter().map(|s| (*s).to_owned()).collect();
+                found_path.push(target.to_owned());
+                paths.push(found_path);
+            } else if !visited.contains(next) && path.len() < max_depth {
+                nodes_touched += 1;
+                visited.insert(next);
+                path.push(next);
+                stack.push((next, 0));
+            }
+        } else {
+            stack.pop();
+            if let Some(removed) = path.pop() {
+                visited.remove(removed);
+            }
+        }
+    }
+
+    paths.sort();
+
+    AllSimplePathsResult {
+        paths,
+        witness: ComplexityWitness {
+            algorithm: "all_simple_paths_directed".to_owned(),
             complexity_claim: "O(|V|! / (|V|-k)!)".to_owned(),
             nodes_touched,
             edges_scanned,
@@ -10811,52 +11082,94 @@ pub fn reciprocity(digraph: &DiGraph, nodes: &[&str]) -> HashMap<String, f64> {
 /// The Wiener index is the sum of the shortest-path distances between all
 /// pairs of nodes. Returns `None` if the graph is disconnected.
 /// Matches `networkx.wiener_index(G)`.
+/// Wiener index: sum of shortest-path distances between all pairs of nodes.
+///
+/// For undirected graphs, it's the sum of distances over all unordered pairs.
+/// Returns `f64::INFINITY` if the graph is disconnected.
 #[must_use]
-pub fn wiener_index(graph: &Graph) -> Option<f64> {
+pub fn wiener_index(graph: &Graph) -> f64 {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n <= 1 {
-        return Some(0.0);
-    }
-
-    // Check connectivity first
-    let components = connected_components(graph);
-    if components.components.len() > 1 {
-        return None; // disconnected
+        return 0.0;
     }
 
     let mut total: f64 = 0.0;
 
-    // BFS from each node, sum distances to nodes with higher index
-    // to avoid double-counting
-    for (i, source) in nodes.iter().enumerate() {
-        // Single-source BFS to get all distances
-        let mut dist: HashMap<&str, usize> = HashMap::new();
-        dist.insert(source, 0);
-        let mut queue: VecDeque<&str> = VecDeque::new();
-        queue.push_back(source);
+    for s in 0..n {
+        let mut dist = vec![None; n];
+        let mut queue = VecDeque::new();
+        dist[s] = Some(0usize);
+        queue.push_back(s);
 
-        while let Some(current) = queue.pop_front() {
-            let d = dist[current];
-            if let Some(nbrs) = graph.neighbors(current) {
-                for nbr in nbrs {
-                    if !dist.contains_key(nbr) {
-                        dist.insert(nbr, d + 1);
-                        queue.push_back(nbr);
+        while let Some(u) = queue.pop_front() {
+            let d = dist[u].unwrap();
+            if let Some(nbrs) = graph.neighbors(nodes[u]) {
+                for nbr_name in nbrs {
+                    let v = graph.get_node_index(nbr_name).unwrap();
+                    if dist[v].is_none() {
+                        dist[v] = Some(d + 1);
+                        queue.push_back(v);
                     }
                 }
             }
         }
 
-        // Sum distances to nodes with higher index only (avoid double-counting)
-        for v in &nodes[i + 1..] {
-            if let Some(&d) = dist.get(v as &str) {
-                total += d as f64;
+        for v in (s + 1)..n {
+            match dist[v] {
+                Some(d) => total += d as f64,
+                None => return f64::INFINITY,
             }
         }
     }
 
-    Some(total)
+    total
+}
+
+/// Wiener index for directed graphs: sum of shortest-path distances between all ordered pairs.
+///
+/// Returns `f64::INFINITY` if the graph is not strongly connected.
+#[must_use]
+pub fn wiener_index_directed(digraph: &DiGraph) -> f64 {
+    let nodes = digraph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return 0.0;
+    }
+
+    let mut total: f64 = 0.0;
+
+    for s in 0..n {
+        let mut dist = vec![None; n];
+        let mut queue = VecDeque::new();
+        dist[s] = Some(0usize);
+        queue.push_back(s);
+
+        while let Some(u) = queue.pop_front() {
+            let d = dist[u].unwrap();
+            if let Some(succs) = digraph.successors(nodes[u]) {
+                for v_name in succs {
+                    let v = digraph.get_node_index(v_name).unwrap();
+                    if dist[v].is_none() {
+                        dist[v] = Some(d + 1);
+                        queue.push_back(v);
+                    }
+                }
+            }
+        }
+
+        for v in 0..n {
+            if s == v {
+                continue;
+            }
+            match dist[v] {
+                Some(d) => total += d as f64,
+                None => return f64::INFINITY,
+            }
+        }
+    }
+
+    total
 }
 
 // ===========================================================================
@@ -21074,8 +21387,8 @@ pub fn triadic_census(digraph: &DiGraph) -> std::collections::HashMap<String, us
                             });
 
                         match asym_src {
-                            Some(src) if mutual_nodes.contains(&src) => "111D",
-                            _ => "111U",
+                            Some(src) if mutual_nodes.contains(&src) => "111U",
+                            _ => "111D",
                         }
                     }
                     (0, 3, 0) => {
@@ -21110,9 +21423,9 @@ pub fn triadic_census(digraph: &DiGraph) -> std::collections::HashMap<String, us
                         let from_other_to_m2 = succ_set[other].contains(&m2);
 
                         if to_other_from_m1 && to_other_from_m2 {
-                            "120D" // Both mutual nodes point to other
+                            "120U" // Both mutual nodes point to other
                         } else if from_other_to_m1 && from_other_to_m2 {
-                            "120U" // Other points to both mutual nodes
+                            "120D" // Other points to both mutual nodes
                         } else {
                             "120C" // One in each direction
                         }

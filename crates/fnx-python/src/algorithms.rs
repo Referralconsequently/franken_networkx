@@ -166,18 +166,45 @@ impl<'py> GraphRef<'py> {
                 dg.edge_py_attrs.get(&ek2)
             }
             GraphRef::MultiUndirected { mg, .. } => {
-                // Return first parallel edge's attrs (key 0)
-                let ek = PyMultiGraph::edge_key(left, right, 0);
+                let key = mg.inner.edge_keys(left, right)?.next()?;
+                let ek = PyMultiGraph::edge_key(left, right, *key);
                 mg.edge_py_attrs.get(&ek)
             }
             GraphRef::MultiDirected { mdg, .. } => {
-                let ek1 = (left.to_owned(), right.to_owned(), 0);
-                if let Some(attrs) = mdg.edge_py_attrs.get(&ek1) {
-                    return Some(attrs);
+                if let Some(mut keys) = mdg.inner.edge_keys(left, right) {
+                    if let Some(key) = keys.next() {
+                        let ek = (left.to_owned(), right.to_owned(), *key);
+                        if let Some(attrs) = mdg.edge_py_attrs.get(&ek) {
+                            return Some(attrs);
+                        }
+                    }
                 }
-                let ek2 = (right.to_owned(), left.to_owned(), 0);
-                mdg.edge_py_attrs.get(&ek2)
+                if let Some(mut keys) = mdg.inner.edge_keys(right, left) {
+                    if let Some(key) = keys.next() {
+                        let ek = (right.to_owned(), left.to_owned(), *key);
+                        if let Some(attrs) = mdg.edge_py_attrs.get(&ek) {
+                            return Some(attrs);
+                        }
+                    }
+                }
+                None
             }
+        }
+    }
+
+    /// Look up edge attributes from the original graph for a directed edge.
+    fn edge_attrs_for_directed(&self, source: &str, target: &str) -> Option<&Py<PyDict>> {
+        match self {
+            GraphRef::Directed { dg, .. } => {
+                let ek = (source.to_owned(), target.to_owned());
+                dg.edge_py_attrs.get(&ek)
+            }
+            GraphRef::MultiDirected { mdg, .. } => {
+                let key = mdg.inner.edge_keys(source, target)?.next()?;
+                let ek = (source.to_owned(), target.to_owned(), *key);
+                mdg.edge_py_attrs.get(&ek)
+            }
+            _ => self.edge_attrs_for_undirected(source, target),
         }
     }
 
@@ -3246,8 +3273,25 @@ pub fn all_simple_paths(
     let gr = extract_graph(g)?;
     let s = node_key_to_string(py, source)?;
     let t = node_key_to_string(py, target)?;
-    let inner = gr.undirected();
-    let result = py.allow_threads(|| fnx_algorithms::all_simple_paths(inner, &s, &t, cutoff));
+
+    let result = match &gr {
+        GraphRef::Directed { dg, .. } => {
+            py.allow_threads(|| fnx_algorithms::all_simple_paths_directed(&dg.inner, &s, &t, cutoff))
+        }
+        GraphRef::Undirected(pg) => {
+            py.allow_threads(|| fnx_algorithms::all_simple_paths(&pg.inner, &s, &t, cutoff))
+        }
+        _ => {
+            if gr.is_directed() {
+                let dg = gr.digraph().expect("is_directed is true");
+                py.allow_threads(|| fnx_algorithms::all_simple_paths_directed(dg, &s, &t, cutoff))
+            } else {
+                let inner = gr.undirected();
+                py.allow_threads(|| fnx_algorithms::all_simple_paths(inner, &s, &t, cutoff))
+            }
+        }
+    };
+
     Ok(result
         .paths
         .iter()

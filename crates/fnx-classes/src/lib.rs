@@ -599,6 +599,14 @@ impl MultiGraph {
         self.edges.values().map(IndexMap::len).sum()
     }
 
+    /// Return an iterator over keys for edges between left and right.
+    pub fn edge_keys(&self, left: &str, right: &str) -> Option<impl Iterator<Item = &usize>> {
+        self.adjacency
+            .get(left)?
+            .get(right)
+            .map(|keys| keys.iter())
+    }
+
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision

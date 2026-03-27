@@ -682,6 +682,14 @@ impl MultiDiGraph {
         self.edges.values().map(IndexMap::len).sum()
     }
 
+    /// Return an iterator over keys for edges from source to target.
+    pub fn edge_keys(&self, source: &str, target: &str) -> Option<impl Iterator<Item = &usize>> {
+        self.successors
+            .get(source)?
+            .get(target)
+            .map(|keys| keys.iter())
+    }
+
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.revision
