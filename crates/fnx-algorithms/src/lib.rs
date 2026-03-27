@@ -4554,6 +4554,8 @@ pub fn average_shortest_path_length_directed(digraph: &DiGraph) -> AverageShorte
         },
     }
 }
+
+fn average_shortest_path_length_undirected(graph: &Graph) -> AverageShortestPathLengthResult {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n <= 1 {
