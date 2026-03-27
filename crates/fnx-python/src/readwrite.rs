@@ -168,6 +168,17 @@ fn graph_ref_attrs(gr: &GraphRef<'_>, py: Python<'_>) -> PyResult<fnx_classes::A
     py_dict_to_attr_map(py_attrs)
 }
 
+fn reject_multigraph_write(gr: &GraphRef<'_>, operation: &str) -> PyResult<()> {
+    match gr {
+        GraphRef::MultiUndirected { .. } | GraphRef::MultiDirected { .. } => {
+            Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "{operation} does not support MultiGraph or MultiDiGraph without losing parallel edges"
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Edge list
 // ---------------------------------------------------------------------------
@@ -187,6 +198,7 @@ fn read_edgelist(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyGraph> {
 #[pyo3(signature = (g, path))]
 fn write_edgelist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
     let gr = extract_graph(g)?;
+    reject_multigraph_write(&gr, "write_edgelist")?;
     let mut engine = EdgeListEngine::hardened();
     let content = match &gr {
         GraphRef::Undirected(pg) => {
@@ -237,6 +249,7 @@ fn read_adjlist(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyGraph> {
 #[pyo3(signature = (g, path))]
 fn write_adjlist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
     let gr = extract_graph(g)?;
+    reject_multigraph_write(&gr, "write_adjlist")?;
     let mut engine = EdgeListEngine::hardened();
     let content = match &gr {
         GraphRef::Undirected(pg) => {
@@ -276,6 +289,7 @@ fn write_adjlist(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) 
 #[pyo3(signature = (g,))]
 fn node_link_data(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let gr = extract_graph(g)?;
+    reject_multigraph_write(&gr, "node_link_data")?;
     let graph_attrs = graph_ref_attrs(&gr, py)?;
     let mut engine = EdgeListEngine::hardened();
     let json_str = match &gr {
@@ -377,6 +391,7 @@ fn read_graphml(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyObject> {
 #[pyo3(signature = (g, path))]
 fn write_graphml(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
     let gr = extract_graph(g)?;
+    reject_multigraph_write(&gr, "write_graphml")?;
     let graph_attrs = graph_ref_attrs(&gr, py)?;
     let mut engine = EdgeListEngine::hardened();
     let content = match &gr {
@@ -445,6 +460,7 @@ fn read_gml(py: Python<'_>, path: &Bound<'_, PyAny>) -> PyResult<PyObject> {
 #[pyo3(signature = (g, path))]
 fn write_gml(py: Python<'_>, g: &Bound<'_, PyAny>, path: &Bound<'_, PyAny>) -> PyResult<()> {
     let gr = extract_graph(g)?;
+    reject_multigraph_write(&gr, "write_gml")?;
     let graph_attrs = graph_ref_attrs(&gr, py)?;
     let mut engine = EdgeListEngine::hardened();
     let content = match &gr {

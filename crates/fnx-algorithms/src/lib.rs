@@ -24725,11 +24725,11 @@ pub fn spectral_bisection(graph: &Graph) -> (Vec<String>, Vec<String>) {
     while let Some(v) = queue.pop_front() {
         if let Some(nbrs) = graph.neighbors(nodes[v]) {
             for nb in nbrs {
-                if let Some(&ni) = idx.get(nb) {
-                    if dist[ni] == usize::MAX {
-                        dist[ni] = dist[v] + 1;
-                        queue.push_back(ni);
-                    }
+                if let Some(&ni) = idx.get(nb)
+                    && dist[ni] == usize::MAX
+                {
+                    dist[ni] = dist[v] + 1;
+                    queue.push_back(ni);
                 }
             }
         }
@@ -24749,6 +24749,62 @@ pub fn spectral_bisection(graph: &Graph) -> (Vec<String>, Vec<String>) {
         }
     }
     (part_a, part_b)
+}
+
+// ---------------------------------------------------------------------------
+// Name aliases for NetworkX compatibility
+// ---------------------------------------------------------------------------
+
+/// Alias: NX uses `info(G)`, Rust uses `graph_info`.
+#[must_use]
+pub fn info(graph: &Graph) -> String {
+    graph_info(graph)
+}
+
+/// Alias: NX uses `lexicographical_topological_sort`, Rust uses `lexicographic_topological_sort`.
+#[must_use]
+pub fn lexicographical_topological_sort(digraph: &DiGraph) -> Option<Vec<String>> {
+    lexicographic_topological_sort(digraph)
+}
+
+// ---------------------------------------------------------------------------
+// Write weighted edgelist
+// ---------------------------------------------------------------------------
+
+/// Generate weighted edgelist lines: "u v weight".
+pub fn write_weighted_edgelist(graph: &Graph, weight_attr: &str, delimiter: &str) -> Vec<String> {
+    graph.edges_ordered().iter().map(|e| {
+        let w = e.attrs.get(weight_attr)
+            .map(|v| v.as_str())
+            .unwrap_or_else(|| "1".to_owned());
+        format!("{}{}{}{}{}", e.left, delimiter, e.right, delimiter, w)
+    }).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Remove node attributes
+// ---------------------------------------------------------------------------
+
+/// Remove a specific attribute from all nodes.
+///
+/// Note: Graph doesn't support mutable attribute access, so this creates
+/// a new graph with the attribute removed.
+#[must_use]
+pub fn remove_node_attributes(graph: &Graph, name: &str) -> Graph {
+    let mut result = Graph::new(graph.mode());
+    for node in graph.nodes_ordered() {
+        if let Some(attrs) = graph.node_attrs(node) {
+            let mut new_attrs = attrs.clone();
+            new_attrs.remove(name);
+            let _ = result.add_node_with_attrs(node.to_owned(), new_attrs);
+        } else {
+            let _ = result.add_node(node.to_owned());
+        }
+    }
+    for edge in graph.edges_ordered() {
+        let _ = result.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), edge.attrs.clone());
+    }
+    result
 }
 
 #[cfg(test)]
@@ -25088,8 +25144,6 @@ mod tests {
         ego_graph,
         gutman_index,
         effective_size,
-        complement_digraph,
-        reverse_digraph,
         edge_disjoint_paths,
         node_disjoint_paths,
         power,
@@ -34687,9 +34741,8 @@ mod tests {
         let _ = g.add_node("a"); let _ = g.add_node("b");
         // Disconnected graph: min cut = 0 (no edges to cut)
         let r = stoer_wagner(&g, "weight");
-        match r {
-            Some(result) => assert!((result.cut_value - 0.0).abs() < TEST_TOLERANCE),
-            None => {} // Also acceptable
+        if let Some(result) = r {
+            assert!((result.cut_value - 0.0).abs() < TEST_TOLERANCE);
         }
     }
 
@@ -35109,7 +35162,7 @@ mod tests {
         let _ = g.add_edge("b", "d"); let _ = g.add_edge("c", "e");
         let edges = bfs_beam_edges(&g, "a", 1);
         // Width=1: only explore 1 node per level
-        assert!(edges.len() >= 1 && edges.len() <= 3);
+        assert!(!edges.is_empty() && edges.len() <= 3);
     }
 
     #[test]
@@ -35134,4 +35187,5 @@ mod tests {
         // Actually a-c is direct (1 hop), a-b-c is 2 hops, so only 1 shortest
         assert_eq!(paths["a"]["c"].len(), 1);
     }
+}
 }
