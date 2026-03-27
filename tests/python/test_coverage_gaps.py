@@ -936,6 +936,41 @@ class TestGenerators:
         )
 
     @needs_nx
+    def test_degree_pearson_and_generalized_degree_match_networkx(self):
+        math = pytest.importorskip("math")
+        digraph = fnx.DiGraph()
+        digraph.add_edge(0, 1)
+        digraph.add_edge(2, 1)
+        digraph.add_edge(2, 3)
+
+        expected_digraph = nx.DiGraph()
+        expected_digraph.add_edge(0, 1)
+        expected_digraph.add_edge(2, 1)
+        expected_digraph.add_edge(2, 3)
+
+        graph = fnx.Graph()
+        graph.add_edges_from([(0, 1), (1, 2), (2, 0), (2, 3)])
+
+        expected_graph = nx.Graph()
+        expected_graph.add_edges_from([(0, 1), (1, 2), (2, 0), (2, 3)])
+
+        actual_corr = fnx.degree_pearson_correlation_coefficient(
+            digraph,
+            x="in",
+            y="out",
+        )
+        expected_corr = nx.degree_pearson_correlation_coefficient(
+            expected_digraph,
+            x="in",
+            y="out",
+        )
+        if math.isnan(expected_corr):
+            assert math.isnan(actual_corr)
+        else:
+            assert actual_corr == expected_corr
+        assert fnx.generalized_degree(graph) == nx.generalized_degree(expected_graph)
+
+    @needs_nx
     def test_harary_and_havel_hakimi_wrappers_match_networkx(self):
         hakimi = fnx.havel_hakimi_graph([3, 3, 2, 2, 2], create_using=fnx.Graph())
         expected_hakimi = nx.havel_hakimi_graph([3, 3, 2, 2, 2], create_using=nx.Graph())

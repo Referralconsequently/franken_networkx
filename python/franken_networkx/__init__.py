@@ -3104,7 +3104,17 @@ def degree_pearson_correlation_coefficient(G, x='out', y='in', weight=None, node
     For undirected graphs, this is equivalent to
     ``degree_assortativity_coefficient``.
     """
-    return degree_assortativity_coefficient(G)
+    import networkx as nx
+
+    from franken_networkx.drawing.layout import _to_nx
+
+    return nx.degree_pearson_correlation_coefficient(
+        _to_nx(G),
+        x=x,
+        y=y,
+        weight=weight,
+        nodes=nodes,
+    )
 
 
 def average_degree(G):
@@ -3137,22 +3147,11 @@ def generalized_degree(G, nodes=None):
         ``{node: Counter}`` where Counter maps triangle count to
         number of edges with that many triangles.
     """
-    from collections import Counter
+    import networkx as nx
 
-    if nodes is None:
-        nodes = list(G.nodes())
+    from franken_networkx.drawing.layout import _to_nx
 
-    triangles(G)
-    result = {}
-    for v in nodes:
-        nbrs = set(G.neighbors(v))
-        edge_tri_counts = Counter()
-        for u in nbrs:
-            u_nbrs = set(G.neighbors(u))
-            shared = len(nbrs & u_nbrs)
-            edge_tri_counts[shared] += 1
-        result[v] = dict(edge_tri_counts)
-    return result
+    return nx.generalized_degree(_to_nx(G), nodes=nodes)
 
 
 def all_pairs_node_connectivity(G, nbunch=None, flow_func=None):
