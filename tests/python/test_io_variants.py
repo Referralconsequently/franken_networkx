@@ -5,6 +5,7 @@ from pathlib import Path
 import franken_networkx as fnx
 import franken_networkx._fnx as _fnx
 import networkx as nx
+import pytest
 
 
 def test_parse_and_generate_adjlist_round_trip():
@@ -174,3 +175,18 @@ def test_raw_node_link_graph_preserves_directed_type_and_graph_attrs():
 
     assert graph.is_directed()
     assert dict(graph.graph) == {"name": "demo", "version": 3}
+
+
+def test_raw_serializers_fail_closed_for_multigraphs(tmp_path: Path):
+    graph = fnx.MultiGraph()
+    graph.add_edge("a", "b")
+    graph.add_edge("a", "b")
+
+    with pytest.raises(TypeError):
+        _fnx.node_link_data(graph)
+
+    with pytest.raises(TypeError):
+        _fnx.write_gml(graph, tmp_path / "graph.gml")
+
+    with pytest.raises(TypeError):
+        _fnx.write_graphml(graph, tmp_path / "graph.graphml")
