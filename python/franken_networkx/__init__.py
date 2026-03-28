@@ -147,11 +147,14 @@ class ArborescenceIterator:
     def __iter__(self):
         from franken_networkx._fnx import arborescence_iterator_rust
         from franken_networkx._fnx import NetworkXNotImplemented
+        from franken_networkx._fnx import NetworkXPointlessConcept
 
         if not self.G.is_directed():
             raise NetworkXNotImplemented("not implemented for undirected type")
         if self.G.is_multigraph():
             raise NetworkXNotImplemented("not implemented for multigraph type")
+        if self.G.number_of_nodes() == 0:
+            raise NetworkXPointlessConcept("G has no nodes.")
         self._arbs = arborescence_iterator_rust(
             self.G, self.weight, self.minimum, 2**31,
         )

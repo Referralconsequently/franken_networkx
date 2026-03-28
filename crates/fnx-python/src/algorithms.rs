@@ -9577,6 +9577,9 @@ pub fn arborescence_iterator_rust(
     let dg = gr
         .digraph()
         .ok_or_else(|| crate::NetworkXError::new_err("requires DiGraph"))?;
+    if dg.node_count() == 0 {
+        return Err(crate::NetworkXPointlessConcept::new_err("G has no nodes."));
+    }
     let w = weight.to_owned();
     let arbs = py.allow_threads(move || {
         fnx_algorithms::arborescence_iterator_ordered(dg, &w, minimum, max_count)

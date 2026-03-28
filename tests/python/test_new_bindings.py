@@ -219,6 +219,15 @@ class TestBranchingConstructors:
         with pytest.raises(fnx.NetworkXNotImplemented, match="undirected type"):
             next(iter(fnx.ArborescenceIterator(graph)))
 
+    def test_arborescence_iterator_rejects_null_digraph(self):
+        digraph = fnx.DiGraph()
+
+        with pytest.raises(fnx.NetworkXPointlessConcept, match="G has no nodes"):
+            next(iter(fnx.ArborescenceIterator(digraph)))
+
+        with pytest.raises(fnx.NetworkXPointlessConcept, match="G has no nodes"):
+            _fnx.arborescence_iterator_rust(digraph, max_count=10)
+
     def test_arborescence_iterator_rejects_multidigraphs(self):
         multidigraph = fnx.MultiDiGraph()
         multidigraph.add_edge("a", "b", key=0, weight=1)
