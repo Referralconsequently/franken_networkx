@@ -9536,6 +9536,14 @@ pub fn spanning_tree_iterator_rust(
     max_count: usize,
 ) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
+    if matches!(
+        gr,
+        GraphRef::MultiUndirected { .. } | GraphRef::MultiDirected { .. }
+    ) {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "not implemented for multigraph type",
+        ));
+    }
     let inner = gr.undirected();
     let w = weight.to_owned();
     let trees = py.allow_threads(move || {
@@ -9558,6 +9566,14 @@ pub fn arborescence_iterator_rust(
     max_count: usize,
 ) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
+    if matches!(
+        gr,
+        GraphRef::MultiUndirected { .. } | GraphRef::MultiDirected { .. }
+    ) {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "not implemented for multigraph type",
+        ));
+    }
     let dg = gr
         .digraph()
         .ok_or_else(|| crate::NetworkXError::new_err("requires DiGraph"))?;

@@ -201,12 +201,34 @@ class TestBranchingConstructors:
         with pytest.raises(fnx.NetworkXNotImplemented, match="directed type"):
             next(iter(fnx.SpanningTreeIterator(digraph)))
 
+    def test_spanning_tree_iterator_rejects_multigraphs(self):
+        multigraph = fnx.MultiGraph()
+        multigraph.add_edge("a", "b", key=0, weight=1)
+        multigraph.add_edge("a", "b", key=1, weight=2)
+
+        with pytest.raises(fnx.NetworkXNotImplemented, match="multigraph type"):
+            next(iter(fnx.SpanningTreeIterator(multigraph)))
+
+        with pytest.raises(fnx.NetworkXNotImplemented, match="multigraph type"):
+            _fnx.spanning_tree_iterator_rust(multigraph, max_count=10)
+
     def test_arborescence_iterator_rejects_undirected_graphs(self):
         graph = fnx.Graph()
         graph.add_edge("a", "b", weight=1)
 
         with pytest.raises(fnx.NetworkXNotImplemented, match="undirected type"):
             next(iter(fnx.ArborescenceIterator(graph)))
+
+    def test_arborescence_iterator_rejects_multidigraphs(self):
+        multidigraph = fnx.MultiDiGraph()
+        multidigraph.add_edge("a", "b", key=0, weight=1)
+        multidigraph.add_edge("a", "b", key=1, weight=2)
+
+        with pytest.raises(fnx.NetworkXNotImplemented, match="multigraph type"):
+            next(iter(fnx.ArborescenceIterator(multidigraph)))
+
+        with pytest.raises(fnx.NetworkXNotImplemented, match="multigraph type"):
+            _fnx.arborescence_iterator_rust(multidigraph, max_count=10)
 
 
 # ---------------------------------------------------------------------------
