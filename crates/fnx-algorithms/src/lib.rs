@@ -24701,13 +24701,13 @@ impl GraphMLType {
     /// Maps directly from the value's *variant* (which reflects the Python
     /// source type) rather than parsing string contents.  This matches NX
     /// behavior where `type(value)` determines the GraphML attr.type:
-    ///   Python int   → "int"
-    ///   Python float → "double"  (even 3.0 — NX uses `type(3.0)` = float)
+    ///   Python int   → "long"   (NX: last-wins dict maps int→"long")
+    ///   Python float → "double" (NX: last-wins dict maps float→"double")
     ///   Python bool  → "boolean"
-    ///   Python str   → "string"  (even "42" or "true")
+    ///   Python str   → "string" (even "42" or "true")
     fn from_cgse_value(val: &CgseValue) -> Self {
         match val {
-            CgseValue::Int(_) => Self::Int,
+            CgseValue::Int(_) => Self::Long,
             CgseValue::Float(_) => Self::Double,
             CgseValue::Bool(_) => Self::Boolean,
             CgseValue::String(_) => Self::String,
@@ -35768,7 +35768,7 @@ mod tests {
             ..GraphMLWriterConfig::default()
         };
         let xml = write_graphml_string_config(&g, &config);
-        assert!(xml.contains("attr.type=\"int\""));
+        assert!(xml.contains("attr.type=\"long\""));
     }
 
     #[test]
