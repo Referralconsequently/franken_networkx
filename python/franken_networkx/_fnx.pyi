@@ -1169,3 +1169,33 @@ def node_link_data(g: Union[Graph, DiGraph]) -> dict[str, Any]: ...
 def node_link_graph(data: dict[str, Any]) -> Graph: ...
 def read_graphml(path: Union[str, PathLike, IO[str]]) -> Graph: ...
 def write_graphml(g: Union[Graph, DiGraph], path: Union[str, PathLike, IO[str]]) -> None: ...
+
+# ---------------------------------------------------------------------------
+# Iterator / enumeration algorithms
+# ---------------------------------------------------------------------------
+
+def spanning_tree_iterator_rust(
+    g: Graph,
+    weight: str = "weight",
+    minimum: bool = True,
+    max_count: int = 100,
+) -> list[Graph]: ...
+
+def arborescence_iterator_rust(
+    g: DiGraph,
+    weight: str = "weight",
+    minimum: bool = True,
+    max_count: int = 100,
+) -> list[DiGraph]: ...
+
+# ---------------------------------------------------------------------------
+# GraphML string writer (full NX-compatible options)
+# ---------------------------------------------------------------------------
+
+def write_graphml_string_rust(
+    g: Union[Graph, DiGraph],
+    prettyprint: bool = True,
+    infer_numeric_types: bool = False,
+    named_key_ids: bool = False,
+    edge_id_from_attribute: Optional[str] = None,
+) -> str: ...
