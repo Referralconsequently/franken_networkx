@@ -104,9 +104,13 @@ class SpanningTreeIterator:
         return self
 
     def __next__(self):
-        if self._trees is None:
-            raise StopIteration
+        if not hasattr(self, "_trees") or self._trees is None:
+            raise AttributeError(
+                "'SpanningTreeIterator' object has no attribute 'partition_queue'",
+            )
         if self._index >= len(self._trees):
+            del self.G
+            del self._trees
             raise StopIteration
         tree = self._trees[self._index]
         self._index += 1
@@ -161,9 +165,13 @@ class ArborescenceIterator:
         return self
 
     def __next__(self):
-        if self._arbs is None:
-            raise StopIteration
+        if not hasattr(self, "_arbs") or self._arbs is None:
+            raise AttributeError(
+                "'ArborescenceIterator' object has no attribute 'partition_queue'",
+            )
         if self._index >= len(self._arbs):
+            del self.G
+            del self._arbs
             raise StopIteration
         arb = self._arbs[self._index]
         self._index += 1

@@ -263,6 +263,38 @@ class TestBranchingConstructors:
         with pytest.raises(fnx.NetworkXNotImplemented, match="multigraph type"):
             _fnx.arborescence_iterator_rust(multidigraph, max_count=10)
 
+    def test_spanning_tree_iterator_matches_networkx_next_lifecycle(self):
+        iterator = fnx.SpanningTreeIterator(fnx.path_graph(2))
+
+        with pytest.raises(AttributeError, match="partition_queue"):
+            next(iterator)
+
+        iterator = iter(iterator)
+        tree = next(iterator)
+        assert sorted(tree.edges()) == [(0, 1)]
+
+        with pytest.raises(StopIteration):
+            next(iterator)
+        with pytest.raises(AttributeError, match="partition_queue"):
+            next(iterator)
+
+    def test_arborescence_iterator_matches_networkx_next_lifecycle(self):
+        digraph = fnx.DiGraph()
+        digraph.add_edge(0, 1)
+        iterator = fnx.ArborescenceIterator(digraph)
+
+        with pytest.raises(AttributeError, match="partition_queue"):
+            next(iterator)
+
+        iterator = iter(iterator)
+        arb = next(iterator)
+        assert sorted(arb.edges()) == [(0, 1)]
+
+        with pytest.raises(StopIteration):
+            next(iterator)
+        with pytest.raises(AttributeError, match="partition_queue"):
+            next(iterator)
+
 
 # ---------------------------------------------------------------------------
 # is_isolate, isolates, number_of_isolates
