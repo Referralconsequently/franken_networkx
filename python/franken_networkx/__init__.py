@@ -132,15 +132,10 @@ class ArborescenceIterator:
     """
 
     def __init__(self, G, weight="weight", minimum=True, init_partition=None):
-        if init_partition is not None:
-            from franken_networkx._fnx import NetworkXNotImplemented
-
-            raise NetworkXNotImplemented(
-                "ArborescenceIterator does not yet support init_partition",
-            )
         self.G = G
         self.weight = weight
         self.minimum = minimum
+        self.init_partition = init_partition
         self._arbs = None
         self._index = 0
 
@@ -149,6 +144,10 @@ class ArborescenceIterator:
         from franken_networkx._fnx import NetworkXNotImplemented
         from franken_networkx._fnx import NetworkXPointlessConcept
 
+        if self.init_partition is not None:
+            raise NetworkXNotImplemented(
+                "ArborescenceIterator does not yet support init_partition",
+            )
         if not self.G.is_directed():
             raise NetworkXNotImplemented("not implemented for undirected type")
         if self.G.is_multigraph():

@@ -9536,6 +9536,11 @@ pub fn spanning_tree_iterator_rust(
     max_count: usize,
 ) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
+    if gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "not implemented for directed type",
+        ));
+    }
     if matches!(
         gr,
         GraphRef::MultiUndirected { .. } | GraphRef::MultiDirected { .. }
@@ -9566,6 +9571,11 @@ pub fn arborescence_iterator_rust(
     max_count: usize,
 ) -> PyResult<Vec<PyObject>> {
     let gr = extract_graph(g)?;
+    if !gr.is_directed() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "not implemented for undirected type",
+        ));
+    }
     if matches!(
         gr,
         GraphRef::MultiUndirected { .. } | GraphRef::MultiDirected { .. }
@@ -9574,9 +9584,7 @@ pub fn arborescence_iterator_rust(
             "not implemented for multigraph type",
         ));
     }
-    let dg = gr
-        .digraph()
-        .ok_or_else(|| crate::NetworkXError::new_err("requires DiGraph"))?;
+    let dg = gr.digraph().expect("directed type checked above");
     if dg.node_count() == 0 {
         return Err(crate::NetworkXPointlessConcept::new_err("G has no nodes."));
     }

@@ -172,13 +172,31 @@ class TestBranchingConstructors:
         digraph.add_edge("a", "b", weight=1)
         digraph.add_edge("b", "a", weight=2)
 
+        iterator = fnx.ArborescenceIterator(
+            digraph,
+            weight="weight",
+            minimum=True,
+            init_partition=([], [("a", "b")]),
+        )
+
         with pytest.raises(fnx.NetworkXNotImplemented, match="init_partition"):
-            fnx.ArborescenceIterator(
-                digraph,
-                weight="weight",
-                minimum=True,
-                init_partition=([], [("a", "b")]),
-            )
+            next(iter(iterator))
+
+    def test_arborescence_iterator_constructor_allows_deferred_init_partition_error(self):
+        digraph = fnx.DiGraph()
+        digraph.add_edge("a", "b", weight=1)
+        digraph.add_edge("b", "a", weight=2)
+
+        iterator = fnx.ArborescenceIterator(
+            digraph,
+            weight="weight",
+            minimum=True,
+            init_partition=([], [("a", "b")]),
+        )
+
+        assert isinstance(iterator, fnx.ArborescenceIterator)
+        with pytest.raises(fnx.NetworkXNotImplemented, match="init_partition"):
+            iter(iterator)
 
     def test_spanning_tree_iterator_honors_ignore_nan(self):
         graph = fnx.Graph()
@@ -201,6 +219,9 @@ class TestBranchingConstructors:
         with pytest.raises(fnx.NetworkXNotImplemented, match="directed type"):
             next(iter(fnx.SpanningTreeIterator(digraph)))
 
+        with pytest.raises(fnx.NetworkXNotImplemented, match="directed type"):
+            _fnx.spanning_tree_iterator_rust(digraph, max_count=10)
+
     def test_spanning_tree_iterator_rejects_multigraphs(self):
         multigraph = fnx.MultiGraph()
         multigraph.add_edge("a", "b", key=0, weight=1)
@@ -218,6 +239,9 @@ class TestBranchingConstructors:
 
         with pytest.raises(fnx.NetworkXNotImplemented, match="undirected type"):
             next(iter(fnx.ArborescenceIterator(graph)))
+
+        with pytest.raises(fnx.NetworkXNotImplemented, match="undirected type"):
+            _fnx.arborescence_iterator_rust(graph, max_count=10)
 
     def test_arborescence_iterator_rejects_null_digraph(self):
         digraph = fnx.DiGraph()
