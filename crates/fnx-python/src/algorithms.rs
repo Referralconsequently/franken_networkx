@@ -1793,8 +1793,28 @@ pub fn node_connectivity(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize
 
 /// Return a minimum node cut of the graph.
 #[pyfunction]
-pub fn minimum_node_cut(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<PyObject>> {
+#[pyo3(signature = (g, s=None, t=None, flow_func=None))]
+pub fn minimum_node_cut(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    s: Option<Bound<'_, PyAny>>,
+    t: Option<Bound<'_, PyAny>>,
+    flow_func: Option<Bound<'_, PyAny>>,
+) -> PyResult<Vec<PyObject>> {
+    if s.is_some() || t.is_some() || flow_func.is_some() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "franken_networkx currently only supports default parameters for minimum_node_cut",
+        ));
+    }
     let gr = extract_graph(g)?;
+    if matches!(
+        gr,
+        GraphRef::MultiUndirected { .. } | GraphRef::MultiDirected { .. }
+    ) {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "not implemented for multigraph type",
+        ));
+    }
     let result = if gr.is_directed() {
         let dg = gr.digraph().expect("is_directed checked above");
         if !fnx_algorithms::is_weakly_connected(dg) {
@@ -9576,15 +9596,16 @@ pub fn snap_aggregation_rust(
 
 #[pyclass(unsendable, name="spanning_tree_iterator_rust")]
 pub struct SpanningTreeIteratorRust {
-    inner: fnx_algorithms::SpanningTreeIteratorState,
+    items: Vec<fnx_classes::Graph>,
+    index: usize,
     original_graph: PyObject,
 }
 
 #[pymethods]
 impl SpanningTreeIteratorRust {
     #[new]
-    #[pyo3(signature = (g, weight="weight", minimum=true, _max_count=100))]
-    fn new(_py: Python<'_>, g: &Bound<'_, PyAny>, weight: &str, minimum: bool, _max_count: usize) -> PyResult<Self> {
+    #[pyo3(signature = (g, weight="weight", minimum=true, max_count=100))]
+    fn new(_py: Python<'_>, g: &Bound<'_, PyAny>, weight: &str, minimum: bool, max_count: usize) -> PyResult<Self> {
         let gr = extract_graph(g)?;
         if gr.is_directed() {
             return Err(crate::NetworkXNotImplemented::new_err(
@@ -9599,9 +9620,11 @@ impl SpanningTreeIteratorRust {
                 "not implemented for multigraph type",
             ));
         }
-        let inner_state = fnx_algorithms::SpanningTreeIteratorState::new(gr.undirected(), weight, minimum);
+        let items =
+            fnx_algorithms::spanning_tree_iterator_ordered(gr.undirected(), weight, minimum, max_count);
         Ok(Self {
-            inner: inner_state,
+            items,
+            index: 0,
             original_graph: g.clone().unbind(),
         })
     }
@@ -9611,15 +9634,14 @@ impl SpanningTreeIteratorRust {
     }
 
     fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<PyObject>> {
-        let next_tree = slf.inner.next();
-        match next_tree {
-            Some(t) => {
-                let g_bound = slf.original_graph.bind(py);
-                let gr = extract_graph(g_bound)?;
-                Ok(Some(rust_graph_to_py_subgraph(py, &t, &gr)?))
-            }
-            None => Ok(None),
+        if slf.index >= slf.items.len() {
+            return Ok(None);
         }
+        let tree = slf.items[slf.index].clone();
+        slf.index += 1;
+        let g_bound = slf.original_graph.bind(py);
+        let gr = extract_graph(g_bound)?;
+        Ok(Some(rust_graph_to_py_subgraph(py, &tree, &gr)?))
     }
 }
 
@@ -10026,6 +10048,60 @@ pub fn current_flow_betweenness_centrality_rust(
     let dict = PyDict::new(py);
     for (node, val) in &result {
         dict.set_item(gr.py_node_key(py, node), val)?;
+    }
+    Ok(dict.into_any().unbind())
+}
+
+// ---------------------------------------------------------------------------
+// k-clique communities
+// ---------------------------------------------------------------------------
+
+/// k-clique communities via clique percolation.
+#[pyfunction]
+#[pyo3(signature = (g, k))]
+pub fn k_clique_communities_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    k: usize,
+) -> PyResult<Vec<PyObject>> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let communities = py.allow_threads(|| fnx_algorithms::k_clique_communities(inner, k));
+    communities
+        .into_iter()
+        .map(|comm| {
+            let py_set = pyo3::types::PyFrozenSet::new(
+                py,
+                comm.iter().map(|n| gr.py_node_key(py, n)),
+            )?;
+            Ok(py_set.into_any().unbind())
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Edge current-flow betweenness centrality
+// ---------------------------------------------------------------------------
+
+/// Edge current-flow betweenness centrality.
+#[pyfunction]
+#[pyo3(signature = (g, normalized=true, weight="weight"))]
+pub fn edge_current_flow_betweenness_centrality_rust(
+    py: Python<'_>,
+    g: &Bound<'_, PyAny>,
+    normalized: bool,
+    weight: &str,
+) -> PyResult<PyObject> {
+    let gr = extract_graph(g)?;
+    let inner = gr.undirected();
+    let w = weight.to_owned();
+    let result = py.allow_threads(|| {
+        fnx_algorithms::edge_current_flow_betweenness_centrality(inner, normalized, &w)
+    });
+    let dict = PyDict::new(py);
+    for ((u, v), val) in &result {
+        let key = (gr.py_node_key(py, u), gr.py_node_key(py, v));
+        dict.set_item(key, val)?;
     }
     Ok(dict.into_any().unbind())
 }
@@ -10522,5 +10598,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(second_order_centrality_rust, m)?)?;
     m.add_function(wrap_pyfunction!(communicability_betweenness_centrality_rust, m)?)?;
     m.add_function(wrap_pyfunction!(current_flow_betweenness_centrality_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(k_clique_communities_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(edge_current_flow_betweenness_centrality_rust, m)?)?;
     Ok(())
 }

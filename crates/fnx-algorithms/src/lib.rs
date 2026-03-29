@@ -24935,6 +24935,194 @@ pub fn arborescence_iterator_ordered(
 
 
 // ---------------------------------------------------------------------------
+// k-clique communities (clique percolation method)
+// ---------------------------------------------------------------------------
+
+/// Find k-clique communities using the clique percolation method.
+///
+/// A k-clique community is the union of all cliques of size k that can be
+/// reached through adjacent (sharing k-1 nodes) k-cliques.
+pub fn k_clique_communities(graph: &Graph, k: usize) -> Vec<Vec<String>> {
+    if k < 2 {
+        return Vec::new();
+    }
+
+    // Find all maximal cliques of size >= k
+    let all_cliques = find_cliques(graph);
+    let k_cliques: Vec<HashSet<String>> = all_cliques
+        .cliques
+        .into_iter()
+        .filter(|c| c.len() >= k)
+        .map(|c| c.into_iter().collect::<HashSet<_>>())
+        .collect();
+
+    if k_cliques.is_empty() {
+        return Vec::new();
+    }
+
+    // Build adjacency between k-cliques (share k-1 nodes)
+    let n = k_cliques.len();
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let overlap = k_cliques[i].intersection(&k_cliques[j]).count();
+            if overlap >= k - 1 {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+        }
+    }
+
+    // Find connected components in the clique graph via BFS
+    let mut visited = vec![false; n];
+    let mut communities = Vec::new();
+
+    for start in 0..n {
+        if visited[start] {
+            continue;
+        }
+        let mut component_nodes: HashSet<String> = HashSet::new();
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+        visited[start] = true;
+        while let Some(idx) = queue.pop_front() {
+            component_nodes.extend(k_cliques[idx].iter().cloned());
+            for &neighbor in &adj[idx] {
+                if !visited[neighbor] {
+                    visited[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+        let mut sorted: Vec<String> = component_nodes.into_iter().collect();
+        sorted.sort();
+        communities.push(sorted);
+    }
+
+    communities
+}
+
+// ---------------------------------------------------------------------------
+// Edge current-flow betweenness centrality
+// ---------------------------------------------------------------------------
+
+/// Edge current-flow betweenness centrality.
+///
+/// Uses the Laplacian pseudo-inverse to compute electrical current flow
+/// through each edge for all source-target pairs.
+pub fn edge_current_flow_betweenness_centrality(
+    graph: &Graph,
+    normalized: bool,
+    weight_attr: &str,
+) -> HashMap<(String, String), f64> {
+    let nodes = graph.nodes_ordered();
+    let n = nodes.len();
+    if n <= 1 {
+        return HashMap::new();
+    }
+    let idx: HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, &nd)| (nd, i)).collect();
+
+    // Build Laplacian
+    let mut l_mat = vec![0.0_f64; n * n];
+    for edge in graph.edges_ordered() {
+        let i = idx[edge.left.as_str()];
+        let j = idx[edge.right.as_str()];
+        let w = edge
+            .attrs
+            .get(weight_attr)
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        l_mat[i * n + j] -= w;
+        l_mat[j * n + i] -= w;
+        l_mat[i * n + i] += w;
+        l_mat[j * n + j] += w;
+    }
+
+    // Pseudo-inverse via regularized inversion
+    let inv_n = 1.0 / n as f64;
+    let mut mat = l_mat;
+    for i in 0..n {
+        for j in 0..n {
+            mat[i * n + j] += inv_n;
+        }
+    }
+
+    // Gauss-Jordan inversion
+    let mut aug = vec![0.0_f64; n * 2 * n];
+    for i in 0..n {
+        for j in 0..n {
+            aug[i * 2 * n + j] = mat[i * n + j];
+        }
+        aug[i * 2 * n + n + i] = 1.0;
+    }
+    for col in 0..n {
+        let mut max_row = col;
+        let mut max_val = aug[col * 2 * n + col].abs();
+        for row in (col + 1)..n {
+            let val = aug[row * 2 * n + col].abs();
+            if val > max_val {
+                max_val = val;
+                max_row = row;
+            }
+        }
+        if max_val < 1e-15 {
+            return HashMap::new();
+        }
+        if max_row != col {
+            for k in 0..(2 * n) {
+                aug.swap(col * 2 * n + k, max_row * 2 * n + k);
+            }
+        }
+        let pivot = aug[col * 2 * n + col];
+        for k in 0..(2 * n) {
+            aug[col * 2 * n + k] /= pivot;
+        }
+        for row in 0..n {
+            if row == col {
+                continue;
+            }
+            let factor = aug[row * 2 * n + col];
+            for k in 0..(2 * n) {
+                aug[row * 2 * n + k] -= factor * aug[col * 2 * n + k];
+            }
+        }
+    }
+
+    let mut l_pinv = vec![0.0_f64; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            l_pinv[i * n + j] = aug[i * 2 * n + n + j] - inv_n;
+        }
+    }
+
+    // Compute edge current-flow betweenness
+    let mut ebc: HashMap<(String, String), f64> = HashMap::new();
+    for s in 0..n {
+        for t in (s + 1)..n {
+            // p[i] = L_pinv[i][s] - L_pinv[i][t]
+            for edge in graph.edges_ordered() {
+                let i = idx[edge.left.as_str()];
+                let j = idx[edge.right.as_str()];
+                let flow = (l_pinv[i * n + s] - l_pinv[i * n + t]
+                    - (l_pinv[j * n + s] - l_pinv[j * n + t]))
+                    .abs();
+                let key = canonical_contracted_edge_key(&edge.left, &edge.right);
+                *ebc.entry(key).or_insert(0.0) += flow;
+            }
+        }
+    }
+
+    if normalized && n > 1 {
+        let factor = 2.0 / (n * (n - 1)) as f64;
+        for val in ebc.values_mut() {
+            *val *= factor;
+        }
+    }
+
+    ebc
+}
+
+// ---------------------------------------------------------------------------
 // SimRank similarity
 // ---------------------------------------------------------------------------
 
@@ -26793,6 +26981,8 @@ mod tests {
         second_order_centrality,
         communicability_betweenness_centrality,
         current_flow_betweenness_centrality,
+        k_clique_communities,
+        edge_current_flow_betweenness_centrality,
         // New algorithms (March 2026)
         stoer_wagner,
         strongly_connected_components,
@@ -36645,12 +36835,14 @@ mod tests {
     }
 
     #[test]
-    fn test_spanning_tree_iterator_disconnected_empty() {
+    fn test_spanning_tree_iterator_disconnected_yields_forest() {
         let mut g = Graph::strict();
         let _ = g.add_node("a".to_owned());
         let _ = g.add_node("b".to_owned());
         let trees = spanning_tree_iterator(&g, "weight", 100);
-        assert!(trees.is_empty()); // Disconnected graph has no spanning trees
+        // Disconnected graph yields one spanning forest (MST of each component)
+        assert_eq!(trees.len(), 1);
+        assert_eq!(trees[0].nodes_ordered().len(), 2);
     }
 
     #[test]
@@ -37255,5 +37447,48 @@ mod tests {
         // Node b should have highest betweenness (it's the bridge)
         assert!(cfbc["b"] >= cfbc["a"], "b={} a={}", cfbc["b"], cfbc["a"]);
         assert!(cfbc["b"] >= cfbc["c"], "b={} c={}", cfbc["b"], cfbc["c"]);
+    }
+
+    #[test]
+    fn test_k_clique_communities_triangle() {
+        // A triangle is a single 3-clique, so k=3 should yield one community
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c"); let _ = g.add_edge("a", "c");
+        let communities = k_clique_communities(&g, 3);
+        assert_eq!(communities.len(), 1);
+        assert_eq!(communities[0].len(), 3);
+    }
+
+    #[test]
+    fn test_k_clique_communities_two_triangles() {
+        // Two triangles sharing edge b-c: a-b-c and b-c-d
+        // k=3: two 3-cliques that share 2 nodes → single community
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c"); let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("b", "d"); let _ = g.add_edge("c", "d");
+        let communities = k_clique_communities(&g, 3);
+        assert_eq!(communities.len(), 1);
+        assert_eq!(communities[0].len(), 4); // a, b, c, d all in one community
+    }
+
+    #[test]
+    fn test_k_clique_communities_no_cliques() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        // Path graph: no 3-cliques
+        let communities = k_clique_communities(&g, 3);
+        assert!(communities.is_empty());
+    }
+
+    #[test]
+    fn test_edge_current_flow_betweenness_path() {
+        let mut g = Graph::strict();
+        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        let ebc = edge_current_flow_betweenness_centrality(&g, true, "weight");
+        assert_eq!(ebc.len(), 2); // 2 edges
+        // Both edges should have some betweenness
+        for val in ebc.values() {
+            assert!(*val >= 0.0 && val.is_finite());
+        }
     }
 }
