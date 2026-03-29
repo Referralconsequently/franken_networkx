@@ -1009,7 +1009,6 @@ impl MultiDiGraph {
         let should_drop_bucket = self.edges.get(&edge_key).is_some_and(IndexMap::is_empty);
         if should_drop_bucket {
             self.edges.shift_remove(&edge_key);
-            self.next_edge_key.shift_remove(&edge_key);
         }
 
         self.remove_successor_key(source, target, removal_key);
@@ -1034,7 +1033,6 @@ impl MultiDiGraph {
                 }
                 let k = DirectedEdgeKey::new(node, &target);
                 self.edges.shift_remove(&k);
-                self.next_edge_key.shift_remove(&k);
             }
         }
 
@@ -1685,5 +1683,13 @@ mod tests {
             prop_assert_eq!(g.edge_count(), total_out);
             prop_assert_eq!(g.edge_count(), total_in);
         }
+    }
+}
+
+    }
+}
+
+}
+
     }
 }

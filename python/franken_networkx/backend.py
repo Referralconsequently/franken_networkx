@@ -40,6 +40,7 @@ _SUPPORTED_ALGORITHMS = {
     "edge_connectivity": fnx.edge_connectivity,
     "articulation_points": fnx.articulation_points,
     "bridges": fnx.bridges,
+    "local_bridges": fnx.local_bridges,
     # Centrality
     "degree_centrality": fnx.degree_centrality,
     "closeness_centrality": fnx.closeness_centrality,
@@ -475,5 +476,19 @@ class BackendInterface:
     # Make algorithm functions available as attributes for dispatch
     def __getattr__(self, name):
         if name in _SUPPORTED_ALGORITHMS:
-            return _SUPPORTED_ALGORITHMS[name]
+            import franken_networkx as fnx
+            import functools
+            
+            fn = _SUPPORTED_ALGORITHMS[name]
+            
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                try:
+                    return fn(*args, **kwargs)
+                except fnx.NetworkXNotImplemented as e:
+                    # NetworkX's dispatcher strictly requires the builtin NotImplementedError
+                    # to correctly trigger its fallback sequence.
+                    raise NotImplementedError(str(e)) from e
+                    
+            return wrapper
         raise AttributeError(f"BackendInterface has no attribute '{name}'")

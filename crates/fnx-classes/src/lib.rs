@@ -569,7 +569,6 @@ impl MultiGraph {
             nodes: IndexMap::new(),
             adjacency: IndexMap::new(),
             edges: IndexMap::new(),
-            next_edge_key: IndexMap::new(),
             ledger: EvidenceLedger::new(),
         }
     }
@@ -945,7 +944,6 @@ impl MultiGraph {
                 }
                 let k = EdgeKey::new(node, &neighbor);
                 self.edges.shift_remove(&k);
-                self.next_edge_key.shift_remove(&k);
             }
         }
 

@@ -18,6 +18,7 @@ Or as a NetworkX backend (zero code changes required)::
 
 from enum import Enum
 import math
+import sys
 
 from franken_networkx._fnx import __version__
 
@@ -66,8 +67,8 @@ def _nan_filtered_graph(G, weight, ignore_nan):
 class SpanningTreeIterator:
     """Iterate over all spanning trees of a graph in weight-sorted order.
 
-    Uses the Janssens-Sörensen partition scheme with modified Kruskal's
-    algorithm.  Matches NetworkX ``SpanningTreeIterator`` semantics.
+    Uses the Rust-backed spanning-tree iterator implementation and matches
+    NetworkX ``SpanningTreeIterator`` semantics for the supported graph types.
 
     Parameters
     ----------
@@ -78,7 +79,8 @@ class SpanningTreeIterator:
     minimum : bool, default True
         If True, yield trees in increasing weight order; otherwise decreasing.
     ignore_nan : bool, default False
-        Ignored (present for NX API compat).
+        If False, raise when a NaN edge weight is encountered. If True, skip
+        NaN-weighted edges before enumeration.
     """
 
     def __init__(self, G, weight="weight", minimum=True, ignore_nan=False):
@@ -98,7 +100,7 @@ class SpanningTreeIterator:
             raise NetworkXNotImplemented("not implemented for multigraph type")
         graph = _nan_filtered_graph(self.G, self.weight, self.ignore_nan)
         self._iterator = spanning_tree_iterator_rust(
-            graph, self.weight, self.minimum, 100
+            graph, self.weight, self.minimum, sys.maxsize,
         )
         return self
 
@@ -118,8 +120,8 @@ class SpanningTreeIterator:
 class ArborescenceIterator:
     """Iterate over all spanning arborescences of a digraph in weight-sorted order.
 
-    Uses the Janssens-Sörensen partition scheme with Edmonds' algorithm.
-    Matches NetworkX ``ArborescenceIterator`` semantics.
+    Uses the Rust-backed arborescence iterator implementation and matches
+    NetworkX ``ArborescenceIterator`` semantics for the supported graph types.
 
     Parameters
     ----------
@@ -156,7 +158,7 @@ class ArborescenceIterator:
         if self.G.number_of_nodes() == 0:
             raise NetworkXPointlessConcept("G has no nodes.")
         self._iterator = arborescence_iterator_rust(
-            self.G, self.weight, self.minimum, 100
+            self.G, self.weight, self.minimum, sys.maxsize,
         )
         return self
 
@@ -1293,26 +1295,19 @@ def has_bridges(G):
     return len(bridges(G)) > 0
 
 
-def local_bridges(G, with_span=True):
+def local_bridges(G, with_span=True, weight=None):
     """Yield local bridges in *G*.
 
-    A local bridge is an edge whose endpoints have no common neighbors,
-    giving it a span of infinity. If ``with_span`` is True, yields
-    ``(u, v, span)`` tuples; otherwise yields ``(u, v)`` tuples.
-
-    Only edges with no common neighbors (span > 2) are yielded,
-    matching NetworkX's definition.
+    Delegates to NetworkX if ``with_span=True`` or ``weight`` is specified,
+    otherwise uses the high-performance Rust implementation.
     """
-    for u, v in G.edges():
-        if u == v:
-            continue
-        u_nbrs = set(G.neighbors(u)) - {v}
-        v_nbrs = set(G.neighbors(v)) - {u}
-        if not (u_nbrs & v_nbrs):
-            if with_span:
-                yield (u, v, float('inf'))
-            else:
-                yield (u, v)
+    if with_span or weight is not None:
+        import networkx as nx
+        from franken_networkx.drawing.layout import _to_nx
+        return nx.local_bridges(_to_nx(G), with_span=with_span, weight=weight)
+    else:
+        from franken_networkx._fnx import local_bridges_rust
+        return iter(local_bridges_rust(G))
 
 
 def minimum_edge_cut(G, s=None, t=None):

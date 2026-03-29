@@ -277,6 +277,24 @@ class TestBranchingConstructors:
         assert sorted(raw_forests[0].nodes()) == [0, 1, 2]
         assert forests[0].edges[0, 1]["tag"] == "keep"
 
+    def test_spanning_tree_iterator_rust_honors_max_count_keyword(self):
+        graph = fnx.complete_graph(4)
+
+        assert len(list(_fnx.spanning_tree_iterator_rust(graph, max_count=1))) == 1
+        assert len(list(_fnx.spanning_tree_iterator_rust(graph, max_count=2))) == 2
+        assert len(list(_fnx.spanning_tree_iterator_rust(graph, max_count=5))) == 5
+
+    def test_arborescence_iterator_rust_honors_max_count_keyword(self):
+        digraph = fnx.DiGraph()
+        for u in range(4):
+            for v in range(4):
+                if u != v:
+                    digraph.add_edge(u, v, weight=1)
+
+        assert len(list(_fnx.arborescence_iterator_rust(digraph, max_count=1))) == 1
+        assert len(list(_fnx.arborescence_iterator_rust(digraph, max_count=2))) == 2
+        assert len(list(_fnx.arborescence_iterator_rust(digraph, max_count=5))) == 5
+
     def test_arborescence_iterator_raises_for_disconnected_digraph(self):
         digraph = fnx.DiGraph()
         digraph.add_edge(0, 1, weight=1)
@@ -291,6 +309,27 @@ class TestBranchingConstructors:
             list(fnx.ArborescenceIterator(digraph, minimum=False))
         with pytest.raises(fnx.NetworkXError, match="No maximum spanning arborescence"):
             _fnx.arborescence_iterator_rust(digraph, minimum=False)
+
+    def test_arborescence_iterator_complete_digraph_k4_count(self):
+        digraph = fnx.DiGraph()
+        for u in range(4):
+            for v in range(4):
+                if u != v:
+                    digraph.add_edge(u, v, weight=1)
+
+        arbs = list(fnx.ArborescenceIterator(digraph))
+
+        assert len(arbs) == 64
+        assert len({tuple(sorted(arb.edges())) for arb in arbs}) == 64
+
+    def test_arborescence_iterator_complete_digraph_k5_exceeds_old_wrapper_cap(self):
+        digraph = fnx.DiGraph()
+        for u in range(5):
+            for v in range(5):
+                if u != v:
+                    digraph.add_edge(u, v, weight=1)
+
+        assert sum(1 for _ in fnx.ArborescenceIterator(digraph)) == 625
 
     def test_spanning_tree_iterator_matches_networkx_next_lifecycle(self):
         iterator = fnx.SpanningTreeIterator(fnx.path_graph(2))
