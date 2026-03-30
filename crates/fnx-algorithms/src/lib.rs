@@ -6063,6 +6063,19 @@ fn edmonds_base_new_node_name(level: usize) -> String {
     format!("edmonds new node base name {level}")
 }
 
+fn sort_branching_edges(edges: &mut [BranchingEdge]) {
+    edges.sort_by(|a, b| {
+        a.left
+            .cmp(&b.left)
+            .then_with(|| a.right.cmp(&b.right))
+            .then_with(|| {
+                a.weight
+                    .partial_cmp(&b.weight)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+}
+
 fn edmonds_exact_maximum_branching_keys(
     nodes: &[String],
     edges: &[DirectedWeightedKeyEdge],
@@ -6370,7 +6383,7 @@ pub fn maximum_branching(
 
     let directed_edges =
         collect_directed_branching_edges_with_keys(digraph, weight_attr, default_weight);
-    let edges = edmonds_exact_maximum_branching_keys(&nodes, &directed_edges)
+    let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &directed_edges)
         .into_iter()
         .filter_map(|edge_key| directed_edges.get(edge_key))
         .map(|edge| BranchingEdge {
@@ -6379,6 +6392,7 @@ pub fn maximum_branching(
             weight: edge.weight,
         })
         .collect::<Vec<_>>();
+    sort_branching_edges(&mut edges);
     branching_result(
         "chu_liu_edmonds_maximum_branching",
         nodes.len(),
@@ -6405,24 +6419,16 @@ pub fn minimum_branching(
 
     let directed_edges =
         collect_directed_branching_edges_with_keys(digraph, weight_attr, default_weight);
-    let max_weight = directed_edges
-        .iter()
-        .map(|edge| edge.weight)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let min_weight = directed_edges
-        .iter()
-        .map(|edge| edge.weight)
-        .fold(f64::INFINITY, f64::min);
     let transformed_edges = directed_edges
         .iter()
         .map(|edge| DirectedWeightedKeyEdge {
             key: edge.key,
             source: edge.source.clone(),
             target: edge.target.clone(),
-            weight: max_weight + 1.0 + (max_weight - min_weight) - edge.weight,
+            weight: -edge.weight,
         })
         .collect::<Vec<_>>();
-    let edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
+    let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
         .into_iter()
         .filter_map(|edge_key| directed_edges.get(edge_key))
         .map(|edge| BranchingEdge {
@@ -6431,6 +6437,7 @@ pub fn minimum_branching(
             weight: edge.weight,
         })
         .collect::<Vec<_>>();
+    sort_branching_edges(&mut edges);
     branching_result(
         "chu_liu_edmonds_minimum_branching",
         nodes.len(),
@@ -6473,19 +6480,22 @@ pub fn maximum_spanning_arborescence(
             weight: edge.weight - min_weight + 1.0 - (min_weight - max_weight),
         })
         .collect::<Vec<_>>();
+    let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
+        .into_iter()
+        .filter_map(|edge_key| directed_edges.get(edge_key))
+        .map(|edge| BranchingEdge {
+            left: edge.source.clone(),
+            right: edge.target.clone(),
+            weight: edge.weight,
+        })
+        .collect::<Vec<_>>();
+    sort_branching_edges(&mut edges);
+
     let result = branching_result(
         "chu_liu_edmonds_maximum_spanning_arborescence",
         nodes.len(),
         directed_edges.len(),
-        edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
-            .into_iter()
-            .filter_map(|edge_key| directed_edges.get(edge_key))
-            .map(|edge| BranchingEdge {
-                left: edge.source.clone(),
-                right: edge.target.clone(),
-                weight: edge.weight,
-            })
-            .collect(),
+        edges,
     );
     let arborescence = build_branching_digraph(&nodes, &result.edges, digraph.mode());
     is_arborescence(&arborescence).then_some(result)
@@ -6525,19 +6535,22 @@ pub fn minimum_spanning_arborescence(
             weight: max_weight + 1.0 + (max_weight - min_weight) - edge.weight,
         })
         .collect::<Vec<_>>();
+    let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
+        .into_iter()
+        .filter_map(|edge_key| directed_edges.get(edge_key))
+        .map(|edge| BranchingEdge {
+            left: edge.source.clone(),
+            right: edge.target.clone(),
+            weight: edge.weight,
+        })
+        .collect::<Vec<_>>();
+    sort_branching_edges(&mut edges);
+
     let result = branching_result(
         "chu_liu_edmonds_minimum_spanning_arborescence",
         nodes.len(),
         directed_edges.len(),
-        edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
-            .into_iter()
-            .filter_map(|edge_key| directed_edges.get(edge_key))
-            .map(|edge| BranchingEdge {
-                left: edge.source.clone(),
-                right: edge.target.clone(),
-                weight: edge.weight,
-            })
-            .collect(),
+        edges,
     );
     let arborescence = build_branching_digraph(&nodes, &result.edges, digraph.mode());
     is_arborescence(&arborescence).then_some(result)
@@ -25048,8 +25061,6 @@ pub fn arborescence_iterator_ordered_with_partition(
     }
 
     let mode = digraph.mode();
-    let mut enumerated: Vec<(f64, Vec<(String, String)>)> = Vec::new();
-    let mut seen: HashSet<Vec<(String, String)>> = HashSet::new();
     let graph_edges: HashSet<(String, String)> = digraph
         .edges_ordered()
         .iter()
@@ -25075,193 +25086,71 @@ pub fn arborescence_iterator_ordered_with_partition(
             })
             .or_insert_with(|| source.clone());
     }
-
-    fn reaches_root(
-        node: &str,
-        root: &str,
-        parent: &HashMap<String, String>,
-        path: &mut HashSet<String>,
-    ) -> bool {
-        if node == root {
-            return true;
-        }
-        if !path.insert(node.to_owned()) {
-            return false;
-        }
-        let Some(next) = parent.get(node) else {
-            return false;
-        };
-        reaches_root(next, root, parent, path)
+    let mut initial_partition = PartitionDict::new();
+    for edge in &excluded {
+        initial_partition.insert(edge.clone(), PartitionState::Excluded);
+    }
+    for (target, source) in included_by_target {
+        initial_partition.insert((source, target), PartitionState::Included);
     }
 
-    fn would_create_cycle(
-        source: &str,
-        target: &str,
-        root: &str,
-        parent: &HashMap<String, String>,
-    ) -> bool {
-        let mut current = source;
-        let mut seen = HashSet::new();
-        while current != root {
-            if current == target {
-                return true;
-            }
-            if !seen.insert(current.to_owned()) {
-                return true;
-            }
-            let Some(next) = parent.get(current) else {
-                return false;
-            };
-            current = next;
-        }
-        false
-    }
+    let Some((init_weight, _)) =
+        find_arborescence(digraph, &initial_partition, minimum, weight_attr)
+    else {
+        return Vec::new();
+    };
 
-    fn backtrack(
-        idx: usize,
-        targets: &[String],
-        incoming: &HashMap<String, Vec<(String, f64)>>,
-        included_by_target: &BTreeMap<String, String>,
-        root: &str,
-        parent: &mut HashMap<String, String>,
-        chosen_edges: &mut Vec<(String, String)>,
-        digraph: &DiGraph,
-        weight_attr: &str,
-        seen: &mut HashSet<Vec<(String, String)>>,
-        enumerated: &mut Vec<(f64, Vec<(String, String)>)>,
-    ) {
-        if idx == targets.len() {
-            for node in digraph.nodes_ordered() {
-                let mut path = HashSet::new();
-                if !reaches_root(node, root, parent, &mut path) {
-                    return;
-                }
-            }
+    let mut heap = Vec::new();
+    partition_heap_push(
+        &mut heap,
+        QueueEntry {
+            weight: if minimum { init_weight } else { -init_weight },
+            partition: initial_partition,
+        },
+    );
 
-            let mut canonical_edges = chosen_edges.clone();
-            canonical_edges.sort();
-            if !seen.insert(canonical_edges.clone()) {
-                return;
-            }
-
-            let total_weight = canonical_edges
-                .iter()
-                .map(|(u, v)| {
-                    digraph
-                        .edge_attrs(u, v)
-                        .and_then(|attrs| attrs.get(weight_attr).and_then(CgseValue::as_f64))
-                        .unwrap_or(1.0)
-                })
-                .sum();
-            enumerated.push((total_weight, canonical_edges));
-            return;
-        }
-
-        let target = &targets[idx];
-        let Some(candidates) = incoming.get(target) else {
-            return;
+    let nodes_refs: Vec<&str> = nodes.to_vec();
+    let mut results = Vec::new();
+    while results.len() < max_count {
+        let Some(entry) = partition_heap_pop(&mut heap) else {
+            break;
         };
-        for (source, _weight) in candidates {
-            if let Some(required_source) = included_by_target.get(target)
-                && source != required_source
-            {
+        let Some((_weight, arb_edges)) =
+            find_arborescence(digraph, &entry.partition, minimum, weight_attr)
+        else {
+            continue;
+        };
+
+        let arb = build_arborescence(&nodes_refs, &arb_edges, mode);
+        results.push(arb);
+
+        let mut p1 = entry.partition.clone();
+        let mut p2 = entry.partition.clone();
+
+        for (source, target) in &arb_edges {
+            let key = (source.clone(), target.clone());
+            if entry.partition.contains_key(&key) {
                 continue;
             }
-            if would_create_cycle(source, target, root, parent) {
-                continue;
+
+            p1.insert(key.clone(), PartitionState::Excluded);
+            p2.insert(key.clone(), PartitionState::Included);
+
+            if let Some((p1_weight, _)) = find_arborescence(digraph, &p1, minimum, weight_attr) {
+                partition_heap_push(
+                    &mut heap,
+                    QueueEntry {
+                        weight: if minimum { p1_weight } else { -p1_weight },
+                        partition: p1.clone(),
+                    },
+                );
             }
-            parent.insert(target.clone(), source.clone());
-            chosen_edges.push((source.clone(), target.clone()));
-            backtrack(
-                idx + 1,
-                targets,
-                incoming,
-                included_by_target,
-                root,
-                parent,
-                chosen_edges,
-                digraph,
-                weight_attr,
-                seen,
-                enumerated,
-            );
-            chosen_edges.pop();
-            parent.remove(target);
+
+            p1 = p2.clone();
         }
     }
 
-    for &root in &nodes {
-        if included_by_target.contains_key(root) {
-            continue;
-        }
-        let targets: Vec<String> = nodes
-            .iter()
-            .filter(|&&node| node != root)
-            .map(|&node| node.to_owned())
-            .collect();
-        let mut incoming: HashMap<String, Vec<(String, f64)>> = HashMap::new();
-        let mut feasible = true;
-        for target in &targets {
-            let candidates: Vec<(String, f64)> = digraph
-                .edges_ordered()
-                .iter()
-                .filter(|edge| {
-                    edge.right == *target
-                        && !excluded.contains(&(edge.left.clone(), edge.right.clone()))
-                })
-                .map(|edge| {
-                    (
-                        edge.left.clone(),
-                        edge.attrs
-                            .get(weight_attr)
-                            .and_then(CgseValue::as_f64)
-                            .unwrap_or(1.0),
-                    )
-                })
-                .collect();
-            if candidates.is_empty() {
-                feasible = false;
-                break;
-            }
-            incoming.insert(target.clone(), candidates);
-        }
-        if !feasible {
-            continue;
-        }
-
-        let mut parent = HashMap::new();
-        let mut chosen_edges = Vec::with_capacity(n.saturating_sub(1));
-        backtrack(
-            0,
-            &targets,
-            &incoming,
-            &included_by_target,
-            root,
-            &mut parent,
-            &mut chosen_edges,
-            digraph,
-            weight_attr,
-            &mut seen,
-            &mut enumerated,
-        );
-    }
-
-    enumerated.sort_by(|(wa, ea), (wb, eb)| {
-        if minimum {
-            wa.total_cmp(wb).then_with(|| ea.cmp(eb))
-        } else {
-            wb.total_cmp(wa).then_with(|| ea.cmp(eb))
-        }
-    });
-
-    enumerated
-        .into_iter()
-        .take(max_count)
-        .map(|(_weight, edges)| {
-            let node_refs: Vec<&str> = nodes.to_vec();
-            build_arborescence(&node_refs, &edges, mode)
-        })
-        .collect()
+    results
 }
 
 // ---------------------------------------------------------------------------

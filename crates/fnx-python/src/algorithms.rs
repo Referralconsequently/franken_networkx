@@ -129,6 +129,14 @@ impl<'py> GraphRef<'py> {
         )
     }
 
+    /// Is this a multigraph?
+    pub(crate) fn is_multigraph(&self) -> bool {
+        matches!(
+            self,
+            GraphRef::MultiUndirected { .. } | GraphRef::MultiDirected { .. }
+        )
+    }
+
     /// Get a reference to the inner DiGraph (for directed-specific algorithms).
     /// Returns `None` for undirected graphs.
     pub(crate) fn digraph(&self) -> Option<&fnx_classes::digraph::DiGraph> {
@@ -3099,8 +3107,13 @@ pub fn partition_spanning_tree(
 ) -> PyResult<PyGraph> {
     let gr = extract_graph(g)?;
     require_undirected(&gr, "partition_spanning_tree")?;
+    if gr.is_multigraph() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "not implemented for multigraph type",
+        ));
+    }
     let GraphRef::Undirected(pg) = &gr else {
-        unreachable!("require_undirected should reject directed graphs")
+        unreachable!("require_undirected and is_multigraph should reject all other types")
     };
     let weight_name = weight.to_owned();
     let partition_name = partition.to_owned();
@@ -3150,8 +3163,13 @@ pub fn random_spanning_tree(
 ) -> PyResult<PyGraph> {
     let gr = extract_graph(g)?;
     require_undirected(&gr, "random_spanning_tree")?;
+    if gr.is_multigraph() {
+        return Err(crate::NetworkXNotImplemented::new_err(
+            "not implemented for multigraph type",
+        ));
+    }
     let GraphRef::Undirected(pg) = &gr else {
-        unreachable!("require_undirected should reject directed graphs")
+        unreachable!("require_undirected and is_multigraph should reject all other types")
     };
     if let Some(weight_attr) = weight {
         ensure_random_spanning_weight_key(py, pg, weight_attr)?;
