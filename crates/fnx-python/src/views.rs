@@ -160,23 +160,26 @@ impl EdgeView {
     fn __iter__(&self, py: Python<'_>) -> PyResult<Py<NodeViewIterator>> {
         let g = self.graph.borrow(py);
         let items: Vec<PyObject> = g
-            .edge_py_attrs
-            .iter()
-            .map(|((u, v), attrs)| {
-                let py_u = g.py_node_key(py, u);
-                let py_v = g.py_node_key(py, v);
+            .inner
+            .edges_ordered()
+            .into_iter()
+            .map(|edge| {
+                let py_u = g.py_node_key(py, &edge.left);
+                let py_v = g.py_node_key(py, &edge.right);
+                let ek = PyGraph::edge_key(&edge.left, &edge.right);
+                let attrs = g.edge_py_attrs.get(&ek);
                 match &self.data {
                     NodeViewData::NoData => tuple_object(py, &[py_u, py_v]),
                     NodeViewData::AllData => {
-                        let a: PyObject = attrs.clone_ref(py).into_any();
+                        let a: PyObject = attrs.map_or_else(
+                            || PyDict::new(py).into_any().unbind(),
+                            |d| d.clone_ref(py).into_any(),
+                        );
                         tuple_object(py, &[py_u, py_v, a])
                     }
                     NodeViewData::Attr(attr_name) => {
                         let val = attrs
-                            .bind(py)
-                            .get_item(attr_name.as_str())
-                            .ok()
-                            .flatten()
+                            .and_then(|d| d.bind(py).get_item(attr_name.as_str()).ok().flatten())
                             .map_or_else(|| py.None(), |v| v.unbind());
                         tuple_object(py, &[py_u, py_v, val])
                     }
@@ -239,24 +242,29 @@ impl EdgeView {
             }
             let view_data = parse_data_param(data)?;
             let items: Vec<PyObject> = g
-                .edge_py_attrs
-                .iter()
-                .filter(|((u, v), _)| node_set.contains(u) || node_set.contains(v))
-                .map(|((u, v), attrs)| {
-                    let py_u = g.py_node_key(py, u);
-                    let py_v = g.py_node_key(py, v);
+                .inner
+                .edges_ordered()
+                .into_iter()
+                .filter(|edge| node_set.contains(&edge.left) || node_set.contains(&edge.right))
+                .map(|edge| {
+                    let py_u = g.py_node_key(py, &edge.left);
+                    let py_v = g.py_node_key(py, &edge.right);
+                    let ek = PyGraph::edge_key(&edge.left, &edge.right);
+                    let attrs = g.edge_py_attrs.get(&ek);
                     match &view_data {
                         NodeViewData::NoData => tuple_object(py, &[py_u, py_v]),
                         NodeViewData::AllData => {
-                            let a: PyObject = attrs.clone_ref(py).into_any();
+                            let a: PyObject = attrs.map_or_else(
+                                || PyDict::new(py).into_any().unbind(),
+                                |d| d.clone_ref(py).into_any(),
+                            );
                             tuple_object(py, &[py_u, py_v, a])
                         }
                         NodeViewData::Attr(attr_name) => {
                             let val = attrs
-                                .bind(py)
-                                .get_item(attr_name.as_str())
-                                .ok()
-                                .flatten()
+                                .and_then(|d| {
+                                    d.bind(py).get_item(attr_name.as_str()).ok().flatten()
+                                })
                                 .map_or_else(|| py.None(), |v| v.unbind());
                             tuple_object(py, &[py_u, py_v, val])
                         }

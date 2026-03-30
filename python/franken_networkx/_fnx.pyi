@@ -1186,6 +1186,7 @@ def arborescence_iterator_rust(
     weight: str = "weight",
     minimum: bool = True,
     max_count: int = 100,
+    init_partition: tuple[Iterable[tuple[Any, Any]], Iterable[tuple[Any, Any]]] | None = None,
 ) -> list[DiGraph]: ...
 
 # ---------------------------------------------------------------------------

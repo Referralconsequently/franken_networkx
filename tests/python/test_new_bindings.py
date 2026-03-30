@@ -2,6 +2,7 @@
 boundary and cuts, is_simple_path, matching validators, simple_cycles, find_cycle."""
 
 import pytest
+import networkx as nx
 
 import franken_networkx as fnx
 import franken_networkx._fnx as _fnx
@@ -113,6 +114,20 @@ class TestIsBranching:
 
 
 class TestBranchingConstructors:
+    def test_graph_edge_view_preserves_insertion_order(self):
+        graph = fnx.Graph()
+        for edge in [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]:
+            graph.add_edge(*edge)
+
+        assert list(graph.edges()) == [
+            (0, 1),
+            (0, 2),
+            (0, 3),
+            (1, 2),
+            (1, 3),
+            (2, 3),
+        ]
+
     def test_maximum_branching_preserve_attrs(self):
         D = fnx.DiGraph()
         D.add_edge("a", "b", weight=5.0, color="red")
@@ -167,36 +182,84 @@ class TestBranchingConstructors:
         assert arb.edges[1, 2]["tag"] == "keep"
         assert dict(arb.graph) == {"name": "demo"}
 
-    def test_arborescence_iterator_rejects_unsupported_init_partition(self):
+    def test_arborescence_iterator_honors_init_partition(self):
         digraph = fnx.DiGraph()
-        digraph.add_edge("a", "b", weight=1)
-        digraph.add_edge("b", "a", weight=2)
+        digraph.add_edge(0, 1, weight=1)
+        digraph.add_edge(0, 2, weight=1)
+        digraph.add_edge(1, 2, weight=1)
+        digraph.add_edge(2, 1, weight=1)
 
-        iterator = fnx.ArborescenceIterator(
-            digraph,
-            weight="weight",
-            minimum=True,
-            init_partition=([], [("a", "b")]),
+        arbs = list(
+            fnx.ArborescenceIterator(
+                digraph,
+                weight="weight",
+                minimum=True,
+                init_partition=([(0, 1)], []),
+            )
         )
 
-        with pytest.raises(fnx.NetworkXNotImplemented, match="init_partition"):
-            next(iter(iterator))
+        assert [sorted(arb.edges()) for arb in arbs] == [
+            [(0, 1), (0, 2)],
+            [(0, 1), (1, 2)],
+        ]
 
-    def test_arborescence_iterator_constructor_allows_deferred_init_partition_error(self):
+    def test_arborescence_iterator_honors_excluded_edges_in_init_partition(self):
         digraph = fnx.DiGraph()
-        digraph.add_edge("a", "b", weight=1)
-        digraph.add_edge("b", "a", weight=2)
+        digraph.add_edge(0, 1, weight=1)
+        digraph.add_edge(0, 2, weight=1)
+        digraph.add_edge(1, 2, weight=1)
+        digraph.add_edge(2, 1, weight=1)
+
+        arbs = list(
+            fnx.ArborescenceIterator(
+                digraph,
+                weight="weight",
+                minimum=True,
+                init_partition=([], [(0, 1)]),
+            )
+        )
+
+        assert [sorted(arb.edges()) for arb in arbs] == [[(0, 2), (2, 1)]]
+
+    def test_arborescence_iterator_constructor_preserves_init_partition(self):
+        digraph = fnx.DiGraph()
+        digraph.add_edge(0, 1, weight=1)
+        digraph.add_edge(0, 2, weight=1)
+        digraph.add_edge(1, 2, weight=1)
+        digraph.add_edge(2, 1, weight=1)
 
         iterator = fnx.ArborescenceIterator(
             digraph,
             weight="weight",
             minimum=True,
-            init_partition=([], [("a", "b")]),
+            init_partition=([(0, 1)], []),
         )
 
         assert isinstance(iterator, fnx.ArborescenceIterator)
-        with pytest.raises(fnx.NetworkXNotImplemented, match="init_partition"):
-            iter(iterator)
+        assert [sorted(arb.edges()) for arb in iterator] == [
+            [(0, 1), (0, 2)],
+            [(0, 1), (1, 2)],
+        ]
+
+    def test_arborescence_iterator_rust_honors_init_partition_keyword(self):
+        digraph = fnx.DiGraph()
+        digraph.add_edge(0, 1, weight=1)
+        digraph.add_edge(0, 2, weight=1)
+        digraph.add_edge(1, 2, weight=1)
+        digraph.add_edge(2, 1, weight=1)
+
+        arbs = list(
+            _fnx.arborescence_iterator_rust(
+                digraph,
+                max_count=10,
+                init_partition=([(0, 1)], []),
+            )
+        )
+
+        assert [sorted(arb.edges()) for arb in arbs] == [
+            [(0, 1), (0, 2)],
+            [(0, 1), (1, 2)],
+        ]
 
     def test_spanning_tree_iterator_honors_ignore_nan(self):
         graph = fnx.Graph()
@@ -330,6 +393,25 @@ class TestBranchingConstructors:
                     digraph.add_edge(u, v, weight=1)
 
         assert sum(1 for _ in fnx.ArborescenceIterator(digraph)) == 625
+
+    def test_complete_digraph_k4_branching_and_arborescences_match_networkx(self):
+        nx_graph = nx.DiGraph()
+        fnx_graph = fnx.DiGraph()
+        for u in range(4):
+            for v in range(4):
+                if u != v:
+                    nx_graph.add_edge(u, v, weight=1)
+                    fnx_graph.add_edge(u, v, weight=1)
+
+        assert sorted(fnx.maximum_branching(fnx_graph).edges()) == sorted(
+            nx.maximum_branching(nx_graph).edges()
+        )
+        assert sorted(fnx.maximum_spanning_arborescence(fnx_graph).edges()) == sorted(
+            nx.maximum_spanning_arborescence(nx_graph).edges()
+        )
+        assert sorted(fnx.minimum_spanning_arborescence(fnx_graph).edges()) == sorted(
+            nx.minimum_spanning_arborescence(nx_graph).edges()
+        )
 
     def test_spanning_tree_iterator_matches_networkx_next_lifecycle(self):
         iterator = fnx.SpanningTreeIterator(fnx.path_graph(2))

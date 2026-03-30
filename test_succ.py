@@ -1,6 +1,10 @@
 import franken_networkx as fnx
-g = fnx.DiGraph()
-g.add_edge("a", "b", weight=1.0)
-g.add_edge("b", "c", weight=2.0)
-print(g.successors("b"))
-print(g.predecessors("b"))
+
+GF = fnx.DiGraph()
+GF.add_node("A")
+print("FNX has_node:", GF.has_node("A"))
+print("FNX out_degree:", GF.out_degree("A"))
+try:
+    print("FNX successors:", list(GF.successors("A")))
+except Exception as e:
+    print("FNX successors error:", e)

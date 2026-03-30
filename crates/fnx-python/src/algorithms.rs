@@ -869,6 +869,44 @@ fn random_source(py: Python<'_>, seed: Option<u64>) -> PyResult<Bound<'_, PyAny>
     }
 }
 
+fn extract_partition_edges(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<Vec<(String, String)>> {
+    let mut edges = Vec::new();
+    for item in value.try_iter()? {
+        let item = item?;
+        let pair = item.downcast::<PyTuple>()?;
+        if pair.len() != 2 {
+            return Err(pyo3::exceptions::PyTypeError::new_err(
+                "init_partition edges must be 2-tuples",
+            ));
+        }
+        let source = node_key_to_string(py, &pair.get_item(0)?)?;
+        let target = node_key_to_string(py, &pair.get_item(1)?)?;
+        edges.push((source, target));
+    }
+    Ok(edges)
+}
+
+fn extract_init_partition(
+    py: Python<'_>,
+    init_partition: Option<&Bound<'_, PyAny>>,
+) -> PyResult<(Vec<(String, String)>, Vec<(String, String)>)> {
+    let Some(init_partition) = init_partition else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let tuple = init_partition.downcast::<PyTuple>()?;
+    if tuple.len() != 2 {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "init_partition must be a 2-tuple of (included_edges, excluded_edges)",
+        ));
+    }
+    let included = extract_partition_edges(py, &tuple.get_item(0)?)?;
+    let excluded = extract_partition_edges(py, &tuple.get_item(1)?)?;
+    Ok((included, excluded))
+}
+
 fn shuffled_spanning_edges_with_random(
     py: Python<'_>,
     inner: &fnx_classes::Graph,
@@ -1385,7 +1423,10 @@ pub fn shortest_path_length(
                 ))),
             }
         } else {
-            match fnx_algorithms::shortest_path_unweighted_directed(inner, &s, &t).path {
+            let result = py.allow_threads(|| {
+                fnx_algorithms::shortest_path_unweighted_directed(inner, &s, &t)
+            });
+            match result.path {
                 Some(path) => Ok((path.len().saturating_sub(1))
                     .into_pyobject(py)?
                     .into_any()
@@ -1513,15 +1554,15 @@ pub fn dijkstra_path(
     validate_node(&gr, &t, target)?;
 
     let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
-        fnx_algorithms::shortest_path_weighted_directed(
+        py.allow_threads(|| fnx_algorithms::shortest_path_weighted_directed(
             weighted_projection.as_ref(),
             &s,
             &t,
             weight,
-        )
+        ))
     } else {
         let weighted_projection = gr.weighted_undirected_projection(weight);
-        fnx_algorithms::shortest_path_weighted(weighted_projection.as_ref(), &s, &t, weight)
+        py.allow_threads(|| fnx_algorithms::shortest_path_weighted(weighted_projection.as_ref(), &s, &t, weight))
     };
     match result.path {
         Some(p) => Ok(p.iter().map(|n| gr.py_node_key(py, n)).collect()),
@@ -1552,14 +1593,14 @@ pub fn bellman_ford_path(
     validate_node(&gr, &t, target)?;
 
     let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
-        fnx_algorithms::bellman_ford_shortest_paths_directed(
+        py.allow_threads(|| fnx_algorithms::bellman_ford_shortest_paths_directed(
             weighted_projection.as_ref(),
             &s,
             weight,
-        )
+        ))
     } else {
         let weighted_projection = gr.weighted_undirected_projection(weight);
-        fnx_algorithms::bellman_ford_shortest_paths(weighted_projection.as_ref(), &s, weight)
+        py.allow_threads(|| fnx_algorithms::bellman_ford_shortest_paths(weighted_projection.as_ref(), &s, weight))
     };
     if result.negative_cycle_detected {
         return Err(crate::NetworkXUnbounded::new_err(
@@ -3532,7 +3573,8 @@ pub fn bfs_edges(
 
     let edges = match &gr {
         GraphRef::Directed { dg, .. } => {
-            fnx_algorithms::bfs_edges_directed(&dg.inner, &source_key, depth_limit)
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit))
         }
 
         GraphRef::Undirected(pg) => {
@@ -3542,7 +3584,8 @@ pub fn bfs_edges(
         }
         _ => {
             if gr.is_directed() {
-                fnx_algorithms::bfs_edges_directed(gr.digraph().unwrap(), &source_key, depth_limit)
+                let inner = gr.digraph().unwrap();
+                py.allow_threads(|| fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit))
             } else {
                 let inner = gr.undirected();
 
@@ -3580,7 +3623,8 @@ pub fn bfs_tree(
 
     let edges = match &gr {
         GraphRef::Directed { dg, .. } => {
-            fnx_algorithms::bfs_edges_directed(&dg.inner, &source_key, depth_limit)
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit))
         }
 
         GraphRef::Undirected(pg) => {
@@ -3590,7 +3634,8 @@ pub fn bfs_tree(
         }
         _ => {
             if gr.is_directed() {
-                fnx_algorithms::bfs_edges_directed(gr.digraph().unwrap(), &source_key, depth_limit)
+                let inner = gr.digraph().unwrap();
+                py.allow_threads(|| fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit))
             } else {
                 let inner = gr.undirected();
 
@@ -5374,7 +5419,7 @@ pub fn number_weakly_connected_components(
 
 /// Return whether the directed graph is weakly connected.
 #[pyfunction]
-pub fn is_weakly_connected(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
+pub fn is_weakly_connected(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bool> {
     let gr = extract_graph(g)?;
     if !gr.is_directed() {
         return Err(crate::NetworkXNotImplemented::new_err(
@@ -5388,7 +5433,7 @@ pub fn is_weakly_connected(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<bo
                 "Connectivity is undefined for the null graph.",
             ));
         }
-        Ok(fnx_algorithms::is_weakly_connected(dg_ref))
+        Ok(py.allow_threads(|| fnx_algorithms::is_weakly_connected(dg_ref)))
     }
 }
 
@@ -9655,8 +9700,15 @@ pub struct ArborescenceIteratorRust {
 #[pymethods]
 impl ArborescenceIteratorRust {
     #[new]
-    #[pyo3(signature = (g, weight="weight", minimum=true, max_count=100))]
-    fn new(_py: Python<'_>, g: &Bound<'_, PyAny>, weight: &str, minimum: bool, max_count: usize) -> PyResult<Self> {
+    #[pyo3(signature = (g, weight="weight", minimum=true, max_count=100, init_partition=None))]
+    fn new(
+        py: Python<'_>,
+        g: &Bound<'_, PyAny>,
+        weight: &str,
+        minimum: bool,
+        max_count: usize,
+        init_partition: Option<&Bound<'_, PyAny>>,
+    ) -> PyResult<Self> {
         let gr = extract_graph(g)?;
         if !gr.is_directed() {
             return Err(crate::NetworkXNotImplemented::new_err(
@@ -9671,11 +9723,14 @@ impl ArborescenceIteratorRust {
                 "not implemented for multigraph type",
             ));
         }
-        let items = fnx_algorithms::arborescence_iterator_ordered(
+        let (included_edges, excluded_edges) = extract_init_partition(py, init_partition)?;
+        let items = fnx_algorithms::arborescence_iterator_ordered_with_partition(
             gr.digraph().unwrap(),
             weight,
             minimum,
             max_count,
+            &included_edges,
+            &excluded_edges,
         );
         if items.is_empty() && gr.digraph().unwrap().node_count() > 1 {
             let message = if minimum {

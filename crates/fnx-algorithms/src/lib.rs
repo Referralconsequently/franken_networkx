@@ -5784,311 +5784,537 @@ pub fn random_spanning_tree_from_samples(
     Err(RandomSpanningTreeError::IncompleteTree)
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct ContractedBranchingEdge {
-    left: String,
-    right: String,
+#[derive(Clone, Debug)]
+struct EdmondsEdgeRecord {
+    source: String,
+    target: String,
     weight: f64,
-    repr_left: String,
-    repr_right: String,
-    repr_weight: f64,
+    is_candidate: bool,
 }
 
-fn sort_branching_edges(edges: &mut [BranchingEdge]) {
-    edges.sort_by(|a, b| {
-        a.left
-            .cmp(&b.left)
-            .then_with(|| a.right.cmp(&b.right))
-            .then_with(|| {
-                a.weight
-                    .partial_cmp(&b.weight)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    });
-}
-
-fn better_contracted_edge_for_max(
-    candidate: &ContractedBranchingEdge,
-    current: &ContractedBranchingEdge,
-) -> bool {
-    match candidate
-        .weight
-        .partial_cmp(&current.weight)
-        .unwrap_or(std::cmp::Ordering::Equal)
-    {
-        std::cmp::Ordering::Greater => true,
-        std::cmp::Ordering::Less => false,
-        std::cmp::Ordering::Equal => {
-            (
-                candidate.repr_left.as_str(),
-                candidate.repr_right.as_str(),
-                candidate.left.as_str(),
-                candidate.right.as_str(),
-            ) < (
-                current.repr_left.as_str(),
-                current.repr_right.as_str(),
-                current.left.as_str(),
-                current.right.as_str(),
-            )
-        }
-    }
-}
-
-fn better_branching_result_for_max(candidate: &BranchingResult, current: &BranchingResult) -> bool {
-    if candidate.total_weight > current.total_weight + DISTANCE_COMPARISON_EPSILON {
-        return true;
-    }
-    if current.total_weight > candidate.total_weight + DISTANCE_COMPARISON_EPSILON {
-        return false;
-    }
-    candidate
-        .edges
-        .iter()
-        .map(|edge| (edge.left.as_str(), edge.right.as_str()))
-        .collect::<Vec<_>>()
-        < current
-            .edges
-            .iter()
-            .map(|edge| (edge.left.as_str(), edge.right.as_str()))
-            .collect::<Vec<_>>()
-}
-
-fn better_branching_result_for_min(candidate: &BranchingResult, current: &BranchingResult) -> bool {
-    if candidate.total_weight + DISTANCE_COMPARISON_EPSILON < current.total_weight {
-        return true;
-    }
-    if current.total_weight + DISTANCE_COMPARISON_EPSILON < candidate.total_weight {
-        return false;
-    }
-    candidate
-        .edges
-        .iter()
-        .map(|edge| (edge.left.as_str(), edge.right.as_str()))
-        .collect::<Vec<_>>()
-        < current
-            .edges
-            .iter()
-            .map(|edge| (edge.left.as_str(), edge.right.as_str()))
-            .collect::<Vec<_>>()
-}
-
-fn find_selected_cycle(
-    nodes: &[String],
-    root: &str,
-    selected_incoming: &HashMap<String, ContractedBranchingEdge>,
-) -> Option<Vec<String>> {
-    let mut globally_done = HashSet::<String>::new();
-    for node in nodes {
-        if node == root || globally_done.contains(node) {
-            continue;
-        }
-        let mut path = Vec::<String>::new();
-        let mut positions = HashMap::<String, usize>::new();
-        let mut current = node.clone();
-        loop {
-            if current == root {
-                break;
-            }
-            if let Some(&cycle_start) = positions.get(&current) {
-                return Some(path[cycle_start..].to_vec());
-            }
-            if globally_done.contains(&current) {
-                break;
-            }
-            positions.insert(current.clone(), path.len());
-            path.push(current.clone());
-            let edge = selected_incoming.get(&current)?;
-            current = edge.left.clone();
-        }
-        globally_done.extend(path);
-    }
-    None
-}
-
-fn unique_cycle_node_name(nodes: &[String], cycle: &[String]) -> String {
-    let base = format!("__fnx_cycle__{}", cycle.join("__"));
-    if !nodes.iter().any(|node| node == &base) {
-        return base;
-    }
-    let mut suffix = 1usize;
-    loop {
-        let candidate = format!("{base}#{suffix}");
-        if !nodes.iter().any(|node| node == &candidate) {
-            return candidate;
-        }
-        suffix += 1;
-    }
-}
-
-fn maximum_rooted_arborescence_current(
+#[derive(Clone, Debug, Default)]
+struct EdmondsMultiDiGraph {
     nodes: Vec<String>,
-    edges: Vec<ContractedBranchingEdge>,
-    root: &str,
-) -> Option<Vec<ContractedBranchingEdge>> {
-    if nodes.len() <= 1 {
-        return Some(Vec::new());
+    node_set: HashSet<String>,
+    successors: HashMap<String, Vec<String>>,
+    predecessors: HashMap<String, Vec<String>>,
+    edge_keys_by_pair: HashMap<(String, String), Vec<usize>>,
+    edge_index: HashMap<usize, EdmondsEdgeRecord>,
+}
+
+impl EdmondsMultiDiGraph {
+    fn with_nodes(nodes: &[String]) -> Self {
+        let mut graph = Self::default();
+        for node in nodes {
+            graph.add_node(node.clone());
+        }
+        graph
     }
 
-    let mut selected_incoming = HashMap::<String, ContractedBranchingEdge>::new();
-    for node in nodes.iter().filter(|node| node.as_str() != root) {
-        let mut best_edge: Option<ContractedBranchingEdge> = None;
-        for edge in &edges {
-            if edge.right != *node || edge.left == *node {
+    fn add_node(&mut self, node: String) {
+        if self.node_set.insert(node.clone()) {
+            self.nodes.push(node.clone());
+            self.successors.entry(node.clone()).or_default();
+            self.predecessors.entry(node).or_default();
+        }
+    }
+
+    fn add_edge_with_key(&mut self, key: usize, edge: EdmondsEdgeRecord) {
+        self.add_node(edge.source.clone());
+        self.add_node(edge.target.clone());
+        let pair = (edge.source.clone(), edge.target.clone());
+        let keys = self.edge_keys_by_pair.entry(pair.clone()).or_default();
+        if keys.is_empty() {
+            self.successors
+                .entry(edge.source.clone())
+                .or_default()
+                .push(edge.target.clone());
+            self.predecessors
+                .entry(edge.target.clone())
+                .or_default()
+                .push(edge.source.clone());
+        }
+        keys.push(key);
+        self.edge_index.insert(key, edge);
+    }
+
+    fn remove_edge_from_pair(&mut self, source: &str, target: &str, key: usize) {
+        let pair = (source.to_owned(), target.to_owned());
+        let mut remove_pair = false;
+        if let Some(keys) = self.edge_keys_by_pair.get_mut(&pair) {
+            keys.retain(|existing| *existing != key);
+            remove_pair = keys.is_empty();
+        }
+        if remove_pair {
+            self.edge_keys_by_pair.remove(&pair);
+            if let Some(neighbors) = self.successors.get_mut(source) {
+                neighbors.retain(|neighbor| neighbor != target);
+            }
+            if let Some(neighbors) = self.predecessors.get_mut(target) {
+                neighbors.retain(|neighbor| neighbor != source);
+            }
+        }
+    }
+
+    fn remove_node(&mut self, node: &str) {
+        if !self.node_set.remove(node) {
+            return;
+        }
+        self.nodes.retain(|existing| existing != node);
+        let incident = self
+            .edge_index
+            .iter()
+            .filter_map(|(key, edge)| {
+                (edge.source == node || edge.target == node).then_some((
+                    *key,
+                    edge.source.clone(),
+                    edge.target.clone(),
+                ))
+            })
+            .collect::<Vec<_>>();
+        for (key, source, target) in incident {
+            self.edge_index.remove(&key);
+            self.remove_edge_from_pair(&source, &target, key);
+        }
+        self.successors.remove(node);
+        self.predecessors.remove(node);
+    }
+
+    fn ordered_edge_keys(&self) -> Vec<usize> {
+        let mut ordered = Vec::with_capacity(self.edge_index.len());
+        for source in &self.nodes {
+            if let Some(targets) = self.successors.get(source) {
+                for target in targets {
+                    if let Some(keys) = self
+                        .edge_keys_by_pair
+                        .get(&(source.clone(), target.clone()))
+                    {
+                        ordered.extend(keys.iter().copied());
+                    }
+                }
+            }
+        }
+        ordered
+    }
+
+    fn in_edge_keys(&self, node: &str) -> Vec<usize> {
+        let mut keys = Vec::new();
+        if let Some(predecessors) = self.predecessors.get(node) {
+            for predecessor in predecessors {
+                if let Some(edge_keys) = self
+                    .edge_keys_by_pair
+                    .get(&(predecessor.clone(), node.to_owned()))
+                {
+                    keys.extend(edge_keys.iter().copied());
+                }
+            }
+        }
+        keys
+    }
+
+    fn out_neighbors(&self, node: &str) -> &[String] {
+        self.successors.get(node).map_or(&[], Vec::as_slice)
+    }
+
+    fn edge_keys(&self, source: &str, target: &str) -> Option<&[usize]> {
+        self.edge_keys_by_pair
+            .get(&(source.to_owned(), target.to_owned()))
+            .map(Vec::as_slice)
+    }
+
+    fn edge(&self, key: usize) -> Option<&EdmondsEdgeRecord> {
+        self.edge_index.get(&key)
+    }
+
+    fn all_edge_keys(&self) -> HashSet<usize> {
+        self.edge_index.keys().copied().collect()
+    }
+}
+
+#[derive(Default)]
+struct EdmondsUnionFind {
+    parent: HashMap<String, String>,
+    rank: HashMap<String, usize>,
+}
+
+impl EdmondsUnionFind {
+    fn ensure(&mut self, node: &str) {
+        self.parent
+            .entry(node.to_owned())
+            .or_insert_with(|| node.to_owned());
+        self.rank.entry(node.to_owned()).or_insert(0);
+    }
+
+    fn find(&mut self, node: &str) -> String {
+        self.ensure(node);
+        let parent = self
+            .parent
+            .get(node)
+            .cloned()
+            .unwrap_or_else(|| node.to_owned());
+        if parent == node {
+            return parent;
+        }
+        let root = self.find(&parent);
+        self.parent.insert(node.to_owned(), root.clone());
+        root
+    }
+
+    fn same_set(&mut self, left: &str, right: &str) -> bool {
+        self.find(left) == self.find(right)
+    }
+
+    fn union(&mut self, left: &str, right: &str) {
+        let left_root = self.find(left);
+        let right_root = self.find(right);
+        if left_root == right_root {
+            return;
+        }
+        let left_rank = *self.rank.get(&left_root).unwrap_or(&0);
+        let right_rank = *self.rank.get(&right_root).unwrap_or(&0);
+        if left_rank < right_rank {
+            self.parent.insert(left_root, right_root);
+        } else if left_rank > right_rank {
+            self.parent.insert(right_root, left_root);
+        } else {
+            self.parent.insert(right_root.clone(), left_root.clone());
+            self.rank.insert(left_root, left_rank + 1);
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct DirectedWeightedKeyEdge {
+    key: usize,
+    source: String,
+    target: String,
+    weight: f64,
+}
+
+fn edmonds_find_desired_edge(graph: &EdmondsMultiDiGraph, node: &str) -> Option<(usize, f64)> {
+    let mut desired_key = None;
+    let mut max_weight = f64::NEG_INFINITY;
+    for edge_key in graph.in_edge_keys(node) {
+        let edge = graph.edge(edge_key)?;
+        if edge.weight > max_weight {
+            max_weight = edge.weight;
+            desired_key = Some(edge_key);
+        }
+    }
+    desired_key.map(|key| (key, max_weight))
+}
+
+fn edmonds_path_in_branching(
+    graph: &EdmondsMultiDiGraph,
+    source: &str,
+    target: &str,
+) -> Option<(Vec<String>, Vec<usize>)> {
+    let mut queue = VecDeque::from([source.to_owned()]);
+    let mut seen = HashSet::from([source.to_owned()]);
+    let mut parent = HashMap::<String, (String, usize)>::new();
+
+    while let Some(node) = queue.pop_front() {
+        if node == target {
+            break;
+        }
+        for successor in graph.out_neighbors(&node) {
+            if seen.contains(successor) {
                 continue;
             }
-            if best_edge
-                .as_ref()
-                .is_none_or(|current| better_contracted_edge_for_max(edge, current))
-            {
-                best_edge = Some(edge.clone());
-            }
-        }
-        selected_incoming.insert(node.clone(), best_edge?);
-    }
-
-    let Some(cycle) = find_selected_cycle(&nodes, root, &selected_incoming) else {
-        return Some(selected_incoming.into_values().collect());
-    };
-
-    let cycle_set = cycle.iter().cloned().collect::<HashSet<_>>();
-    let supernode = unique_cycle_node_name(&nodes, &cycle);
-    let cycle_insert_index = nodes
-        .iter()
-        .position(|node| cycle_set.contains(node))
-        .unwrap_or(nodes.len());
-
-    let mut contracted_nodes = Vec::<String>::new();
-    for (index, node) in nodes.iter().enumerate() {
-        if index == cycle_insert_index {
-            contracted_nodes.push(supernode.clone());
-        }
-        if !cycle_set.contains(node) {
-            contracted_nodes.push(node.clone());
+            let edge_key = graph.edge_keys(&node, successor)?.first().copied()?;
+            seen.insert(successor.clone());
+            parent.insert(successor.clone(), (node.clone(), edge_key));
+            queue.push_back(successor.clone());
         }
     }
 
-    let mut contracted_edges = Vec::<ContractedBranchingEdge>::new();
-    for edge in &edges {
-        let source_in_cycle = cycle_set.contains(&edge.left);
-        let target_in_cycle = cycle_set.contains(&edge.right);
-        match (source_in_cycle, target_in_cycle) {
-            (true, true) => {}
-            (false, false) => contracted_edges.push(edge.clone()),
-            (false, true) => {
-                let incoming = selected_incoming.get(&edge.right)?;
-                contracted_edges.push(ContractedBranchingEdge {
-                    left: edge.left.clone(),
-                    right: supernode.clone(),
-                    weight: edge.weight - incoming.weight,
-                    repr_left: edge.left.clone(),
-                    repr_right: edge.right.clone(),
-                    repr_weight: edge.weight,
-                });
-            }
-            (true, false) => {
-                contracted_edges.push(ContractedBranchingEdge {
-                    left: supernode.clone(),
-                    right: edge.right.clone(),
-                    weight: edge.weight,
-                    repr_left: edge.left.clone(),
-                    repr_right: edge.right.clone(),
-                    repr_weight: edge.weight,
-                });
-            }
-        }
+    if !seen.contains(target) {
+        return None;
     }
 
-    let contracted_solution =
-        maximum_rooted_arborescence_current(contracted_nodes, contracted_edges, root)?;
-
-    let mut expanded = Vec::<ContractedBranchingEdge>::new();
-    let mut cycle_entry_target: Option<String> = None;
-
-    for edge in contracted_solution {
-        if edge.left == supernode || edge.right == supernode {
-            let restored = ContractedBranchingEdge {
-                left: edge.repr_left.clone(),
-                right: edge.repr_right.clone(),
-                weight: edge.repr_weight,
-                repr_left: edge.repr_left,
-                repr_right: edge.repr_right,
-                repr_weight: edge.repr_weight,
-            };
-            if edge.right == supernode {
-                cycle_entry_target = Some(restored.right.clone());
-            }
-            expanded.push(restored);
-        } else {
-            expanded.push(edge);
-        }
+    let mut nodes = vec![target.to_owned()];
+    let mut edges = Vec::new();
+    let mut current = target.to_owned();
+    while current != source {
+        let (prev, edge_key) = parent.get(&current)?.clone();
+        edges.push(edge_key);
+        current = prev;
+        nodes.push(current.clone());
     }
-
-    let cycle_entry_target = cycle_entry_target?;
-    for node in cycle {
-        if node == cycle_entry_target {
-            continue;
-        }
-        if let Some(edge) = selected_incoming.get(&node) {
-            expanded.push(edge.clone());
-        }
-    }
-
-    Some(expanded)
+    nodes.reverse();
+    edges.reverse();
+    Some((nodes, edges))
 }
 
-fn collect_directed_branching_edges(
+fn edmonds_is_root(
+    graph: &EdmondsMultiDiGraph,
+    node: &str,
+    active_edges: &HashSet<usize>,
+) -> (bool, Option<usize>) {
+    for edge_key in graph.in_edge_keys(node) {
+        if active_edges.contains(&edge_key) {
+            return (false, Some(edge_key));
+        }
+    }
+    (true, None)
+}
+
+fn edmonds_base_new_node_name(level: usize) -> String {
+    format!("edmonds new node base name {level}")
+}
+
+fn edmonds_exact_maximum_branching_keys(
+    nodes: &[String],
+    edges: &[DirectedWeightedKeyEdge],
+) -> Vec<usize> {
+    if nodes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut graph = EdmondsMultiDiGraph::with_nodes(nodes);
+    for edge in edges {
+        graph.add_edge_with_key(
+            edge.key,
+            EdmondsEdgeRecord {
+                source: edge.source.clone(),
+                target: edge.target.clone(),
+                weight: edge.weight,
+                is_candidate: false,
+            },
+        );
+    }
+    let original_graph = graph.clone();
+
+    let mut branching = EdmondsMultiDiGraph::default();
+    let mut graph_snapshots = Vec::<EdmondsMultiDiGraph>::new();
+    let mut branching_snapshots = Vec::<EdmondsMultiDiGraph>::new();
+    let mut circuits = Vec::<Vec<usize>>::new();
+    let mut minedge_circuit = Vec::<Option<usize>>::new();
+    let mut selected_nodes = HashSet::<String>::new();
+    let mut uf = EdmondsUnionFind::default();
+    let mut level = 0usize;
+    let mut pending_nodes = graph.nodes.clone();
+    let mut node_index = 0usize;
+
+    loop {
+        if node_index >= pending_nodes.len() {
+            graph_snapshots.push(graph.clone());
+            branching_snapshots.push(branching.clone());
+            circuits.push(Vec::new());
+            minedge_circuit.push(None);
+            break;
+        }
+
+        let node = pending_nodes[node_index].clone();
+        node_index += 1;
+        if selected_nodes.contains(&node) {
+            continue;
+        }
+
+        selected_nodes.insert(node.clone());
+        branching.add_node(node.clone());
+        uf.ensure(&node);
+
+        let Some((desired_key, desired_weight)) = edmonds_find_desired_edge(&graph, &node) else {
+            continue;
+        };
+        if desired_weight <= 0.0 {
+            continue;
+        }
+
+        let desired_edge = graph
+            .edge(desired_key)
+            .cloned()
+            .expect("desired edge key should exist");
+        let source = desired_edge.source.clone();
+        let target = desired_edge.target.clone();
+        let circuit = uf.same_set(&source, &target);
+        branching.add_edge_with_key(
+            desired_key,
+            EdmondsEdgeRecord {
+                source: source.clone(),
+                target: target.clone(),
+                weight: desired_weight,
+                is_candidate: false,
+            },
+        );
+        if let Some(edge) = graph.edge_index.get_mut(&desired_key) {
+            edge.is_candidate = true;
+        }
+        uf.union(&source, &target);
+
+        if !circuit {
+            continue;
+        }
+
+        let (cycle_nodes_path, mut cycle_edge_keys) =
+            edmonds_path_in_branching(&branching, &target, &source)
+                .expect("branching path should exist when a circuit is detected");
+        cycle_edge_keys.push(desired_key);
+
+        let mut minweight = f64::INFINITY;
+        let mut minedge = None;
+        let mut cycle_incoming_weight = HashMap::<String, f64>::new();
+        for edge_key in &cycle_edge_keys {
+            let edge = branching
+                .edge(*edge_key)
+                .expect("cycle edge should exist in branching");
+            cycle_incoming_weight.insert(edge.target.clone(), edge.weight);
+            if edge.weight < minweight {
+                minweight = edge.weight;
+                minedge = Some(*edge_key);
+            }
+        }
+
+        circuits.push(cycle_edge_keys.clone());
+        minedge_circuit.push(minedge);
+        graph_snapshots.push(graph.clone());
+        branching_snapshots.push(branching.clone());
+
+        let new_node = edmonds_base_new_node_name(level);
+        graph.add_node(new_node.clone());
+        let cycle_set = cycle_nodes_path.into_iter().collect::<HashSet<_>>();
+        let mut new_edges = Vec::<(usize, EdmondsEdgeRecord)>::new();
+
+        for edge_key in graph.ordered_edge_keys() {
+            let edge = graph
+                .edge(edge_key)
+                .cloned()
+                .expect("ordered edge key should exist");
+            let source_in_cycle = cycle_set.contains(&edge.source);
+            let target_in_cycle = cycle_set.contains(&edge.target);
+            match (source_in_cycle, target_in_cycle) {
+                (true, true) => {}
+                (true, false) => {
+                    new_edges.push((
+                        edge_key,
+                        EdmondsEdgeRecord {
+                            source: new_node.clone(),
+                            target: edge.target,
+                            weight: edge.weight,
+                            is_candidate: edge.is_candidate,
+                        },
+                    ));
+                }
+                (false, true) => {
+                    let adjusted = edge.weight + minweight
+                        - cycle_incoming_weight
+                            .get(&edge.target)
+                            .copied()
+                            .unwrap_or(0.0);
+                    new_edges.push((
+                        edge_key,
+                        EdmondsEdgeRecord {
+                            source: edge.source,
+                            target: new_node.clone(),
+                            weight: adjusted,
+                            is_candidate: edge.is_candidate,
+                        },
+                    ));
+                }
+                (false, false) => {}
+            }
+        }
+
+        for cycle_node in &cycle_set {
+            graph.remove_node(cycle_node);
+            branching.remove_node(cycle_node);
+            selected_nodes.remove(cycle_node);
+        }
+
+        for (edge_key, edge) in new_edges {
+            let candidate = edge.is_candidate;
+            graph.add_edge_with_key(edge_key, edge.clone());
+            if candidate {
+                branching.add_edge_with_key(
+                    edge_key,
+                    EdmondsEdgeRecord {
+                        source: edge.source.clone(),
+                        target: edge.target.clone(),
+                        weight: edge.weight,
+                        is_candidate: false,
+                    },
+                );
+                uf.union(&edge.source, &edge.target);
+            }
+        }
+
+        pending_nodes = graph.nodes.clone();
+        node_index = 0;
+        level += 1;
+    }
+
+    let mut active_edges = branching_snapshots
+        .get(level)
+        .map_or_else(HashSet::new, EdmondsMultiDiGraph::all_edge_keys);
+    while level > 0 {
+        level -= 1;
+        let merged_node = edmonds_base_new_node_name(level);
+        let circuit = &circuits[level];
+        let (is_root, incoming_edge_key) = edmonds_is_root(
+            graph_snapshots
+                .get(level + 1)
+                .expect("next graph snapshot should exist"),
+            &merged_node,
+            &active_edges,
+        );
+        active_edges.extend(circuit.iter().copied());
+        if is_root {
+            let minedge = minedge_circuit[level].expect("cycle should have a minimum edge");
+            active_edges.remove(&minedge);
+            continue;
+        }
+
+        let incoming_edge_key =
+            incoming_edge_key.expect("merged node should have an incoming edge");
+        let target = graph_snapshots[level]
+            .edge(incoming_edge_key)
+            .expect("incoming edge should exist at prior level")
+            .target
+            .clone();
+        let mut remove_key = None;
+        for edge_key in circuit {
+            let edge = graph_snapshots[level]
+                .edge(*edge_key)
+                .expect("circuit edge should exist at prior level");
+            if edge.target == target {
+                remove_key = Some(*edge_key);
+                break;
+            }
+        }
+        active_edges.remove(&remove_key.expect("cycle entry edge should exist"));
+    }
+
+    let mut ordered_keys = active_edges.into_iter().collect::<Vec<_>>();
+    ordered_keys.sort_unstable();
+    ordered_keys
+        .into_iter()
+        .filter(|edge_key| original_graph.edge(*edge_key).is_some())
+        .collect()
+}
+
+fn collect_directed_branching_edges_with_keys(
     digraph: &DiGraph,
     weight_attr: &str,
     default_weight: f64,
-) -> Vec<BranchingEdge> {
-    let mut edges = Vec::<BranchingEdge>::new();
-    for edge in digraph.edges_ordered() {
-        let weight = directed_edge_weight_with_default(
-            digraph,
-            &edge.left,
-            &edge.right,
-            weight_attr,
-            default_weight,
-        );
-        edges.push(BranchingEdge {
-            left: edge.left,
-            right: edge.right,
-            weight,
-        });
-    }
-    sort_branching_edges(&mut edges);
-    edges
-}
-
-fn maximum_rooted_arborescence(
-    nodes: &[String],
-    edges: &[BranchingEdge],
-    root: &str,
-) -> Option<Vec<BranchingEdge>> {
-    if !nodes.iter().any(|node| node == root) {
-        return None;
-    }
-    let contracted_edges = edges
-        .iter()
-        .map(|edge| ContractedBranchingEdge {
-            left: edge.left.clone(),
-            right: edge.right.clone(),
-            weight: edge.weight,
-            repr_left: edge.left.clone(),
-            repr_right: edge.right.clone(),
-            repr_weight: edge.weight,
-        })
-        .collect::<Vec<_>>();
-    let mut restored = maximum_rooted_arborescence_current(nodes.to_vec(), contracted_edges, root)?
+) -> Vec<DirectedWeightedKeyEdge> {
+    digraph
+        .edges_ordered()
         .into_iter()
-        .map(|edge| BranchingEdge {
-            left: edge.left,
-            right: edge.right,
-            weight: edge.weight,
+        .enumerate()
+        .map(|(key, edge)| DirectedWeightedKeyEdge {
+            key,
+            source: edge.left.clone(),
+            target: edge.right.clone(),
+            weight: directed_edge_weight_with_default(
+                digraph,
+                &edge.left,
+                &edge.right,
+                weight_attr,
+                default_weight,
+            ),
         })
-        .collect::<Vec<_>>();
-    sort_branching_edges(&mut restored);
-    Some(restored)
+        .collect()
 }
 
 fn branching_result(
@@ -6111,6 +6337,21 @@ fn branching_result(
     }
 }
 
+fn build_branching_digraph(
+    nodes: &[String],
+    edges: &[BranchingEdge],
+    mode: fnx_runtime::CompatibilityMode,
+) -> DiGraph {
+    let mut graph = DiGraph::new(mode);
+    for node in nodes {
+        graph.add_node(node.clone());
+    }
+    for edge in edges {
+        let _ = graph.add_edge(edge.left.clone(), edge.right.clone());
+    }
+    graph
+}
+
 /// Return a maximum branching of a directed graph.
 #[must_use]
 pub fn maximum_branching(
@@ -6127,31 +6368,21 @@ pub fn maximum_branching(
         return branching_result("chu_liu_edmonds_maximum_branching", 0, 0, Vec::new());
     }
 
-    let mut augmented_nodes = nodes.clone();
-    let super_root = unique_cycle_node_name(&augmented_nodes, &["root".to_owned()]);
-    augmented_nodes.insert(0, super_root.clone());
-
-    let mut augmented_edges =
-        collect_directed_branching_edges(digraph, weight_attr, default_weight);
-    for node in &nodes {
-        augmented_edges.push(BranchingEdge {
-            left: super_root.clone(),
-            right: node.clone(),
-            weight: 0.0,
-        });
-    }
-    sort_branching_edges(&mut augmented_edges);
-
-    let mut edges = maximum_rooted_arborescence(&augmented_nodes, &augmented_edges, &super_root)
-        .unwrap_or_default()
+    let directed_edges =
+        collect_directed_branching_edges_with_keys(digraph, weight_attr, default_weight);
+    let edges = edmonds_exact_maximum_branching_keys(&nodes, &directed_edges)
         .into_iter()
-        .filter(|edge| edge.left != super_root)
+        .filter_map(|edge_key| directed_edges.get(edge_key))
+        .map(|edge| BranchingEdge {
+            left: edge.source.clone(),
+            right: edge.target.clone(),
+            weight: edge.weight,
+        })
         .collect::<Vec<_>>();
-    sort_branching_edges(&mut edges);
     branching_result(
         "chu_liu_edmonds_maximum_branching",
-        augmented_nodes.len(),
-        augmented_edges.len(),
+        nodes.len(),
+        directed_edges.len(),
         edges,
     )
 }
@@ -6172,44 +6403,38 @@ pub fn minimum_branching(
         return branching_result("chu_liu_edmonds_minimum_branching", 0, 0, Vec::new());
     }
 
-    let transformed_edges = collect_directed_branching_edges(digraph, weight_attr, default_weight)
-        .into_iter()
-        .map(|edge| BranchingEdge {
-            left: edge.left,
-            right: edge.right,
-            weight: -edge.weight,
+    let directed_edges =
+        collect_directed_branching_edges_with_keys(digraph, weight_attr, default_weight);
+    let max_weight = directed_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_weight = directed_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .fold(f64::INFINITY, f64::min);
+    let transformed_edges = directed_edges
+        .iter()
+        .map(|edge| DirectedWeightedKeyEdge {
+            key: edge.key,
+            source: edge.source.clone(),
+            target: edge.target.clone(),
+            weight: max_weight + 1.0 + (max_weight - min_weight) - edge.weight,
         })
         .collect::<Vec<_>>();
-
-    let mut augmented_nodes = nodes.clone();
-    let super_root = unique_cycle_node_name(&augmented_nodes, &["root".to_owned()]);
-    augmented_nodes.insert(0, super_root.clone());
-
-    let mut augmented_edges = transformed_edges;
-    for node in &nodes {
-        augmented_edges.push(BranchingEdge {
-            left: super_root.clone(),
-            right: node.clone(),
-            weight: 0.0,
-        });
-    }
-    sort_branching_edges(&mut augmented_edges);
-
-    let mut edges = maximum_rooted_arborescence(&augmented_nodes, &augmented_edges, &super_root)
-        .unwrap_or_default()
+    let edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
         .into_iter()
-        .filter(|edge| edge.left != super_root)
+        .filter_map(|edge_key| directed_edges.get(edge_key))
         .map(|edge| BranchingEdge {
-            left: edge.left,
-            right: edge.right,
-            weight: -edge.weight,
+            left: edge.source.clone(),
+            right: edge.target.clone(),
+            weight: edge.weight,
         })
         .collect::<Vec<_>>();
-    sort_branching_edges(&mut edges);
     branching_result(
         "chu_liu_edmonds_minimum_branching",
-        augmented_nodes.len(),
-        augmented_edges.len(),
+        nodes.len(),
+        directed_edges.len(),
         edges,
     )
 }
@@ -6221,35 +6446,49 @@ pub fn maximum_spanning_arborescence(
     weight_attr: &str,
     default_weight: f64,
 ) -> Option<BranchingResult> {
+    if digraph.node_count() == 0 {
+        return None;
+    }
     let nodes = digraph
         .nodes_ordered()
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    if nodes.is_empty() {
-        return None;
-    }
-    let edges = collect_directed_branching_edges(digraph, weight_attr, default_weight);
-    let mut best: Option<BranchingResult> = None;
-    for root in &nodes {
-        let Some(mut candidate_edges) = maximum_rooted_arborescence(&nodes, &edges, root) else {
-            continue;
-        };
-        sort_branching_edges(&mut candidate_edges);
-        let candidate = branching_result(
-            "chu_liu_edmonds_maximum_spanning_arborescence",
-            nodes.len(),
-            edges.len(),
-            candidate_edges,
-        );
-        if best
-            .as_ref()
-            .is_none_or(|current| better_branching_result_for_max(&candidate, current))
-        {
-            best = Some(candidate);
-        }
-    }
-    best
+    let directed_edges =
+        collect_directed_branching_edges_with_keys(digraph, weight_attr, default_weight);
+    let min_weight = directed_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .fold(f64::INFINITY, f64::min);
+    let max_weight = directed_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let transformed_edges = directed_edges
+        .iter()
+        .map(|edge| DirectedWeightedKeyEdge {
+            key: edge.key,
+            source: edge.source.clone(),
+            target: edge.target.clone(),
+            weight: edge.weight - min_weight + 1.0 - (min_weight - max_weight),
+        })
+        .collect::<Vec<_>>();
+    let result = branching_result(
+        "chu_liu_edmonds_maximum_spanning_arborescence",
+        nodes.len(),
+        directed_edges.len(),
+        edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
+            .into_iter()
+            .filter_map(|edge_key| directed_edges.get(edge_key))
+            .map(|edge| BranchingEdge {
+                left: edge.source.clone(),
+                right: edge.target.clone(),
+                weight: edge.weight,
+            })
+            .collect(),
+    );
+    let arborescence = build_branching_digraph(&nodes, &result.edges, digraph.mode());
+    is_arborescence(&arborescence).then_some(result)
 }
 
 /// Return a minimum spanning arborescence of a directed graph, if one exists.
@@ -6259,52 +6498,49 @@ pub fn minimum_spanning_arborescence(
     weight_attr: &str,
     default_weight: f64,
 ) -> Option<BranchingResult> {
+    if digraph.node_count() == 0 {
+        return None;
+    }
     let nodes = digraph
         .nodes_ordered()
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    if nodes.is_empty() {
-        return None;
-    }
-    let transformed_edges = collect_directed_branching_edges(digraph, weight_attr, default_weight)
-        .into_iter()
-        .map(|edge| BranchingEdge {
-            left: edge.left,
-            right: edge.right,
-            weight: -edge.weight,
+    let directed_edges =
+        collect_directed_branching_edges_with_keys(digraph, weight_attr, default_weight);
+    let max_weight = directed_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_weight = directed_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .fold(f64::INFINITY, f64::min);
+    let transformed_edges = directed_edges
+        .iter()
+        .map(|edge| DirectedWeightedKeyEdge {
+            key: edge.key,
+            source: edge.source.clone(),
+            target: edge.target.clone(),
+            weight: max_weight + 1.0 + (max_weight - min_weight) - edge.weight,
         })
         .collect::<Vec<_>>();
-
-    let mut best: Option<BranchingResult> = None;
-    for root in &nodes {
-        let Some(candidate_edges) = maximum_rooted_arborescence(&nodes, &transformed_edges, root)
-        else {
-            continue;
-        };
-        let mut restored_edges = candidate_edges
+    let result = branching_result(
+        "chu_liu_edmonds_minimum_spanning_arborescence",
+        nodes.len(),
+        directed_edges.len(),
+        edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
             .into_iter()
+            .filter_map(|edge_key| directed_edges.get(edge_key))
             .map(|edge| BranchingEdge {
-                left: edge.left,
-                right: edge.right,
-                weight: -edge.weight,
+                left: edge.source.clone(),
+                right: edge.target.clone(),
+                weight: edge.weight,
             })
-            .collect::<Vec<_>>();
-        sort_branching_edges(&mut restored_edges);
-        let candidate = branching_result(
-            "chu_liu_edmonds_minimum_spanning_arborescence",
-            nodes.len(),
-            transformed_edges.len(),
-            restored_edges,
-        );
-        if best
-            .as_ref()
-            .is_none_or(|current| better_branching_result_for_min(&candidate, current))
-        {
-            best = Some(candidate);
-        }
-    }
-    best
+            .collect(),
+    );
+    let arborescence = build_branching_digraph(&nodes, &result.edges, digraph.mode());
+    is_arborescence(&arborescence).then_some(result)
 }
 
 /// Counts the number of triangles each node participates in.
@@ -14240,6 +14476,9 @@ pub fn isolates_directed(graph: &DiGraph) -> Vec<String> {
 /// Return true if `node` is an isolate in a directed graph.
 #[must_use]
 pub fn is_isolate_directed(graph: &DiGraph, node: &str) -> bool {
+    if !graph.has_node(node) {
+        return false;
+    }
     let out_deg = graph.successors(node).map_or(0, |v| v.len());
     let in_deg = graph.predecessors(node).map_or(0, |v| v.len());
     out_deg == 0 && in_deg == 0
@@ -24191,29 +24430,62 @@ pub(crate) type PartitionDict = std::collections::HashMap<(String, String), Part
 #[derive(Clone)]
 pub(crate) struct QueueEntry {
     pub(crate) weight: f64,
-    pub(crate) sequence: u64,
     pub(crate) partition: PartitionDict,
 }
 
-impl PartialEq for QueueEntry {
-    fn eq(&self, other: &Self) -> bool {
-        self.weight == other.weight && self.sequence == other.sequence
-    }
+fn queue_entry_lt(left: &QueueEntry, right: &QueueEntry) -> bool {
+    left.weight < right.weight
 }
-impl Eq for QueueEntry {}
 
-impl PartialOrd for QueueEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+fn partition_heap_push(heap: &mut Vec<QueueEntry>, entry: QueueEntry) {
+    heap.push(entry);
+    let mut pos = heap.len() - 1;
+    let new_item = heap[pos].clone();
+    while pos > 0 {
+        let parent_pos = (pos - 1) >> 1;
+        if !queue_entry_lt(&new_item, &heap[parent_pos]) {
+            break;
+        }
+        heap[pos] = heap[parent_pos].clone();
+        pos = parent_pos;
     }
+    heap[pos] = new_item;
 }
-impl Ord for QueueEntry {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other
-            .weight
-            .total_cmp(&self.weight)
-            .then_with(|| other.sequence.cmp(&self.sequence))
+
+fn partition_heap_pop(heap: &mut Vec<QueueEntry>) -> Option<QueueEntry> {
+    let last = heap.pop()?;
+    if heap.is_empty() {
+        return Some(last);
     }
+
+    let result = std::mem::replace(&mut heap[0], last);
+    let end = heap.len();
+    let start_pos = 0usize;
+    let mut pos = start_pos;
+    let new_item = heap[0].clone();
+    let mut child_pos = 2 * pos + 1;
+
+    while child_pos < end {
+        let right_pos = child_pos + 1;
+        if right_pos < end && !queue_entry_lt(&heap[child_pos], &heap[right_pos]) {
+            child_pos = right_pos;
+        }
+        heap[pos] = heap[child_pos].clone();
+        pos = child_pos;
+        child_pos = 2 * pos + 1;
+    }
+
+    heap[pos] = new_item;
+    while pos > start_pos {
+        let parent_pos = (pos - 1) >> 1;
+        if !queue_entry_lt(&heap[pos], &heap[parent_pos]) {
+            break;
+        }
+        heap.swap(pos, parent_pos);
+        pos = parent_pos;
+    }
+
+    Some(result)
 }
 
 // Build a copy of the graph with partition state written into edge attrs
@@ -24265,11 +24537,12 @@ fn compute_partition_mst(
         Ok(mst) => {
             let n = pg.nodes_ordered().len();
             if mst.edges.len() == n.saturating_sub(1) {
-                let edges: Vec<(String, String)> = mst
+                let mut edges: Vec<(String, String)> = mst
                     .edges
                     .iter()
                     .map(|e| (e.left.clone(), e.right.clone()))
                     .collect();
+                edges.sort();
                 Some((mst.total_weight, edges))
             } else {
                 None
@@ -24298,8 +24571,7 @@ pub struct SpanningTreeIteratorState {
     graph: Graph,
     weight_attr: String,
     minimum: bool,
-    seq: u64,
-    heap: std::collections::BinaryHeap<QueueEntry>,
+    heap: Vec<QueueEntry>,
     nodes: Vec<String>,
     mode: fnx_runtime::CompatibilityMode,
     is_connected: bool,
@@ -24308,16 +24580,19 @@ pub struct SpanningTreeIteratorState {
 
 impl SpanningTreeIteratorState {
     pub fn new(graph: &Graph, weight_attr: &str, minimum: bool) -> Self {
-        let nodes: Vec<String> = graph.nodes_ordered().iter().map(|s| (*s).to_owned()).collect();
+        let nodes: Vec<String> = graph
+            .nodes_ordered()
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
         let n = nodes.len();
         let mode = graph.mode();
         let mut is_conn = is_connected(graph).is_connected;
-        let mut heap = std::collections::BinaryHeap::new();
-        let mut seq = 0u64;
+        let mut heap = Vec::new();
 
         if n <= 1 {
             // empty or singleton graph logic
-            is_conn = false; 
+            is_conn = false;
         } else if is_conn {
             let empty_partition = std::collections::HashMap::new();
             if let Some((init_weight, _)) = compute_partition_mst(
@@ -24327,12 +24602,13 @@ impl SpanningTreeIteratorState {
                 weight_attr,
                 "___spanning_tree_partition___",
             ) {
-                heap.push(QueueEntry {
-                    weight: if minimum { init_weight } else { -init_weight },
-                    sequence: seq,
-                    partition: empty_partition,
-                });
-                seq += 1;
+                partition_heap_push(
+                    &mut heap,
+                    QueueEntry {
+                        weight: if minimum { init_weight } else { -init_weight },
+                        partition: empty_partition,
+                    },
+                );
             }
         }
 
@@ -24340,7 +24616,6 @@ impl SpanningTreeIteratorState {
             graph: graph.clone(),
             weight_attr: weight_attr.to_owned(),
             minimum,
-            seq,
             heap,
             nodes,
             mode,
@@ -24392,7 +24667,7 @@ impl Iterator for SpanningTreeIteratorState {
         }
 
         let partition_attr = "___spanning_tree_partition___";
-        while let Some(entry) = self.heap.pop() {
+        while let Some(entry) = partition_heap_pop(&mut self.heap) {
             let Some((_weight, tree_edges)) = compute_partition_mst(
                 &self.graph,
                 &entry.partition,
@@ -24428,12 +24703,13 @@ impl Iterator for SpanningTreeIteratorState {
                 ) {
                     let p1_tree = build_tree(&nodes_refs, &p1_edges, self.mode);
                     if is_connected(&p1_tree).is_connected {
-                        self.heap.push(QueueEntry {
-                            weight: if self.minimum { p1_weight } else { -p1_weight },
-                            sequence: self.seq,
-                            partition: p1.clone(),
-                        });
-                        self.seq += 1;
+                        partition_heap_push(
+                            &mut self.heap,
+                            QueueEntry {
+                                weight: if self.minimum { p1_weight } else { -p1_weight },
+                                partition: p1.clone(),
+                            },
+                        );
                     }
                 }
 
@@ -24478,7 +24754,7 @@ pub fn arborescence_iterator(
 }
 
 /// Enumerate arborescences with explicit ordering control.
-    fn find_arborescence(
+fn find_arborescence(
     digraph: &DiGraph,
     partition: &PartitionDict,
     minimum: bool,
@@ -24516,7 +24792,10 @@ pub fn arborescence_iterator(
         .iter()
         .filter_map(|edge| {
             let key = (edge.left.clone(), edge.right.clone());
-            if matches!(effective_partition.get(&key), Some(PartitionState::Excluded)) {
+            if matches!(
+                effective_partition.get(&key),
+                Some(PartitionState::Excluded)
+            ) {
                 None
             } else {
                 Some(
@@ -24548,11 +24827,7 @@ pub fn arborescence_iterator(
                     original_weight + bonus_magnitude
                 };
                 attrs.insert(weight_attr.to_owned(), CgseValue::Float(biased_weight));
-                let _ = filtered.add_edge_with_attrs(
-                    edge.left.clone(),
-                    edge.right.clone(),
-                    attrs,
-                );
+                let _ = filtered.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), attrs);
             }
             _ => {
                 let _ = filtered.add_edge_with_attrs(
@@ -24606,8 +24881,7 @@ pub fn arborescence_iterator(
     Some((total_weight, edges))
 }
 
-
-    fn build_arborescence(
+fn build_arborescence(
     nodes: &[&str],
     edges: &[(String, String)],
     mode: fnx_runtime::CompatibilityMode,
@@ -24622,14 +24896,11 @@ pub fn arborescence_iterator(
     arb
 }
 
-
-
 pub struct ArborescenceIteratorState {
     digraph: DiGraph,
     weight_attr: String,
     minimum: bool,
-    seq: u64,
-    heap: std::collections::BinaryHeap<QueueEntry>,
+    heap: Vec<QueueEntry>,
     nodes: Vec<String>,
     mode: fnx_runtime::CompatibilityMode,
     yielded_forest: bool,
@@ -24637,21 +24908,27 @@ pub struct ArborescenceIteratorState {
 
 impl ArborescenceIteratorState {
     pub fn new(digraph: &DiGraph, weight_attr: &str, minimum: bool) -> Result<Self, String> {
-        let nodes: Vec<String> = digraph.nodes_ordered().iter().map(|s| (*s).to_owned()).collect();
+        let nodes: Vec<String> = digraph
+            .nodes_ordered()
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
         let n = nodes.len();
         let mode = digraph.mode();
-        let mut heap = std::collections::BinaryHeap::new();
-        let mut seq = 0u64;
+        let mut heap = Vec::new();
 
         if n > 1 {
             let empty_partition = std::collections::HashMap::new();
-            if let Some((init_weight, _)) = find_arborescence(digraph, &empty_partition, minimum, weight_attr) {
-                heap.push(QueueEntry {
-                    weight: if minimum { init_weight } else { -init_weight },
-                    sequence: seq,
-                    partition: empty_partition,
-                });
-                seq += 1;
+            if let Some((init_weight, _)) =
+                find_arborescence(digraph, &empty_partition, minimum, weight_attr)
+            {
+                partition_heap_push(
+                    &mut heap,
+                    QueueEntry {
+                        weight: if minimum { init_weight } else { -init_weight },
+                        partition: empty_partition,
+                    },
+                );
             } else {
                 let msg = if minimum {
                     "No minimum spanning arborescence in graph."
@@ -24666,7 +24943,6 @@ impl ArborescenceIteratorState {
             digraph: digraph.clone(),
             weight_attr: weight_attr.to_owned(),
             minimum,
-            seq,
             heap,
             nodes,
             mode,
@@ -24697,10 +24973,13 @@ impl Iterator for ArborescenceIteratorState {
             return None;
         }
 
-        while let Some(entry) = self.heap.pop() {
-            let Some((_weight, arb_edges)) =
-                find_arborescence(&self.digraph, &entry.partition, self.minimum, &self.weight_attr)
-            else {
+        while let Some(entry) = partition_heap_pop(&mut self.heap) {
+            let Some((_weight, arb_edges)) = find_arborescence(
+                &self.digraph,
+                &entry.partition,
+                self.minimum,
+                &self.weight_attr,
+            ) else {
                 continue;
             };
 
@@ -24719,13 +24998,16 @@ impl Iterator for ArborescenceIteratorState {
                 p1.insert(key.clone(), PartitionState::Excluded);
                 p2.insert(key.clone(), PartitionState::Included);
 
-                if let Some((p1_weight, _)) = find_arborescence(&self.digraph, &p1, self.minimum, &self.weight_attr) {
-                    self.heap.push(QueueEntry {
-                        weight: if self.minimum { p1_weight } else { -p1_weight },
-                        sequence: self.seq,
-                        partition: p1.clone(),
-                    });
-                    self.seq += 1;
+                if let Some((p1_weight, _)) =
+                    find_arborescence(&self.digraph, &p1, self.minimum, &self.weight_attr)
+                {
+                    partition_heap_push(
+                        &mut self.heap,
+                        QueueEntry {
+                            weight: if self.minimum { p1_weight } else { -p1_weight },
+                            partition: p1.clone(),
+                        },
+                    );
                 }
 
                 p1 = p2.clone();
@@ -24743,6 +25025,17 @@ pub fn arborescence_iterator_ordered(
     minimum: bool,
     max_count: usize,
 ) -> Vec<DiGraph> {
+    arborescence_iterator_ordered_with_partition(digraph, weight_attr, minimum, max_count, &[], &[])
+}
+
+pub fn arborescence_iterator_ordered_with_partition(
+    digraph: &DiGraph,
+    weight_attr: &str,
+    minimum: bool,
+    max_count: usize,
+    included_edges: &[(String, String)],
+    excluded_edges: &[(String, String)],
+) -> Vec<DiGraph> {
     let nodes = digraph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -24757,6 +25050,31 @@ pub fn arborescence_iterator_ordered(
     let mode = digraph.mode();
     let mut enumerated: Vec<(f64, Vec<(String, String)>)> = Vec::new();
     let mut seen: HashSet<Vec<(String, String)>> = HashSet::new();
+    let graph_edges: HashSet<(String, String)> = digraph
+        .edges_ordered()
+        .iter()
+        .map(|edge| (edge.left.clone(), edge.right.clone()))
+        .collect();
+    let excluded: HashSet<(String, String)> = excluded_edges
+        .iter()
+        .filter(|edge| graph_edges.contains(*edge))
+        .cloned()
+        .collect();
+    let mut included_by_target: BTreeMap<String, String> = BTreeMap::new();
+    for (source, target) in included_edges {
+        let edge = (source.clone(), target.clone());
+        if excluded.contains(&edge) || !graph_edges.contains(&edge) {
+            continue;
+        }
+        included_by_target
+            .entry(target.clone())
+            .and_modify(|chosen| {
+                if source < chosen {
+                    *chosen = source.clone();
+                }
+            })
+            .or_insert_with(|| source.clone());
+    }
 
     fn reaches_root(
         node: &str,
@@ -24803,6 +25121,7 @@ pub fn arborescence_iterator_ordered(
         idx: usize,
         targets: &[String],
         incoming: &HashMap<String, Vec<(String, f64)>>,
+        included_by_target: &BTreeMap<String, String>,
         root: &str,
         parent: &mut HashMap<String, String>,
         chosen_edges: &mut Vec<(String, String)>,
@@ -24843,6 +25162,11 @@ pub fn arborescence_iterator_ordered(
             return;
         };
         for (source, _weight) in candidates {
+            if let Some(required_source) = included_by_target.get(target)
+                && source != required_source
+            {
+                continue;
+            }
             if would_create_cycle(source, target, root, parent) {
                 continue;
             }
@@ -24852,6 +25176,7 @@ pub fn arborescence_iterator_ordered(
                 idx + 1,
                 targets,
                 incoming,
+                included_by_target,
                 root,
                 parent,
                 chosen_edges,
@@ -24866,6 +25191,9 @@ pub fn arborescence_iterator_ordered(
     }
 
     for &root in &nodes {
+        if included_by_target.contains_key(root) {
+            continue;
+        }
         let targets: Vec<String> = nodes
             .iter()
             .filter(|&&node| node != root)
@@ -24877,7 +25205,10 @@ pub fn arborescence_iterator_ordered(
             let candidates: Vec<(String, f64)> = digraph
                 .edges_ordered()
                 .iter()
-                .filter(|edge| edge.right == *target)
+                .filter(|edge| {
+                    edge.right == *target
+                        && !excluded.contains(&(edge.left.clone(), edge.right.clone()))
+                })
                 .map(|edge| {
                     (
                         edge.left.clone(),
@@ -24904,6 +25235,7 @@ pub fn arborescence_iterator_ordered(
             0,
             &targets,
             &incoming,
+            &included_by_target,
             root,
             &mut parent,
             &mut chosen_edges,
@@ -24931,8 +25263,6 @@ pub fn arborescence_iterator_ordered(
         })
         .collect()
 }
-
-
 
 // ---------------------------------------------------------------------------
 // k-clique communities (clique percolation method)
@@ -25103,7 +25433,8 @@ pub fn edge_current_flow_betweenness_centrality(
             for edge in graph.edges_ordered() {
                 let i = idx[edge.left.as_str()];
                 let j = idx[edge.right.as_str()];
-                let flow = (l_pinv[i * n + s] - l_pinv[i * n + t]
+                let flow = (l_pinv[i * n + s]
+                    - l_pinv[i * n + t]
                     - (l_pinv[j * n + s] - l_pinv[j * n + t]))
                     .abs();
                 let key = canonical_contracted_edge_key(&edge.left, &edge.right);
@@ -25304,11 +25635,7 @@ pub fn simrank_similarity_directed(
 ///
 /// Returns a flat n×n matrix in row-major order, along with the node list.
 /// S is the row-stochastic transition matrix (dangling nodes get uniform 1/n).
-pub fn google_matrix(
-    graph: &Graph,
-    alpha: f64,
-    weight_attr: &str,
-) -> (Vec<f64>, Vec<String>) {
+pub fn google_matrix(graph: &Graph, alpha: f64, weight_attr: &str) -> (Vec<f64>, Vec<String>) {
     let nodes = graph.nodes_ordered();
     let n = nodes.len();
     if n == 0 {
@@ -25459,7 +25786,11 @@ pub fn second_order_centrality(graph: &Graph) -> HashMap<String, f64> {
                 *v /= sum;
             }
         }
-        let diff: f64 = pi.iter().zip(new_pi.iter()).map(|(a, b)| (a - b).abs()).sum();
+        let diff: f64 = pi
+            .iter()
+            .zip(new_pi.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
         pi = new_pi;
         if diff < 1e-12 {
             break;
@@ -26709,6 +27040,7 @@ mod tests {
         closeness_centrality,
         clustering_coefficient,
         common_neighbors,
+        communicability_betweenness_centrality,
         complement,
         complement_directed,
         complement_graph,
@@ -26721,6 +27053,7 @@ mod tests {
         constraint,
         could_be_isomorphic,
         cubical_graph,
+        current_flow_betweenness_centrality,
         // Boundary
         cut_size,
         cut_size_directed,
@@ -26753,6 +27086,7 @@ mod tests {
         edge_boundary,
         edge_boundary_directed,
         edge_connectivity_edmonds_karp,
+        edge_current_flow_betweenness_centrality,
         edge_dfs,
         edge_dfs_directed,
         edge_disjoint_paths,
@@ -26791,6 +27125,7 @@ mod tests {
         global_minimum_edge_cut_edmonds_karp,
         global_reaching_centrality,
         global_reaching_centrality_directed,
+        google_matrix,
         graph_compose,
         graph_difference,
         graph_info,
@@ -26868,6 +27203,7 @@ mod tests {
         isolates,
         isolates_directed,
         jaccard_coefficient,
+        k_clique_communities,
         katz_centrality,
         kneser_graph,
         kosaraju_strongly_connected_components,
@@ -26952,6 +27288,7 @@ mod tests {
         ring_of_cliques,
         s_metric,
         schultz_index,
+        second_order_centrality,
         sedgewick_maze_graph,
         selfloop_edges,
         shortest_path_unweighted,
@@ -26959,6 +27296,9 @@ mod tests {
         shortest_simple_paths,
         // Cycle detection
         simple_cycles,
+        // SimRank, Google matrix, second-order centrality, communicability/current-flow betweenness
+        simrank_similarity,
+        simrank_similarity_pair,
         single_source_bellman_ford,
         single_source_bellman_ford_path,
         single_source_bellman_ford_path_length,
@@ -26974,15 +27314,6 @@ mod tests {
         spanning_tree_iterator,
         spanning_tree_iterator_ordered,
         stochastic_block_model,
-        // SimRank, Google matrix, second-order centrality, communicability/current-flow betweenness
-        simrank_similarity,
-        simrank_similarity_pair,
-        google_matrix,
-        second_order_centrality,
-        communicability_betweenness_centrality,
-        current_flow_betweenness_centrality,
-        k_clique_communities,
-        edge_current_flow_betweenness_centrality,
         // New algorithms (March 2026)
         stoer_wagner,
         strongly_connected_components,
@@ -34243,6 +34574,56 @@ mod tests {
         assert!((result.total_weight - 4.0).abs() <= TEST_TOLERANCE);
     }
 
+    #[test]
+    fn test_complete_digraph_k4_branching_and_arborescences_match_networkx_tie_break() {
+        let mut g = DiGraph::strict();
+        for source in 0..4 {
+            for target in 0..4 {
+                if source == target {
+                    continue;
+                }
+                g.add_edge_with_attrs(
+                    source.to_string(),
+                    target.to_string(),
+                    attrs([("weight", "1")]),
+                )
+                .expect("edge add should succeed");
+            }
+        }
+
+        let expected = vec![
+            BranchingEdge {
+                left: "0".to_owned(),
+                right: "1".to_owned(),
+                weight: 1.0,
+            },
+            BranchingEdge {
+                left: "0".to_owned(),
+                right: "2".to_owned(),
+                weight: 1.0,
+            },
+            BranchingEdge {
+                left: "2".to_owned(),
+                right: "3".to_owned(),
+                weight: 1.0,
+            },
+        ];
+
+        assert_eq!(maximum_branching(&g, "weight", 1.0).edges, expected);
+        assert_eq!(
+            maximum_spanning_arborescence(&g, "weight", 1.0)
+                .expect("arborescence should exist")
+                .edges,
+            expected
+        );
+        assert_eq!(
+            minimum_spanning_arborescence(&g, "weight", 1.0)
+                .expect("arborescence should exist")
+                .edges,
+            expected
+        );
+    }
+
     // -----------------------------------------------------------------------
     // simple_cycles tests
     // -----------------------------------------------------------------------
@@ -37377,7 +37758,9 @@ mod tests {
     #[test]
     fn test_simrank_similarity_triangle() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c"); let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "c");
         let result = simrank_similarity(&g, 0.9, 100, 1e-4);
         // Self-similarity = 1.0
         assert!((result["a"]["a"] - 1.0).abs() < 1e-6);
@@ -37394,7 +37777,8 @@ mod tests {
     #[test]
     fn test_simrank_pair() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
         let val = simrank_similarity_pair(&g, "a", "c", 0.9, 100, 1e-4);
         // a and c are connected through b, so some positive similarity
         assert!(val >= 0.0);
@@ -37403,13 +37787,14 @@ mod tests {
     #[test]
     fn test_google_matrix_basic() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
         let (mat, nodes) = google_matrix(&g, 0.85, "weight");
         assert_eq!(nodes.len(), 3);
         let n = nodes.len();
         // Each row should sum to 1.0 (stochastic)
         for i in 0..n {
-            let row_sum: f64 = mat[i*n..(i+1)*n].iter().sum();
+            let row_sum: f64 = mat[i * n..(i + 1) * n].iter().sum();
             assert!((row_sum - 1.0).abs() < 1e-10, "row {i} sums to {row_sum}");
         }
     }
@@ -37417,7 +37802,8 @@ mod tests {
     #[test]
     fn test_second_order_centrality_path() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
         let soc = second_order_centrality(&g);
         assert_eq!(soc.len(), 3);
         // All values should be finite non-negative
@@ -37429,7 +37815,9 @@ mod tests {
     #[test]
     fn test_communicability_betweenness_triangle() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c"); let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "c");
         let cbc = communicability_betweenness_centrality(&g, true);
         assert_eq!(cbc.len(), 3);
         // In a triangle, all nodes are equivalent
@@ -37441,7 +37829,8 @@ mod tests {
     #[test]
     fn test_current_flow_betweenness_path() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
         let cfbc = current_flow_betweenness_centrality(&g, true, "weight");
         assert_eq!(cfbc.len(), 3);
         // Node b should have highest betweenness (it's the bridge)
@@ -37453,7 +37842,9 @@ mod tests {
     fn test_k_clique_communities_triangle() {
         // A triangle is a single 3-clique, so k=3 should yield one community
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c"); let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "c");
         let communities = k_clique_communities(&g, 3);
         assert_eq!(communities.len(), 1);
         assert_eq!(communities[0].len(), 3);
@@ -37464,8 +37855,11 @@ mod tests {
         // Two triangles sharing edge b-c: a-b-c and b-c-d
         // k=3: two 3-cliques that share 2 nodes → single community
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c"); let _ = g.add_edge("a", "c");
-        let _ = g.add_edge("b", "d"); let _ = g.add_edge("c", "d");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "c");
+        let _ = g.add_edge("b", "d");
+        let _ = g.add_edge("c", "d");
         let communities = k_clique_communities(&g, 3);
         assert_eq!(communities.len(), 1);
         assert_eq!(communities[0].len(), 4); // a, b, c, d all in one community
@@ -37474,7 +37868,8 @@ mod tests {
     #[test]
     fn test_k_clique_communities_no_cliques() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
         // Path graph: no 3-cliques
         let communities = k_clique_communities(&g, 3);
         assert!(communities.is_empty());
@@ -37483,7 +37878,8 @@ mod tests {
     #[test]
     fn test_edge_current_flow_betweenness_path() {
         let mut g = Graph::strict();
-        let _ = g.add_edge("a", "b"); let _ = g.add_edge("b", "c");
+        let _ = g.add_edge("a", "b");
+        let _ = g.add_edge("b", "c");
         let ebc = edge_current_flow_betweenness_centrality(&g, true, "weight");
         assert_eq!(ebc.len(), 2); // 2 edges
         // Both edges should have some betweenness

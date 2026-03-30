@@ -132,7 +132,7 @@ class ArborescenceIterator:
     minimum : bool, default True
         If True, yield arborescences in increasing weight order.
     init_partition : tuple, optional
-        ``(included_edges, excluded_edges)`` — not yet supported.
+        ``(included_edges, excluded_edges)`` to constrain the enumeration.
     """
 
     def __init__(self, G, weight="weight", minimum=True, init_partition=None):
@@ -144,21 +144,18 @@ class ArborescenceIterator:
 
     def __iter__(self):
         from franken_networkx._fnx import arborescence_iterator_rust
-        from franken_networkx._fnx import NetworkXNotImplemented
         from franken_networkx._fnx import NetworkXPointlessConcept
 
-        if self.init_partition is not None:
-            raise NetworkXNotImplemented(
-                "ArborescenceIterator does not yet support init_partition",
-            )
         if not self.G.is_directed():
+            from franken_networkx._fnx import NetworkXNotImplemented
             raise NetworkXNotImplemented("not implemented for undirected type")
         if self.G.is_multigraph():
+            from franken_networkx._fnx import NetworkXNotImplemented
             raise NetworkXNotImplemented("not implemented for multigraph type")
         if self.G.number_of_nodes() == 0:
             raise NetworkXPointlessConcept("G has no nodes.")
         self._iterator = arborescence_iterator_rust(
-            self.G, self.weight, self.minimum, sys.maxsize,
+            self.G, self.weight, self.minimum, sys.maxsize, self.init_partition,
         )
         return self
 
