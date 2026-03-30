@@ -5790,6 +5790,7 @@ struct EdmondsEdgeRecord {
     target: String,
     weight: f64,
     is_candidate: bool,
+    partition: PartitionState,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -5989,6 +5990,7 @@ struct DirectedWeightedKeyEdge {
     source: String,
     target: String,
     weight: f64,
+    partition: PartitionState,
 }
 
 fn edmonds_find_desired_edge(graph: &EdmondsMultiDiGraph, node: &str) -> Option<(usize, f64)> {
@@ -5996,6 +5998,11 @@ fn edmonds_find_desired_edge(graph: &EdmondsMultiDiGraph, node: &str) -> Option<
     let mut max_weight = f64::NEG_INFINITY;
     for edge_key in graph.in_edge_keys(node) {
         let edge = graph.edge(edge_key)?;
+        match edge.partition {
+            PartitionState::Excluded => continue,
+            PartitionState::Included => return Some((edge_key, edge.weight)),
+            PartitionState::Open => {}
+        }
         if edge.weight > max_weight {
             max_weight = edge.weight;
             desired_key = Some(edge_key);
@@ -6093,6 +6100,7 @@ fn edmonds_exact_maximum_branching_keys(
                 target: edge.target.clone(),
                 weight: edge.weight,
                 is_candidate: false,
+                partition: edge.partition,
             },
         );
     }
@@ -6149,6 +6157,7 @@ fn edmonds_exact_maximum_branching_keys(
                 target: target.clone(),
                 weight: desired_weight,
                 is_candidate: false,
+                partition: desired_edge.partition,
             },
         );
         if let Some(edge) = graph.edge_index.get_mut(&desired_key) {
@@ -6173,6 +6182,9 @@ fn edmonds_exact_maximum_branching_keys(
                 .edge(*edge_key)
                 .expect("cycle edge should exist in branching");
             cycle_incoming_weight.insert(edge.target.clone(), edge.weight);
+            if matches!(edge.partition, PartitionState::Included) {
+                continue;
+            }
             if edge.weight < minweight {
                 minweight = edge.weight;
                 minedge = Some(*edge_key);
@@ -6206,6 +6218,7 @@ fn edmonds_exact_maximum_branching_keys(
                             target: edge.target,
                             weight: edge.weight,
                             is_candidate: edge.is_candidate,
+                            partition: edge.partition,
                         },
                     ));
                 }
@@ -6222,6 +6235,7 @@ fn edmonds_exact_maximum_branching_keys(
                             target: new_node.clone(),
                             weight: adjusted,
                             is_candidate: edge.is_candidate,
+                            partition: edge.partition,
                         },
                     ));
                 }
@@ -6246,6 +6260,7 @@ fn edmonds_exact_maximum_branching_keys(
                         target: edge.target.clone(),
                         weight: edge.weight,
                         is_candidate: false,
+                        partition: edge.partition,
                     },
                 );
                 uf.union(&edge.source, &edge.target);
@@ -6326,6 +6341,36 @@ fn collect_directed_branching_edges_with_keys(
                 weight_attr,
                 default_weight,
             ),
+            partition: PartitionState::Open,
+        })
+        .collect()
+}
+
+fn collect_directed_branching_edges_with_partition(
+    digraph: &DiGraph,
+    weight_attr: &str,
+    default_weight: f64,
+    partition: &PartitionDict,
+) -> Vec<DirectedWeightedKeyEdge> {
+    digraph
+        .edges_ordered()
+        .into_iter()
+        .enumerate()
+        .map(|(key, edge)| DirectedWeightedKeyEdge {
+            key,
+            source: edge.left.clone(),
+            target: edge.right.clone(),
+            weight: directed_edge_weight_with_default(
+                digraph,
+                &edge.left,
+                &edge.right,
+                weight_attr,
+                default_weight,
+            ),
+            partition: partition
+                .get(&(edge.left.clone(), edge.right.clone()))
+                .copied()
+                .unwrap_or(PartitionState::Open),
         })
         .collect()
 }
@@ -6363,6 +6408,162 @@ fn build_branching_digraph(
         let _ = graph.add_edge(edge.left.clone(), edge.right.clone());
     }
     graph
+}
+
+fn normalize_arborescence_partition(
+    digraph: &DiGraph,
+    partition: &PartitionDict,
+) -> Option<PartitionDict> {
+    let mut effective = partition.clone();
+    for node in digraph.nodes_ordered() {
+        let incoming = digraph
+            .edges_ordered()
+            .into_iter()
+            .filter(|edge| edge.right == node)
+            .map(|edge| (edge.left.clone(), edge.right.clone()))
+            .collect::<Vec<_>>();
+        let included_count = incoming
+            .iter()
+            .filter(|edge| matches!(effective.get(*edge), Some(PartitionState::Included)))
+            .count();
+        let excluded_count = incoming
+            .iter()
+            .filter(|edge| matches!(effective.get(*edge), Some(PartitionState::Excluded)))
+            .count();
+
+        if included_count == 1 && excluded_count != incoming.len().saturating_sub(1) {
+            for edge in incoming {
+                if !matches!(effective.get(&edge), Some(PartitionState::Included)) {
+                    effective.insert(edge, PartitionState::Excluded);
+                }
+            }
+        }
+    }
+
+    Some(effective)
+}
+
+fn included_partition_has_directed_cycle(partition: &PartitionDict) -> bool {
+    let mut successors = HashMap::<String, String>::new();
+    for ((source, target), state) in partition {
+        if matches!(state, PartitionState::Included) {
+            successors.insert(source.clone(), target.clone());
+        }
+    }
+
+    let mut visited = HashSet::<String>::new();
+    let mut active = HashSet::<String>::new();
+    for node in successors.keys() {
+        if visited.contains(node) {
+            continue;
+        }
+        let mut current = node.clone();
+        loop {
+            if active.contains(&current) {
+                return true;
+            }
+            if !visited.insert(current.clone()) {
+                break;
+            }
+            active.insert(current.clone());
+            let Some(next) = successors.get(&current).cloned() else {
+                break;
+            };
+            current = next;
+        }
+        active.clear();
+    }
+    false
+}
+
+fn spanning_arborescence_with_partition(
+    digraph: &DiGraph,
+    weight_attr: &str,
+    default_weight: f64,
+    partition: &PartitionDict,
+    minimum: bool,
+) -> Option<BranchingResult> {
+    if digraph.node_count() == 0 {
+        return None;
+    }
+
+    let partition = normalize_arborescence_partition(digraph, partition)?;
+    if included_partition_has_directed_cycle(&partition) {
+        return None;
+    }
+    let nodes = digraph
+        .nodes_ordered()
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let directed_edges = collect_directed_branching_edges_with_partition(
+        digraph,
+        weight_attr,
+        default_weight,
+        &partition,
+    );
+    if directed_edges.is_empty() && nodes.len() > 1 {
+        return None;
+    }
+
+    let transformed_edges = if minimum {
+        let max_weight = directed_edges
+            .iter()
+            .map(|edge| edge.weight)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min_weight = directed_edges
+            .iter()
+            .map(|edge| edge.weight)
+            .fold(f64::INFINITY, f64::min);
+        directed_edges
+            .iter()
+            .map(|edge| DirectedWeightedKeyEdge {
+                key: edge.key,
+                source: edge.source.clone(),
+                target: edge.target.clone(),
+                weight: max_weight + 1.0 + (max_weight - min_weight) - edge.weight,
+                partition: edge.partition,
+            })
+            .collect::<Vec<_>>()
+    } else {
+        let min_weight = directed_edges
+            .iter()
+            .map(|edge| edge.weight)
+            .fold(f64::INFINITY, f64::min);
+        let max_weight = directed_edges
+            .iter()
+            .map(|edge| edge.weight)
+            .fold(f64::NEG_INFINITY, f64::max);
+        directed_edges
+            .iter()
+            .map(|edge| DirectedWeightedKeyEdge {
+                key: edge.key,
+                source: edge.source.clone(),
+                target: edge.target.clone(),
+                weight: edge.weight - min_weight + 1.0 - (min_weight - max_weight),
+                partition: edge.partition,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
+        .into_iter()
+        .filter_map(|edge_key| directed_edges.get(edge_key))
+        .map(|edge| BranchingEdge {
+            left: edge.source.clone(),
+            right: edge.target.clone(),
+            weight: edge.weight,
+        })
+        .collect::<Vec<_>>();
+    sort_branching_edges(&mut edges);
+    let algorithm = if minimum {
+        "chu_liu_edmonds_minimum_spanning_arborescence"
+    } else {
+        "chu_liu_edmonds_maximum_spanning_arborescence"
+    };
+    let result = branching_result(algorithm, nodes.len(), directed_edges.len(), edges);
+    let arborescence = build_branching_digraph(&nodes, &result.edges, digraph.mode());
+    is_arborescence(&arborescence).then_some(result)
 }
 
 /// Return a maximum branching of a directed graph.
@@ -6426,6 +6627,7 @@ pub fn minimum_branching(
             source: edge.source.clone(),
             target: edge.target.clone(),
             weight: -edge.weight,
+            partition: edge.partition,
         })
         .collect::<Vec<_>>();
     let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
@@ -6478,6 +6680,7 @@ pub fn maximum_spanning_arborescence(
             source: edge.source.clone(),
             target: edge.target.clone(),
             weight: edge.weight - min_weight + 1.0 - (min_weight - max_weight),
+            partition: edge.partition,
         })
         .collect::<Vec<_>>();
     let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
@@ -6533,6 +6736,7 @@ pub fn minimum_spanning_arborescence(
             source: edge.source.clone(),
             target: edge.target.clone(),
             weight: max_weight + 1.0 + (max_weight - min_weight) - edge.weight,
+            partition: edge.partition,
         })
         .collect::<Vec<_>>();
     let mut edges = edmonds_exact_maximum_branching_keys(&nodes, &transformed_edges)
@@ -19164,38 +19368,47 @@ pub fn edge_dfs(graph: &Graph, source: &str) -> Vec<(String, String)> {
     let mut result = Vec::new();
     let mut visited_edges: HashSet<(String, String)> = HashSet::new();
     let mut visited_nodes: HashSet<String> = HashSet::new();
-    let mut stack: Vec<(String, Option<String>)> = vec![(source.to_string(), None)];
-    visited_nodes.insert(source.to_string());
 
-    while let Some((u, parent)) = stack.pop() {
-        if let Some(p) = &parent {
-            let edge_key = if p < &u {
-                (p.clone(), u.clone())
+    let mut stack = Vec::new();
+    let u = source.to_string();
+    visited_nodes.insert(u.clone());
+    let nbrs = graph
+        .neighbors(&u)
+        .unwrap_or_default()
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>();
+    stack.push((u, nbrs, 0));
+
+    while let Some((u, nbrs, mut idx)) = stack.pop() {
+        let mut pushed = false;
+        while idx < nbrs.len() {
+            let v = nbrs[idx].clone();
+            idx += 1;
+
+            let edge_key = if u < v {
+                (u.clone(), v.clone())
             } else {
-                (u.clone(), p.clone())
+                (v.clone(), u.clone())
             };
             if visited_edges.insert(edge_key) {
-                result.push((p.clone(), u.clone()));
-            }
-        }
-        if let Some(neighbors) = graph.neighbors_iter(&u) {
-            for v in neighbors {
-                let edge_key = if u.as_str() < v {
-                    (u.clone(), v.to_string())
-                } else {
-                    (v.to_string(), u.clone())
-                };
-                if !visited_edges.contains(&edge_key) {
-                    if visited_nodes.insert(v.to_string()) {
-                        stack.push((v.to_string(), Some(u.clone())));
-                    } else {
-                        // Non-tree edge
-                        if visited_edges.insert(edge_key) {
-                            result.push((u.clone(), v.to_string()));
-                        }
-                    }
+                result.push((u.clone(), v.clone()));
+                if visited_nodes.insert(v.clone()) {
+                    stack.push((u.clone(), nbrs, idx));
+                    let v_nbrs = graph
+                        .neighbors(&v)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(String::from)
+                        .collect::<Vec<_>>();
+                    stack.push((v, v_nbrs, 0));
+                    pushed = true;
+                    break;
                 }
             }
+        }
+        if !pushed {
+            // Drop
         }
     }
     result
@@ -19207,29 +19420,43 @@ pub fn edge_dfs_directed(digraph: &DiGraph, source: &str) -> Vec<(String, String
     let mut result = Vec::new();
     let mut visited_edges: HashSet<(String, String)> = HashSet::new();
     let mut visited_nodes: HashSet<String> = HashSet::new();
-    let mut stack: Vec<(String, Option<String>)> = vec![(source.to_string(), None)];
-    visited_nodes.insert(source.to_string());
 
-    while let Some((u, parent)) = stack.pop() {
-        if let Some(p) = &parent {
-            let edge_key = (p.clone(), u.clone());
+    let mut stack = Vec::new();
+    let u = source.to_string();
+    visited_nodes.insert(u.clone());
+    let succs = digraph
+        .successors(&u)
+        .unwrap_or_default()
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>();
+    stack.push((u, succs, 0));
+
+    while let Some((u, succs, mut idx)) = stack.pop() {
+        let mut pushed = false;
+        while idx < succs.len() {
+            let v = succs[idx].clone();
+            idx += 1;
+
+            let edge_key = (u.clone(), v.clone());
             if visited_edges.insert(edge_key) {
-                result.push((p.clone(), u.clone()));
-            }
-        }
-        if let Some(succs) = digraph.successors(&u) {
-            for v in &succs {
-                let edge_key = (u.clone(), v.to_string());
-                if !visited_edges.contains(&edge_key) {
-                    if visited_nodes.insert(v.to_string()) {
-                        stack.push((v.to_string(), Some(u.clone())));
-                    } else {
-                        if visited_edges.insert(edge_key) {
-                            result.push((u.clone(), v.to_string()));
-                        }
-                    }
+                result.push((u.clone(), v.clone()));
+                if visited_nodes.insert(v.clone()) {
+                    stack.push((u.clone(), succs, idx));
+                    let v_succs = digraph
+                        .successors(&v)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(String::from)
+                        .collect::<Vec<_>>();
+                    stack.push((v, v_succs, 0));
+                    pushed = true;
+                    break;
                 }
             }
+        }
+        if !pushed {
+            // Drop
         }
     }
     result
@@ -24443,11 +24670,12 @@ pub(crate) type PartitionDict = std::collections::HashMap<(String, String), Part
 #[derive(Clone)]
 pub(crate) struct QueueEntry {
     pub(crate) weight: f64,
+    pub(crate) ordinal: usize,
     pub(crate) partition: PartitionDict,
 }
 
 fn queue_entry_lt(left: &QueueEntry, right: &QueueEntry) -> bool {
-    left.weight < right.weight
+    left.weight < right.weight || (left.weight == right.weight && left.ordinal < right.ordinal)
 }
 
 fn partition_heap_push(heap: &mut Vec<QueueEntry>, entry: QueueEntry) {
@@ -24585,6 +24813,7 @@ pub struct SpanningTreeIteratorState {
     weight_attr: String,
     minimum: bool,
     heap: Vec<QueueEntry>,
+    next_ordinal: usize,
     nodes: Vec<String>,
     mode: fnx_runtime::CompatibilityMode,
     is_connected: bool,
@@ -24619,6 +24848,7 @@ impl SpanningTreeIteratorState {
                     &mut heap,
                     QueueEntry {
                         weight: if minimum { init_weight } else { -init_weight },
+                        ordinal: 0,
                         partition: empty_partition,
                     },
                 );
@@ -24630,6 +24860,7 @@ impl SpanningTreeIteratorState {
             weight_attr: weight_attr.to_owned(),
             minimum,
             heap,
+            next_ordinal: 1,
             nodes,
             mode,
             is_connected: is_conn,
@@ -24720,9 +24951,11 @@ impl Iterator for SpanningTreeIteratorState {
                             &mut self.heap,
                             QueueEntry {
                                 weight: if self.minimum { p1_weight } else { -p1_weight },
+                                ordinal: self.next_ordinal,
                                 partition: p1.clone(),
                             },
                         );
+                        self.next_ordinal += 1;
                     }
                 }
 
@@ -24773,125 +25006,62 @@ fn find_arborescence(
     minimum: bool,
     weight_attr: &str,
 ) -> Option<(f64, Vec<(String, String)>)> {
-    let nodes = digraph.nodes_ordered();
-    let n = nodes.len();
-
-    // Apply in-degree-1 constraint: if an edge is INCLUDED to target v,
-    // all other incoming edges to v must be EXCLUDED
-    let mut effective_partition = partition.clone();
-    let mut included_targets: HashMap<String, String> = HashMap::new();
-    for ((src, tgt), state) in partition {
-        if matches!(state, PartitionState::Included) {
-            included_targets.insert(tgt.clone(), src.clone());
-        }
-    }
-    for edge in digraph.edges_ordered() {
-        if let Some(inc_src) = included_targets.get(edge.right.as_str())
-            && edge.left.as_str() != inc_src.as_str()
-        {
-            effective_partition
-                .entry((edge.left.clone(), edge.right.clone()))
-                .or_insert(PartitionState::Excluded);
-        }
-    }
-
-    // Build a filtered digraph with only non-excluded edges
-    let mut filtered = DiGraph::new(digraph.mode());
-    for &node in &nodes {
-        filtered.add_node(node.to_owned());
-    }
-    let bonus_magnitude = digraph
-        .edges_ordered()
-        .iter()
-        .filter_map(|edge| {
-            let key = (edge.left.clone(), edge.right.clone());
-            if matches!(
-                effective_partition.get(&key),
-                Some(PartitionState::Excluded)
-            ) {
-                None
-            } else {
-                Some(
-                    edge.attrs
-                        .get(weight_attr)
-                        .and_then(CgseValue::as_f64)
-                        .unwrap_or(1.0)
-                        .abs(),
-                )
-            }
-        })
-        .sum::<f64>()
-        + 1.0;
-    let mut included_edges = Vec::new();
-    for edge in digraph.edges_ordered() {
-        let key = (edge.left.clone(), edge.right.clone());
-        match effective_partition.get(&key) {
-            Some(PartitionState::Excluded) => continue,
-            Some(PartitionState::Included) => {
-                included_edges.push(key.clone());
-                let mut attrs = edge.attrs.clone();
-                let original_weight = attrs
-                    .get(weight_attr)
-                    .and_then(CgseValue::as_f64)
-                    .unwrap_or(1.0);
-                let biased_weight = if minimum {
-                    original_weight - bonus_magnitude
-                } else {
-                    original_weight + bonus_magnitude
-                };
-                attrs.insert(weight_attr.to_owned(), CgseValue::Float(biased_weight));
-                let _ = filtered.add_edge_with_attrs(edge.left.clone(), edge.right.clone(), attrs);
-            }
-            _ => {
-                let _ = filtered.add_edge_with_attrs(
-                    edge.left.clone(),
-                    edge.right.clone(),
-                    edge.attrs.clone(),
-                );
-            }
-        }
-    }
-
-    // Use spanning arborescence (not branching!) — tries all roots
-    let arb = if minimum {
-        minimum_spanning_arborescence(&filtered, weight_attr, 1.0)
-    } else {
-        maximum_spanning_arborescence(&filtered, weight_attr, 1.0)
-    };
-
-    let arb = arb?;
-
-    if arb.edges.len() != n.saturating_sub(1) {
-        return None;
-    }
-
-    // Verify all included edges are in the result
-    let result_edges: HashSet<(String, String)> = arb
-        .edges
-        .iter()
-        .map(|e| (e.left.clone(), e.right.clone()))
-        .collect();
-    for ie in &included_edges {
-        if !result_edges.contains(ie) {
-            return None;
-        }
-    }
-
+    let arb = spanning_arborescence_with_partition(digraph, weight_attr, 1.0, partition, minimum)?;
     let edges: Vec<(String, String)> = arb
         .edges
         .iter()
         .map(|e| (e.left.clone(), e.right.clone()))
         .collect();
-    let total_weight = edges
+    Some((arb.total_weight, edges))
+}
+
+fn build_initial_arborescence_partition(
+    digraph: &DiGraph,
+    included_edges: &[(String, String)],
+    excluded_edges: &[(String, String)],
+) -> PartitionDict {
+    let graph_edges: HashSet<(String, String)> = digraph
+        .edges_ordered()
         .iter()
-        .map(|(u, v)| {
-            digraph
-                .edge_attrs(u, v)
-                .and_then(|attrs| attrs.get(weight_attr).and_then(CgseValue::as_f64))
-                .unwrap_or(1.0)
-        })
-        .sum();
-    Some((total_weight, edges))
+        .map(|edge| (edge.left.clone(), edge.right.clone()))
+        .collect();
+    let excluded: HashSet<(String, String)> = excluded_edges
+        .iter()
+        .filter(|edge| graph_edges.contains(*edge))
+        .cloned()
+        .collect();
+    let mut partition = PartitionDict::new();
+    for edge in excluded {
+        partition.insert(edge, PartitionState::Excluded);
+    }
+    for edge in included_edges {
+        if graph_edges.contains(edge) && !partition.contains_key(edge) {
+            partition.insert(edge.clone(), PartitionState::Included);
+        }
+    }
+    partition
+}
+
+pub fn minimum_spanning_arborescence_with_edge_partition(
+    digraph: &DiGraph,
+    weight_attr: &str,
+    default_weight: f64,
+    included_edges: &[(String, String)],
+    excluded_edges: &[(String, String)],
+) -> Option<BranchingResult> {
+    let partition = build_initial_arborescence_partition(digraph, included_edges, excluded_edges);
+    spanning_arborescence_with_partition(digraph, weight_attr, default_weight, &partition, true)
+}
+
+pub fn maximum_spanning_arborescence_with_edge_partition(
+    digraph: &DiGraph,
+    weight_attr: &str,
+    default_weight: f64,
+    included_edges: &[(String, String)],
+    excluded_edges: &[(String, String)],
+) -> Option<BranchingResult> {
+    let partition = build_initial_arborescence_partition(digraph, included_edges, excluded_edges);
+    spanning_arborescence_with_partition(digraph, weight_attr, default_weight, &partition, false)
 }
 
 fn build_arborescence(
@@ -24914,6 +25084,7 @@ pub struct ArborescenceIteratorState {
     weight_attr: String,
     minimum: bool,
     heap: Vec<QueueEntry>,
+    next_ordinal: usize,
     nodes: Vec<String>,
     mode: fnx_runtime::CompatibilityMode,
     yielded_forest: bool,
@@ -24939,6 +25110,7 @@ impl ArborescenceIteratorState {
                     &mut heap,
                     QueueEntry {
                         weight: if minimum { init_weight } else { -init_weight },
+                        ordinal: 0,
                         partition: empty_partition,
                     },
                 );
@@ -24957,6 +25129,7 @@ impl ArborescenceIteratorState {
             weight_attr: weight_attr.to_owned(),
             minimum,
             heap,
+            next_ordinal: 1,
             nodes,
             mode,
             yielded_forest: false,
@@ -25018,9 +25191,11 @@ impl Iterator for ArborescenceIteratorState {
                         &mut self.heap,
                         QueueEntry {
                             weight: if self.minimum { p1_weight } else { -p1_weight },
+                            ordinal: self.next_ordinal,
                             partition: p1.clone(),
                         },
                     );
+                    self.next_ordinal += 1;
                 }
 
                 p1 = p2.clone();
@@ -25061,38 +25236,8 @@ pub fn arborescence_iterator_ordered_with_partition(
     }
 
     let mode = digraph.mode();
-    let graph_edges: HashSet<(String, String)> = digraph
-        .edges_ordered()
-        .iter()
-        .map(|edge| (edge.left.clone(), edge.right.clone()))
-        .collect();
-    let excluded: HashSet<(String, String)> = excluded_edges
-        .iter()
-        .filter(|edge| graph_edges.contains(*edge))
-        .cloned()
-        .collect();
-    let mut included_by_target: BTreeMap<String, String> = BTreeMap::new();
-    for (source, target) in included_edges {
-        let edge = (source.clone(), target.clone());
-        if excluded.contains(&edge) || !graph_edges.contains(&edge) {
-            continue;
-        }
-        included_by_target
-            .entry(target.clone())
-            .and_modify(|chosen| {
-                if source < chosen {
-                    *chosen = source.clone();
-                }
-            })
-            .or_insert_with(|| source.clone());
-    }
-    let mut initial_partition = PartitionDict::new();
-    for edge in &excluded {
-        initial_partition.insert(edge.clone(), PartitionState::Excluded);
-    }
-    for (target, source) in included_by_target {
-        initial_partition.insert((source, target), PartitionState::Included);
-    }
+    let initial_partition =
+        build_initial_arborescence_partition(digraph, included_edges, excluded_edges);
 
     let Some((init_weight, _)) =
         find_arborescence(digraph, &initial_partition, minimum, weight_attr)
@@ -25101,10 +25246,12 @@ pub fn arborescence_iterator_ordered_with_partition(
     };
 
     let mut heap = Vec::new();
+    let mut next_ordinal = 1usize;
     partition_heap_push(
         &mut heap,
         QueueEntry {
             weight: if minimum { init_weight } else { -init_weight },
+            ordinal: 0,
             partition: initial_partition,
         },
     );
@@ -25141,9 +25288,11 @@ pub fn arborescence_iterator_ordered_with_partition(
                     &mut heap,
                     QueueEntry {
                         weight: if minimum { p1_weight } else { -p1_weight },
+                        ordinal: next_ordinal,
                         partition: p1.clone(),
                     },
                 );
+                next_ordinal += 1;
             }
 
             p1 = p2.clone();
@@ -25151,6 +25300,146 @@ pub fn arborescence_iterator_ordered_with_partition(
     }
 
     results
+}
+
+// ---------------------------------------------------------------------------
+// Random tree via Prüfer sequence
+// ---------------------------------------------------------------------------
+
+/// Generate a uniformly random labeled tree on `n` nodes via Prüfer sequence.
+pub fn random_tree(n: usize, seed: u64) -> Graph {
+    let mut g = Graph::strict();
+    if n == 0 {
+        return g;
+    }
+    for i in 0..n {
+        let _ = g.add_node(i.to_string());
+    }
+    if n <= 1 {
+        return g;
+    }
+    if n == 2 {
+        let _ = g.add_edge("0", "1");
+        return g;
+    }
+
+    // LCG pseudo-random number generator
+    let mut rng_state = seed;
+    let mut next_rand = || -> usize {
+        rng_state = rng_state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (rng_state >> 33) as usize
+    };
+
+    let prufer: Vec<usize> = (0..n - 2).map(|_| next_rand() % n).collect();
+
+    let mut degree = vec![1usize; n];
+    for &i in &prufer {
+        degree[i] += 1;
+    }
+
+    for &i in &prufer {
+        for j in 0..n {
+            if degree[j] == 1 {
+                let _ = g.add_edge(i.to_string(), j.to_string());
+                degree[i] -= 1;
+                degree[j] -= 1;
+                break;
+            }
+        }
+    }
+
+    let last_two: Vec<usize> = (0..n).filter(|&j| degree[j] == 1).collect();
+    if last_two.len() == 2 {
+        let _ = g.add_edge(last_two[0].to_string(), last_two[1].to_string());
+    }
+
+    g
+}
+
+// ---------------------------------------------------------------------------
+// Navigable small-world graph (Kleinberg model)
+// ---------------------------------------------------------------------------
+
+/// Generate a navigable small-world graph using the Kleinberg model.
+///
+/// Creates an n×n 2D grid with local connections within Manhattan distance `p`,
+/// plus `q` random long-range directed edges per node with probability
+/// proportional to distance^(-r).
+pub fn navigable_small_world_graph(n: usize, p: usize, q: usize, r: f64, seed: u64) -> DiGraph {
+    let mut g = DiGraph::strict();
+    let total = n * n;
+
+    let mut nodes = Vec::with_capacity(total);
+    for i in 0..n {
+        for j in 0..n {
+            let name = format!("{i},{j}");
+            g.add_node(name.clone());
+            nodes.push((i, j, name));
+        }
+    }
+
+    let p_i = p as isize;
+    let ni = n as isize;
+
+    // LCG RNG
+    let mut rng_state = seed;
+    let mut next_f64 = || -> f64 {
+        rng_state = rng_state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (rng_state >> 11) as f64 / (1u64 << 53) as f64
+    };
+
+    for idx in 0..total {
+        let (i, j, ref name) = nodes[idx];
+        let ii = i as isize;
+        let ji = j as isize;
+
+        // Local connections within Manhattan distance p
+        for di in -p_i..=p_i {
+            for dj in -p_i..=p_i {
+                if di == 0 && dj == 0 {
+                    continue;
+                }
+                let ni_idx = ((ii + di).rem_euclid(ni)) as usize;
+                let nj_idx = ((ji + dj).rem_euclid(ni)) as usize;
+                let target_name = format!("{ni_idx},{nj_idx}");
+                let _ = g.add_edge(name.clone(), target_name);
+            }
+        }
+
+        // Long-range connections
+        for _ in 0..q {
+            let mut probs = Vec::with_capacity(total);
+            let mut total_prob = 0.0_f64;
+            for &(oi, oj, _) in &nodes {
+                if oi == i && oj == j {
+                    probs.push(0.0);
+                    continue;
+                }
+                let d = (oi as isize - ii).unsigned_abs() + (oj as isize - ji).unsigned_abs();
+                let prob = if d > 0 { (d as f64).powf(-r) } else { 0.0 };
+                probs.push(prob);
+                total_prob += prob;
+            }
+
+            if total_prob > 0.0 {
+                let threshold = next_f64() * total_prob;
+                let mut cum = 0.0;
+                for (k, &prob) in probs.iter().enumerate() {
+                    cum += prob;
+                    if cum >= threshold {
+                        let _ = g.add_edge(name.clone(), nodes[k].2.clone());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    g
 }
 
 // ---------------------------------------------------------------------------
@@ -27133,6 +27422,8 @@ mod tests {
         moral_graph,
         multi_source_dijkstra,
         multi_source_dijkstra_directed,
+        // Connectivity and cuts — additional
+        navigable_small_world_graph,
         negative_edge_cycle,
         node_boundary,
         node_boundary_directed,
@@ -27168,6 +27459,7 @@ mod tests {
         predecessor,
         preferential_attachment,
         quotient_graph,
+        random_tree,
         reciprocity,
         reconstruct_path,
         relabel_nodes,
@@ -27225,7 +27517,6 @@ mod tests {
         tutte_graph,
         tutte_polynomial,
         union_all,
-        // Connectivity and cuts — additional
         volume,
         voronoi_cells,
         weakly_connected_components,
@@ -37172,6 +37463,41 @@ mod tests {
     }
 
     #[test]
+    fn test_arborescence_iterator_constrained_k4_partition_matches_networkx_choice() {
+        let mut d = DiGraph::strict();
+        for u in ["a", "b", "c", "d"] {
+            for v in ["a", "b", "c", "d"] {
+                if u != v {
+                    let _ = d.add_edge_with_attrs(u, v, single_attr("weight", "1.0"));
+                }
+            }
+        }
+
+        let arbs = crate::arborescence_iterator_ordered_with_partition(
+            &d,
+            "weight",
+            true,
+            3,
+            &[("a".to_owned(), "b".to_owned())],
+            &[("a".to_owned(), "c".to_owned())],
+        );
+
+        let first_edges = arbs[0]
+            .edges_ordered()
+            .iter()
+            .map(|edge| (edge.left.clone(), edge.right.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            first_edges,
+            vec![
+                ("a".to_owned(), "b".to_owned()),
+                ("b".to_owned(), "c".to_owned()),
+                ("c".to_owned(), "d".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
     fn test_arborescence_iterator_single_node() {
         let mut d = DiGraph::strict();
         d.add_node("a".to_owned());
@@ -37775,5 +38101,33 @@ mod tests {
         for val in ebc.values() {
             assert!(*val >= 0.0 && val.is_finite());
         }
+    }
+
+    #[test]
+    fn test_random_tree_basic() {
+        let t = random_tree(10, 42);
+        assert_eq!(t.nodes_ordered().len(), 10);
+        assert_eq!(t.edge_count(), 9); // n-1 edges
+        assert!(crate::is_connected(&t).is_connected);
+    }
+
+    #[test]
+    fn test_random_tree_small() {
+        let t0 = random_tree(0, 0);
+        assert_eq!(t0.nodes_ordered().len(), 0);
+        let t1 = random_tree(1, 0);
+        assert_eq!(t1.nodes_ordered().len(), 1);
+        assert_eq!(t1.edge_count(), 0);
+        let t2 = random_tree(2, 0);
+        assert_eq!(t2.nodes_ordered().len(), 2);
+        assert_eq!(t2.edge_count(), 1);
+    }
+
+    #[test]
+    fn test_navigable_small_world_basic() {
+        let g = navigable_small_world_graph(3, 1, 1, 2.0, 42);
+        assert_eq!(g.node_count(), 9); // 3x3 grid
+        // Should have local edges + some long-range edges
+        assert!(g.edge_count() > 0);
     }
 }

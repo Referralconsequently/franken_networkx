@@ -915,6 +915,40 @@ fn extract_init_partition(
     Ok((included, excluded))
 }
 
+fn extract_edge_partition_from_attr(
+    py: Python<'_>,
+    dg: &PyDiGraph,
+    partition_attr: &str,
+) -> PyResult<(Vec<(String, String)>, Vec<(String, String)>)> {
+    let mut included = Vec::new();
+    let mut excluded = Vec::new();
+    for edge in dg.inner.edges_ordered() {
+        let key = PyDiGraph::edge_key(&edge.left, &edge.right);
+        let Some(attrs) = dg.edge_py_attrs.get(&key) else {
+            continue;
+        };
+        let attrs = attrs.bind(py);
+        let Ok(value) = attrs.get_item(partition_attr) else {
+            continue;
+        };
+        let Some(value) = value else {
+            continue;
+        };
+        let value_str = value.str()?;
+        let raw = value_str.to_str()?;
+        match raw {
+            "EdgePartition.INCLUDED" | "INCLUDED" | "Included" | "included" => {
+                included.push((edge.left.clone(), edge.right.clone()));
+            }
+            "EdgePartition.EXCLUDED" | "EXCLUDED" | "Excluded" | "excluded" => {
+                excluded.push((edge.left.clone(), edge.right.clone()));
+            }
+            _ => {}
+        }
+    }
+    Ok((included, excluded))
+}
+
 fn shuffled_spanning_edges_with_random(
     py: Python<'_>,
     inner: &fnx_classes::Graph,
@@ -1431,9 +1465,8 @@ pub fn shortest_path_length(
                 ))),
             }
         } else {
-            let result = py.allow_threads(|| {
-                fnx_algorithms::shortest_path_unweighted_directed(inner, &s, &t)
-            });
+            let result = py
+                .allow_threads(|| fnx_algorithms::shortest_path_unweighted_directed(inner, &s, &t));
             match result.path {
                 Some(path) => Ok((path.len().saturating_sub(1))
                     .into_pyobject(py)?
@@ -1562,15 +1595,19 @@ pub fn dijkstra_path(
     validate_node(&gr, &t, target)?;
 
     let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
-        py.allow_threads(|| fnx_algorithms::shortest_path_weighted_directed(
-            weighted_projection.as_ref(),
-            &s,
-            &t,
-            weight,
-        ))
+        py.allow_threads(|| {
+            fnx_algorithms::shortest_path_weighted_directed(
+                weighted_projection.as_ref(),
+                &s,
+                &t,
+                weight,
+            )
+        })
     } else {
         let weighted_projection = gr.weighted_undirected_projection(weight);
-        py.allow_threads(|| fnx_algorithms::shortest_path_weighted(weighted_projection.as_ref(), &s, &t, weight))
+        py.allow_threads(|| {
+            fnx_algorithms::shortest_path_weighted(weighted_projection.as_ref(), &s, &t, weight)
+        })
     };
     match result.path {
         Some(p) => Ok(p.iter().map(|n| gr.py_node_key(py, n)).collect()),
@@ -1601,14 +1638,18 @@ pub fn bellman_ford_path(
     validate_node(&gr, &t, target)?;
 
     let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
-        py.allow_threads(|| fnx_algorithms::bellman_ford_shortest_paths_directed(
-            weighted_projection.as_ref(),
-            &s,
-            weight,
-        ))
+        py.allow_threads(|| {
+            fnx_algorithms::bellman_ford_shortest_paths_directed(
+                weighted_projection.as_ref(),
+                &s,
+                weight,
+            )
+        })
     } else {
         let weighted_projection = gr.weighted_undirected_projection(weight);
-        py.allow_threads(|| fnx_algorithms::bellman_ford_shortest_paths(weighted_projection.as_ref(), &s, weight))
+        py.allow_threads(|| {
+            fnx_algorithms::bellman_ford_shortest_paths(weighted_projection.as_ref(), &s, weight)
+        })
     };
     if result.negative_cycle_detected {
         return Err(crate::NetworkXUnbounded::new_err(
@@ -1673,14 +1714,22 @@ pub fn multi_source_dijkstra(
     let source_refs: Vec<&str> = source_strs.iter().map(String::as_str).collect();
 
     let result = if let Some(weighted_projection) = gr.weighted_digraph_projection(weight) {
-        fnx_algorithms::multi_source_dijkstra_directed(
-            weighted_projection.as_ref(),
-            &source_refs,
-            weight,
-        )
+        py.allow_threads(|| {
+            fnx_algorithms::multi_source_dijkstra_directed(
+                weighted_projection.as_ref(),
+                &source_refs,
+                weight,
+            )
+        })
     } else {
         let weighted_projection = gr.weighted_undirected_projection(weight);
-        fnx_algorithms::multi_source_dijkstra(weighted_projection.as_ref(), &source_refs, weight)
+        py.allow_threads(|| {
+            fnx_algorithms::multi_source_dijkstra(
+                weighted_projection.as_ref(),
+                &source_refs,
+                weight,
+            )
+        })
     };
 
     let dist_dict = PyDict::new(py);
@@ -1866,13 +1915,13 @@ pub fn minimum_node_cut(
     }
     let result = if gr.is_directed() {
         let dg = gr.digraph().expect("is_directed checked above");
-        if !fnx_algorithms::is_weakly_connected(dg) {
+        if !py.allow_threads(|| fnx_algorithms::is_weakly_connected(dg)) {
             return Err(NetworkXError::new_err("Input graph is not connected"));
         }
         py.allow_threads(|| fnx_algorithms::global_minimum_node_cut_directed(dg))
     } else {
         let inner = gr.undirected();
-        if !fnx_algorithms::is_connected(inner).is_connected {
+        if !py.allow_threads(|| fnx_algorithms::is_connected(inner).is_connected) {
             return Err(NetworkXError::new_err("Input graph is not connected"));
         }
         py.allow_threads(|| fnx_algorithms::global_minimum_node_cut(inner))
@@ -2133,7 +2182,11 @@ pub fn eigenvector_centrality(
     nstart: Option<Bound<'_, PyAny>>,
     weight: Option<&str>,
 ) -> PyResult<Py<PyDict>> {
-    if max_iter != 100 || (tol - 1.0e-6).abs() > f64::EPSILON || nstart.is_some() || weight.is_some_and(|w| w != "weight") {
+    if max_iter != 100
+        || (tol - 1.0e-6).abs() > f64::EPSILON
+        || nstart.is_some()
+        || weight.is_some_and(|w| w != "weight")
+    {
         return Err(crate::NetworkXNotImplemented::new_err(
             "franken_networkx currently only supports default parameters for eigenvector_centrality",
         ));
@@ -2186,7 +2239,11 @@ pub fn pagerank(
     weight: Option<&str>,
     dangling: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyDict>> {
-    if personalization.is_some() || nstart.is_some() || dangling.is_some() || weight.is_some_and(|w| w != "weight") {
+    if personalization.is_some()
+        || nstart.is_some()
+        || dangling.is_some()
+        || weight.is_some_and(|w| w != "weight")
+    {
         return Err(crate::NetworkXNotImplemented::new_err(
             "franken_networkx currently only supports default parameters for pagerank",
         ));
@@ -3277,11 +3334,6 @@ pub fn maximum_spanning_arborescence(
     preserve_attrs: bool,
     partition: Option<&str>,
 ) -> PyResult<PyDiGraph> {
-    if partition.is_some() {
-        return Err(crate::NetworkXNotImplemented::new_err(
-            "edge partition constraints are not implemented for maximum_spanning_arborescence.",
-        ));
-    }
     let gr = extract_graph(g)?;
     if let GraphRef::Directed { dg, .. } = &gr {
         if dg.inner.node_count() == 0 {
@@ -3289,8 +3341,22 @@ pub fn maximum_spanning_arborescence(
         }
         let inner = &dg.inner;
         let attr_name = attr.to_owned();
+        let (included_edges, excluded_edges) = match partition {
+            Some(partition_attr) => extract_edge_partition_from_attr(py, dg, partition_attr)?,
+            None => (Vec::new(), Vec::new()),
+        };
         let result = py.allow_threads(move || {
-            fnx_algorithms::maximum_spanning_arborescence(inner, &attr_name, default)
+            if included_edges.is_empty() && excluded_edges.is_empty() {
+                fnx_algorithms::maximum_spanning_arborescence(inner, &attr_name, default)
+            } else {
+                fnx_algorithms::maximum_spanning_arborescence_with_edge_partition(
+                    inner,
+                    &attr_name,
+                    default,
+                    &included_edges,
+                    &excluded_edges,
+                )
+            }
         });
         let result = result
             .ok_or_else(|| NetworkXError::new_err("No maximum spanning arborescence in G."))?;
@@ -3313,11 +3379,6 @@ pub fn minimum_spanning_arborescence(
     preserve_attrs: bool,
     partition: Option<&str>,
 ) -> PyResult<PyDiGraph> {
-    if partition.is_some() {
-        return Err(crate::NetworkXNotImplemented::new_err(
-            "edge partition constraints are not implemented for minimum_spanning_arborescence.",
-        ));
-    }
     let gr = extract_graph(g)?;
     if let GraphRef::Directed { dg, .. } = &gr {
         if dg.inner.node_count() == 0 {
@@ -3325,8 +3386,22 @@ pub fn minimum_spanning_arborescence(
         }
         let inner = &dg.inner;
         let attr_name = attr.to_owned();
+        let (included_edges, excluded_edges) = match partition {
+            Some(partition_attr) => extract_edge_partition_from_attr(py, dg, partition_attr)?,
+            None => (Vec::new(), Vec::new()),
+        };
         let result = py.allow_threads(move || {
-            fnx_algorithms::minimum_spanning_arborescence(inner, &attr_name, default)
+            if included_edges.is_empty() && excluded_edges.is_empty() {
+                fnx_algorithms::minimum_spanning_arborescence(inner, &attr_name, default)
+            } else {
+                fnx_algorithms::minimum_spanning_arborescence_with_edge_partition(
+                    inner,
+                    &attr_name,
+                    default,
+                    &included_edges,
+                    &excluded_edges,
+                )
+            }
         });
         let result = result
             .ok_or_else(|| NetworkXError::new_err("No minimum spanning arborescence in G."))?;
@@ -3603,7 +3678,9 @@ pub fn bfs_edges(
         _ => {
             if gr.is_directed() {
                 let inner = gr.digraph().unwrap();
-                py.allow_threads(|| fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit))
+                py.allow_threads(|| {
+                    fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit)
+                })
             } else {
                 let inner = gr.undirected();
 
@@ -3653,7 +3730,9 @@ pub fn bfs_tree(
         _ => {
             if gr.is_directed() {
                 let inner = gr.digraph().unwrap();
-                py.allow_threads(|| fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit))
+                py.allow_threads(|| {
+                    fnx_algorithms::bfs_edges_directed(inner, &source_key, depth_limit)
+                })
             } else {
                 let inner = gr.undirected();
 
@@ -4286,7 +4365,7 @@ pub fn topological_sort(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<Py
     }
     {
         let dg_ref = gr.digraph().expect("is_directed checked above");
-        match fnx_algorithms::topological_sort(dg_ref) {
+        match py.allow_threads(|| fnx_algorithms::topological_sort(dg_ref)) {
             Some(result) => Ok(result.order.iter().map(|n| gr.py_node_key(py, n)).collect()),
             None => Err(crate::HasACycle::new_err(
                 "Graph contains a cycle, topological sort is not possible.",
@@ -4312,7 +4391,7 @@ pub fn topological_generations(
     }
     {
         let dg_ref = gr.digraph().expect("is_directed checked above");
-        match fnx_algorithms::topological_generations(dg_ref) {
+        match py.allow_threads(|| fnx_algorithms::topological_generations(dg_ref)) {
             Some(result) => {
                 let gens: Vec<Vec<PyObject>> = result
                     .generations
@@ -4341,7 +4420,7 @@ pub fn dag_longest_path(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<Py
     }
     {
         let dg_ref = gr.digraph().expect("is_directed checked above");
-        match fnx_algorithms::dag_longest_path(dg_ref) {
+        match py.allow_threads(|| fnx_algorithms::dag_longest_path(dg_ref)) {
             Some(path) => Ok(path.iter().map(|n| gr.py_node_key(py, n)).collect()),
             None => Err(crate::HasACycle::new_err("Graph contains a cycle.")),
         }
@@ -4352,7 +4431,7 @@ pub fn dag_longest_path(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<Vec<Py
 ///
 /// Matches `networkx.dag_longest_path_length(G)`.
 #[pyfunction]
-pub fn dag_longest_path_length(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
+pub fn dag_longest_path_length(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<usize> {
     let gr = extract_graph(g)?;
     if !gr.is_directed() {
         return Err(NetworkXError::new_err(
@@ -4361,7 +4440,7 @@ pub fn dag_longest_path_length(_py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResul
     }
     {
         let dg_ref = gr.digraph().expect("is_directed checked above");
-        match fnx_algorithms::dag_longest_path_length(dg_ref) {
+        match py.allow_threads(|| fnx_algorithms::dag_longest_path_length(dg_ref)) {
             Some(length) => Ok(length),
             None => Err(crate::HasACycle::new_err("Graph contains a cycle.")),
         }
@@ -4384,7 +4463,7 @@ pub fn lexicographic_topological_sort(
     }
     {
         let dg_ref = gr.digraph().expect("is_directed checked above");
-        match fnx_algorithms::lexicographic_topological_sort(dg_ref) {
+        match py.allow_threads(|| fnx_algorithms::lexicographic_topological_sort(dg_ref)) {
             Some(order) => Ok(order.iter().map(|n| gr.py_node_key(py, n)).collect()),
             None => Err(crate::HasACycle::new_err(
                 "Graph contains a cycle, topological sort is not possible.",
@@ -8079,13 +8158,21 @@ pub fn edge_dfs(
     let gr = extract_graph(g)?;
     let src = node_key_to_string(py, source)?;
     let result = match &gr {
-        GraphRef::Undirected(pg) => fnx_algorithms::edge_dfs(&pg.inner, &src),
-        GraphRef::Directed { dg, .. } => fnx_algorithms::edge_dfs_directed(&dg.inner, &src),
+        GraphRef::Undirected(pg) => {
+            let inner = &pg.inner;
+            py.allow_threads(|| fnx_algorithms::edge_dfs(inner, &src))
+        }
+        GraphRef::Directed { dg, .. } => {
+            let inner = &dg.inner;
+            py.allow_threads(|| fnx_algorithms::edge_dfs_directed(inner, &src))
+        }
         _ => {
             if gr.is_directed() {
-                fnx_algorithms::edge_dfs_directed(gr.digraph().unwrap(), &src)
+                let inner = gr.digraph().unwrap();
+                py.allow_threads(|| fnx_algorithms::edge_dfs_directed(inner, &src))
             } else {
-                fnx_algorithms::edge_dfs(gr.undirected(), &src)
+                let inner = gr.undirected();
+                py.allow_threads(|| fnx_algorithms::edge_dfs(inner, &src))
             }
         }
     };
@@ -9657,7 +9744,7 @@ pub fn snap_aggregation_rust(
 // Spanning tree / arborescence iterators
 // ---------------------------------------------------------------------------
 
-#[pyclass(unsendable, name="spanning_tree_iterator_rust")]
+#[pyclass(unsendable, name = "spanning_tree_iterator_rust")]
 pub struct SpanningTreeIteratorRust {
     items: Vec<fnx_classes::Graph>,
     index: usize,
@@ -9668,7 +9755,13 @@ pub struct SpanningTreeIteratorRust {
 impl SpanningTreeIteratorRust {
     #[new]
     #[pyo3(signature = (g, weight="weight", minimum=true, max_count=100))]
-    fn new(_py: Python<'_>, g: &Bound<'_, PyAny>, weight: &str, minimum: bool, max_count: usize) -> PyResult<Self> {
+    fn new(
+        _py: Python<'_>,
+        g: &Bound<'_, PyAny>,
+        weight: &str,
+        minimum: bool,
+        max_count: usize,
+    ) -> PyResult<Self> {
         let gr = extract_graph(g)?;
         if gr.is_directed() {
             return Err(crate::NetworkXNotImplemented::new_err(
@@ -9683,8 +9776,12 @@ impl SpanningTreeIteratorRust {
                 "not implemented for multigraph type",
             ));
         }
-        let items =
-            fnx_algorithms::spanning_tree_iterator_ordered(gr.undirected(), weight, minimum, max_count);
+        let items = fnx_algorithms::spanning_tree_iterator_ordered(
+            gr.undirected(),
+            weight,
+            minimum,
+            max_count,
+        );
         Ok(Self {
             items,
             index: 0,
@@ -9708,7 +9805,7 @@ impl SpanningTreeIteratorRust {
     }
 }
 
-#[pyclass(unsendable, name="arborescence_iterator_rust")]
+#[pyclass(unsendable, name = "arborescence_iterator_rust")]
 pub struct ArborescenceIteratorRust {
     items: Vec<fnx_classes::digraph::DiGraph>,
     index: usize,
@@ -9976,14 +10073,29 @@ pub fn simrank_similarity_rust(
         if gr.is_directed() {
             let dg = gr.digraph().unwrap();
             let val = py.allow_threads(|| {
-                let all = fnx_algorithms::simrank_similarity_directed(dg, importance_factor, max_iterations, tolerance);
-                all.get(&s).and_then(|row| row.get(&t)).copied().unwrap_or(0.0)
+                let all = fnx_algorithms::simrank_similarity_directed(
+                    dg,
+                    importance_factor,
+                    max_iterations,
+                    tolerance,
+                );
+                all.get(&s)
+                    .and_then(|row| row.get(&t))
+                    .copied()
+                    .unwrap_or(0.0)
             });
             Ok(val.into_pyobject(py)?.into_any().unbind())
         } else {
             let inner = gr.undirected();
             let val = py.allow_threads(|| {
-                fnx_algorithms::simrank_similarity_pair(inner, &s, &t, importance_factor, max_iterations, tolerance)
+                fnx_algorithms::simrank_similarity_pair(
+                    inner,
+                    &s,
+                    &t,
+                    importance_factor,
+                    max_iterations,
+                    tolerance,
+                )
             });
             Ok(val.into_pyobject(py)?.into_any().unbind())
         }
@@ -9991,7 +10103,12 @@ pub fn simrank_similarity_rust(
         if gr.is_directed() {
             let dg = gr.digraph().unwrap();
             let result = py.allow_threads(|| {
-                fnx_algorithms::simrank_similarity_directed(dg, importance_factor, max_iterations, tolerance)
+                fnx_algorithms::simrank_similarity_directed(
+                    dg,
+                    importance_factor,
+                    max_iterations,
+                    tolerance,
+                )
             });
             let dict = PyDict::new(py);
             for (u, row) in &result {
@@ -10005,7 +10122,12 @@ pub fn simrank_similarity_rust(
         } else {
             let inner = gr.undirected();
             let result = py.allow_threads(|| {
-                fnx_algorithms::simrank_similarity(inner, importance_factor, max_iterations, tolerance)
+                fnx_algorithms::simrank_similarity(
+                    inner,
+                    importance_factor,
+                    max_iterations,
+                    tolerance,
+                )
             });
             let dict = PyDict::new(py);
             for (u, row) in &result {
@@ -10061,10 +10183,7 @@ pub fn google_matrix_rust(
 
 /// Second-order centrality.
 #[pyfunction]
-pub fn second_order_centrality_rust(
-    py: Python<'_>,
-    g: &Bound<'_, PyAny>,
-) -> PyResult<PyObject> {
+pub fn second_order_centrality_rust(py: Python<'_>, g: &Bound<'_, PyAny>) -> PyResult<PyObject> {
     let gr = extract_graph(g)?;
     let inner = gr.undirected();
     let result = py.allow_threads(|| fnx_algorithms::second_order_centrality(inner));
@@ -10143,10 +10262,8 @@ pub fn k_clique_communities_rust(
     communities
         .into_iter()
         .map(|comm| {
-            let py_set = pyo3::types::PyFrozenSet::new(
-                py,
-                comm.iter().map(|n| gr.py_node_key(py, n)),
-            )?;
+            let py_set =
+                pyo3::types::PyFrozenSet::new(py, comm.iter().map(|n| gr.py_node_key(py, n)))?;
             Ok(py_set.into_any().unbind())
         })
         .collect()
@@ -10669,9 +10786,18 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(simrank_similarity_rust, m)?)?;
     m.add_function(wrap_pyfunction!(google_matrix_rust, m)?)?;
     m.add_function(wrap_pyfunction!(second_order_centrality_rust, m)?)?;
-    m.add_function(wrap_pyfunction!(communicability_betweenness_centrality_rust, m)?)?;
-    m.add_function(wrap_pyfunction!(current_flow_betweenness_centrality_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        communicability_betweenness_centrality_rust,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        current_flow_betweenness_centrality_rust,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(k_clique_communities_rust, m)?)?;
-    m.add_function(wrap_pyfunction!(edge_current_flow_betweenness_centrality_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        edge_current_flow_betweenness_centrality_rust,
+        m
+    )?)?;
     Ok(())
 }
